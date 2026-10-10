@@ -4,12 +4,12 @@
 
 ```
 NewsCentral.sln
-├── NewsCentral.Shared\          .NET 9 class library — shared domain models
-├── NewsCentral.Shared.Tests\    .NET 9 xUnit test project — ECDSA signing core + config reader + SignatureGate + Entra resolver/merger + key-with-content precedence + shared readers + active-assignment selector (all passing)
-├── NewsCentral\                 .NET 9 MAUI Blazor Hybrid — authoring app (Phase B2 complete)
-├── NewsService\                 .NET 9 Windows Service — cache sync agent (implemented; Entra device team resolution end-to-end, phases 1–3b)
-├── NewsService.Tests\           .NET 9 xUnit test project — Entra extension-attribute mapper + resolution orchestrator + effective-team union + registry-gated three-state apply for both display surfaces (lock screen + wallpaper), cross-surface isolation (offline seams; all passing)
-└── NewsViewer\                  .NET 9 WinForms — end-user presentation viewer (Phase 2 complete; desktop wallpaper STYLE re-assert only — the wallpaper image and the lock screen are both owned by NewsService)
+├── NewsCentral.Shared\          .NET 10 class library — shared domain models
+├── NewsCentral.Shared.Tests\    .NET 10 xUnit test project — ECDSA signing core + config reader + SignatureGate + Entra resolver/merger + key-with-content precedence + shared readers + active-assignment selector (all passing)
+├── NewsCentral\                 .NET 10 MAUI Blazor Hybrid — authoring app (Phase B2 complete)
+├── NewsService\                 .NET 10 Windows Service — cache sync agent (implemented; Entra device team resolution end-to-end, phases 1–3b)
+├── NewsService.Tests\           .NET 10 xUnit test project — Entra extension-attribute mapper + resolution orchestrator + effective-team union + registry-gated three-state apply for both display surfaces (lock screen + wallpaper), cross-surface isolation (offline seams; all passing)
+└── NewsViewer\                  .NET 10 WinForms — end-user presentation viewer (Phase 2 complete; desktop wallpaper STYLE re-assert only — the wallpaper image and the lock screen are both owned by NewsService)
 ```
 
 ## Project References

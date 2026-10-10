@@ -10,10 +10,10 @@
 
 | Component | Role | Type |
 |---|---|---|
-| NewsCentral | Content authoring, approval, scheduling, publishing, user/team management | .NET 9 MAUI Blazor Hybrid desktop app |
-| NewsCentral.Shared | Shared domain models referenced by all components | .NET 9 class library |
-| NewsService | Cache agent — syncs content from repository to local machine, applies **both** display surfaces machine-wide via PersonalizationCSP — the lock screen and the desktop wallpaper image (three-state: writes when content changes, clears its own stale content, never touches a value it did not write; re-verified and published to a protected non-user-writable folder before apply; each independently disabled via `Delivery:LockScreenEnabled`/`Delivery:WallpaperEnabled` — RDS/VDI opt-out, not a revert), uploads telemetry | .NET 9 Windows Service |
-| NewsViewer | End-user presentation layer — displays scheduled content from local cache; re-asserts the per-user desktop wallpaper **style** only (HKCU, no `SystemParametersInfo`) — the wallpaper image itself is owned by NewsService | .NET 9 WinForms desktop app |
+| NewsCentral | Content authoring, approval, scheduling, publishing, user/team management | .NET 10 MAUI Blazor Hybrid desktop app |
+| NewsCentral.Shared | Shared domain models referenced by all components | .NET 10 class library |
+| NewsService | Cache agent — syncs content from repository to local machine, applies **both** display surfaces machine-wide via PersonalizationCSP — the lock screen and the desktop wallpaper image (three-state: writes when content changes, clears its own stale content, never touches a value it did not write; re-verified and published to a protected non-user-writable folder before apply; each independently disabled via `Delivery:LockScreenEnabled`/`Delivery:WallpaperEnabled` — RDS/VDI opt-out, not a revert), uploads telemetry | .NET 10 Windows Service |
+| NewsViewer | End-user presentation layer — displays scheduled content from local cache; re-asserts the per-user desktop wallpaper **style** only (HKCU, no `SystemParametersInfo`) — the wallpaper image itself is owned by NewsService | .NET 10 WinForms desktop app |
 | NewsTester | Content preview tool for authors and approvers | Future — independent desktop app |
 
 ---
@@ -27,7 +27,7 @@
 - ECDSA P-256 per-team `index.json` signing — Phases A, B1 & C complete: signing core in `NewsCentral.Shared`, `IndexGenerationService` signs with team key, `SyncService` and `PresentationSelector` verify via `SigningKeyConfigurationReader`. B2 (Key Management page) complete; D (registry scripts) implemented in `scripts/Set-RegistryOverrides.ps1` at dev/pilot scope, GPO owns fleet configuration; see `docs/security.md`.
 - All domain models live in **NewsCentral.Shared** — no model duplication across projects.
 - NativeAOT migration path is preserved for NewsViewer.
-- Fleet components ship **framework-dependent** — .NET 9 Desktop Runtime (x64) required on every target machine (declared prerequisite, not bundled). See `docs/packaging.md`.
+- Fleet components ship **framework-dependent** — .NET 10 Desktop Runtime (x64) required on every target machine (declared prerequisite, not bundled). See `docs/packaging.md`.
 - **Entra dynamic-team resolution (NewsService-only, behind `Entra:Enabled`; default off)** — resolves dynamic teams from named **instances** of two source kinds (attribute schemes, group-membership instances + a fleet-wide global exclusion), unioning them with the static registry team list on both consuming tiers; each instance graces independently. See the **Entra Device Team Resolution** section below and `docs/entra-dynamic-teams.md`.
 
 ### Data Flow
@@ -62,10 +62,10 @@ NewsService-only feature, gated by `Entra:Enabled` (default `false`). Each poll 
 
 | Component | Technology |
 |---|---|
-| NewsCentral | C# / .NET 9 MAUI Blazor Hybrid — **Windows-only target (`net9.0-windows…`) by decision; do not re-add Android/iOS/MacCatalyst** |
-| NewsCentral.Shared | C# / .NET 9 class library |
-| NewsService | C# / .NET 9 Windows Service (`Microsoft.NET.Sdk.Worker`) |
-| NewsViewer | C# / .NET 9 WinForms; NativeAOT migration path preserved |
+| NewsCentral | C# / .NET 10 MAUI Blazor Hybrid — **Windows-only target (`net10.0-windows…`) by decision; do not re-add Android/iOS/MacCatalyst** |
+| NewsCentral.Shared | C# / .NET 10 class library |
+| NewsService | C# / .NET 10 Windows Service (`Microsoft.NET.Sdk.Worker`) |
+| NewsViewer | C# / .NET 10 WinForms; NativeAOT migration path preserved |
 | Data files | JSON (`System.Text.Json`); see Critical Rules for the two option sets used across components |
 | Images | Base64-encoded and embedded in presentation JSON |
 | Azure auth | MSAL interactive (NewsCentral); machine certificate from local store (NewsService) |

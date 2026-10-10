@@ -1,6 +1,6 @@
 # NewsViewer — Component Specification
 
-**Type:** WinForms (.NET 9) desktop application  
+**Type:** WinForms (.NET 10) desktop application  
 **Status:** Phase 2 complete. All Phase 2 features implemented and tested; the side panel was reworked from a hover-reveal to a fixed Fluent gray panel in the v2.7 UI pass, and to the themed 220px branded panel (adaptive image-fit window, Dark/Light themes, resx strings) in the UI v3 pass. Wallpaper-**image** ownership migrated to NewsService (PersonalizationCSP, machine-wide); NewsViewer retains only a per-user HKCU wallpaper **style** re-assert (no `SystemParametersInfo`; see Wallpaper Application). NativeAOT migration path preserved; Win32 P/Invoke via `DllImport` with simple types — no unsafe code required.
 
 NewsViewer is a **one-shot process**: launch → evaluate the daily gate → render the poster (or not) → re-assert the wallpaper style → exit. There is no resident process, no `FileSystemWatcher`, and no held-open message pump. Each display decision is made afresh at launch.

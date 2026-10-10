@@ -1,6 +1,6 @@
 # NewsCentral — Component Specification
 
-**Type:** .NET 9 MAUI Blazor Hybrid desktop application  
+**Type:** .NET 10 MAUI Blazor Hybrid desktop application  
 **Status:** Active development. Admin page, assignments, publishing workflow, Azure blob distribution, UseVirtualDesktop/VirtualDesktopBackgroundColor UI, and Phase B2 Key Management page implemented.
 
 ## Responsibilities
@@ -78,9 +78,9 @@ Each team folder in the repository contains:
 
 # NewsCentral.Shared — Component Specification
 
-**Type:** .NET 9 class library  
+**Type:** .NET 10 class library  
 **Status:** Implemented.
 
-Contains all shared domain models. Referenced by NewsCentral, NewsService, and (future) NewsViewer and NewsTester. No platform dependencies — targets plain `net9.0` so it is compatible with any .NET 9 project regardless of platform target.
+Contains all shared domain models. Referenced by NewsCentral, NewsService, and (future) NewsViewer and NewsTester. No platform dependencies — targets plain `net10.0` so it is compatible with any .NET 10 project regardless of platform target.
 
 See `docs/solution-structure.md` for the full file layout and `docs/data-model.md` for all model definitions.

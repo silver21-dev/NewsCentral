@@ -34,7 +34,7 @@ per component and are correct whichever package shape is chosen.)
 
 Both components are published **framework-dependent**. They do not contain the .NET runtime.
 
-Every target machine must have the **.NET 9 Desktop Runtime (x64)** installed before these components
+Every target machine must have the **.NET 10 Desktop Runtime (x64)** installed before these components
 run. The Desktop runtime is required (not merely the base runtime) because NewsViewer is a WinForms
 application; the Desktop runtime includes the base runtime that NewsService needs.
 

@@ -251,4 +251,4 @@ A drift guard, one-directional (manifest is deliberately a superset — it carri
 
 - **NativeAOT-safe:** registry via `Microsoft.Win32.Registry`; command-line parsing pure managed; no COM.
 - **Localization:** `IStringLocalizer<ConfigurationReview>`; column headers/labels localizable; resx population may follow the parked batched approach.
-- **Windows guards:** registry/`ImagePath` reads under `OperatingSystem.IsWindows()` where the Shared resolver is `net9.0`.
+- **Windows guards:** registry/`ImagePath` reads under `OperatingSystem.IsWindows()` where the Shared resolver is `net10.0`.

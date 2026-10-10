@@ -1,7 +1,7 @@
 # NewsService — Component Specification
 
-**Type:** .NET 9 Windows Service (`Microsoft.NET.Sdk.Worker`)  
-**Target:** `net9.0-windows10.0.19041.0`, `win-x64`  
+**Type:** .NET 10 Windows Service (`Microsoft.NET.Sdk.Worker`)  
+**Target:** `net10.0-windows10.0.19041.0`, `win-x64`  
 **Status:** Implemented — full sync cycle operational in Share mode; Azure Blob mode implemented with Certificate / ClientSecret / ClientSecretEnv auth.
 
 ## Configuration Resolution
