@@ -470,3 +470,28 @@ Model: `NewsCentral.Models.SessionTelemetry` (in `NewsCentral.Shared`; implement
 `viewerstate.json` is intentionally per-user so that in multi-session environments (Citrix RDSH, Windows Server RDS) each user's shown-today state is independent. All other cache files remain machine-level.
 
 Repository / network share mirrors the same team folder structure as the `%programdata%` cache.
+
+## JSON serialization option sets
+
+Two option sets; use the right one for the context.
+
+*NewsService / NewsViewer* - general cache and telemetry I/O:
+```csharp
+new JsonSerializerOptions {
+    WriteIndented = true,
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    PropertyNameCaseInsensitive = true,
+    Converters = { new JsonStringEnumConverter() }
+}
+```
+
+*NewsCentral* - index file generation and signing (`JsonConfiguration.GetIndexJsonOptions()`):
+```csharp
+new JsonSerializerOptions {
+    WriteIndented = true,
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    Converters = { new JsonStringEnumConverter(), new SmartDateTimeConverter() }
+}
+```
+`SmartDateTimeConverter` writes UTC `DateTime` with a `Z` suffix and `Unspecified` (schedule times) without one, and truncates to whole seconds. **This truncation is what keeps the ECDSA signature byte-consistent with the persisted file** - without it, sub-second precision present in memory is stripped on write, causing every verifier to return `Invalid`. Verifiers (NewsService, NewsViewer) deserialize with standard ISO parsing, which faithfully round-trips whole-second timestamps.

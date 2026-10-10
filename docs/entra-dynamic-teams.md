@@ -219,6 +219,8 @@ per `RequireSignedIndex`) exactly as for static teams. NewsViewer is a **read-on
 `resolved-teams.json` — it never writes it. The authoring and signing sides are untouched by any of
 this: a dynamic team's `index.json` is authored, published, and signed exactly like a static team's.
 
+**Trust model - Option A (key-with-content).** The team signing **public** key is embedded in `index.json` (`SigningPublicKey`) for **all** teams - static-vs-dynamic is a property of the *consuming machine*, not the team, so the key is inert for static consumers. Precedence (`SignatureGate.VerifyWithPrecedence`): registry key wins -> else delivered key (**dynamic teams only**) -> else unsigned per `RequireSignedIndex`. The delivered key is never used for static teams and never overrides a registry key. Dynamic teams are **rotation-free** (the key travels with the content).
+
 See `docs/security.md` for the key-with-content trust model and `docs/data-model.md` for the
 `resolved-teams.json` schema.
 

@@ -24,9 +24,9 @@
 - Storage backend (local file share vs. Azure Blob Storage) is switchable via registry without code changes.
 - Local/file share mode is the **primary development and testing configuration**. No Azure dependency is required for full functional testing.
 - HMAC-SHA256 anti-tamper for session telemetry — NewsViewer signs, NewsService verifies; `index.json` signing moved to per-team ECDSA (see below).
-- ECDSA P-256 per-team `index.json` signing — Phases A, B1 & C complete: signing core in `NewsCentral.Shared`, `IndexGenerationService` signs with team key, `SyncService` and `PresentationSelector` verify via `SigningKeyConfigurationReader`. B2 (Key Management page) complete; D (registry scripts) implemented in `scripts/Set-RegistryOverrides.ps1` at dev/pilot scope, GPO owns fleet configuration; see `docs/security.md`.
+- ECDSA P-256 per-team `index.json` signing — Phases A, B1 & C complete: signing core in `NewsCentral.Shared`, `IndexGenerationService` signs with team key, `SyncService` and `PresentationSelector` verify via `SigningKeyConfigurationReader`. Static-team key rotation uses `PublicKeyPrevious` (dual-key, `docs/anti-tamper.md`). B2 (Key Management page) complete; D (registry scripts) implemented in `scripts/Set-RegistryOverrides.ps1` at dev/pilot scope, GPO owns fleet configuration; see `docs/security.md`.
 - All domain models live in **NewsCentral.Shared** — no model duplication across projects.
-- NativeAOT migration path is preserved for NewsViewer.
+- NativeAOT migration path is preserved for NewsViewer: Win32 P/Invoke via `DllImport` with simple types — no COM, no unsafe code.
 - Fleet components ship **framework-dependent** — .NET 10 Desktop Runtime (x64) required on every target machine (declared prerequisite, not bundled). See `docs/packaging.md`.
 - **Entra dynamic-team resolution (NewsService-only, behind `Entra:Enabled`; default off)** — resolves dynamic teams from named **instances** of two source kinds (attribute schemes, group-membership instances + a fleet-wide global exclusion), unioning them with the static registry team list on both consuming tiers; each instance graces independently. See the **Entra Device Team Resolution** section below and `docs/entra-dynamic-teams.md`.
 
@@ -42,19 +42,16 @@
 
 ## Entra Device Team Resolution
 
-NewsService-only feature, gated by `Entra:Enabled` (default `false`). Each poll cycle NewsService reads **this machine's** Entra device via Microsoft Graph and resolves dynamic teams from named **instances** of two source kinds, then writes `{CacheRootPath}\resolved-teams.json`. Both NewsService and NewsViewer **union** that set with their static (registry) team list; NewsViewer ignores `Source`/`SourceId` entirely and reads only `TeamFolderName`. Grace and identity are keyed `(Source, SourceId)` — **per instance**, not merely per source kind — so removing (or retargeting) an instance from configuration prunes it **without grace** on the next cycle: the configured instance set is read locally and is authoritative even during a Graph outage. Pure logic lives in `NewsCentral.Shared` and is unit-tested. Full detail, including the reasoning behind each fail-closed choice: `docs/entra-dynamic-teams.md`.
+NewsService-only, gated by `Entra:Enabled` (default `false`). Each poll cycle NewsService reads **this machine's** Entra device via Microsoft Graph, resolves dynamic teams from named **instances** of two source kinds (attribute schemes, group-team instances + one fleet-wide exclusion group), and writes `{CacheRootPath}\resolved-teams.json`. Both NewsService and NewsViewer **union** that set with their static (registry) team list; NewsViewer reads only `TeamFolderName`, never `Source`/`SourceId`. Invariants:
 
-**Attribute schemes** (`Entra:AttributeSchemes`) — zero or more named schemes, each with its own selector attribute (`extensionAttribute1`..`15`) and selector→rule mapping table. A rule may reference `extensionAttribute1..15` except its own scheme's selector; an empty referenced attribute or a self-referencing rule aborts that scheme (no team). One team max per scheme; `SourceId` = the scheme name as authored.
+- Grace and identity are keyed `(Source, SourceId)` — **per instance**. The configured instance set is read locally and is authoritative: a removed or retargeted instance is pruned **without grace** on the next cycle, even during a Graph outage.
+- Group instances: `SourceId` and team folder name are both `Canonicalize(InclusionGroup)` — **derived, never authored**. The registry subkey is a diagnostic label only.
+- The global exclusion group **fails closed**: an unresolvable name suppresses every group instance.
+- Key trust (Option A, key-with-content): registry key wins → else the delivered `SigningPublicKey` (**dynamic teams only**) → else unsigned per `RequireSignedIndex`. Dynamic teams are rotation-free.
+- Single Azure app registration shared with Blob; `AzureBlob:*` must be populated even when `StorageMode=Share`.
+- **Status:** structurally complete and offline/fake-tested, shipping behind `Entra:Enabled=false`; **live validation on an Entra-joined box is still pending**.
 
-**Group teams** (`Entra:GroupTeams`) — zero or more named `Instances`, plus one fleet-wide `ExclusionGroup`. Per instance: `inclusion ∧ ¬instanceExclusion ∧ ¬globalExclusion` → one team. Both `SourceId` and the team folder name are `Canonicalize(InclusionGroup)` — **derived, never authored** — so they cannot drift apart; the registry subkey is an operator-facing label only (diagnostics/logs), and renaming it retargets nothing. Colliding derived ids: first by label (ordinal-ignore-case) wins, warned. The global exclusion **fails closed**: an unresolvable name suppresses every group instance, with one unconditional `Error` per cycle — the safe failure mode for a kill switch is to keep killing, not silently stop. One batched `checkMemberGroups` call covers every active instance's names, chunked at 20 ids per call; a per-name failure isolates to the instance(s) referencing it, but a transport-level failure (unreachable/403) fails the whole batch rather than risk partial membership.
-
-**Auth / Graph.** Single app registration shared with Azure Blob — same credential via `AzureCredentialFactory`; `AzureBlob:*` must be populated even when `StorageMode=Share`. Admin-consented permissions: `Device.Read.All`, plus `GroupMember.Read.All` for group teams (`Directory.Read.All` is a broad fallback). DeviceId must be a GUID or Graph is skipped. `Microsoft.Graph` v6 fluent SDK; extensionAttributes read from `AdditionalData` (v1.0 has no typed property; beta deliberately avoided). **Optional:** `AzureBlob:UseWinHttpProxy` routes blob **and** Graph through the machine WinHTTP proxy for reliable proxying under Local System; off = no behavior change.
-
-**Grace, cap, logging.** `GraphFailureClassifier`: 403 or an authoritative "no team" answer is persistent (clean removal, 403 also logs `Error`); only transient Graph failures ride grace, per instance against its own `GracePeriodMinutes`/last-confirmed time. `Entra:MaxDynamicTeams` (default `16`, `0` = no cap) bounds the total written across both sources, truncating deterministically (every Attribute entry by `SourceId`, then every Group entry by `SourceId`) with a `Warning` naming the dropped ids — applied after the grace merge, never inside it. One change-gated summary line per cycle (`Information` on a changed written set, including the transition to empty; `Debug` otherwise) is the primary operator signal; per-instance `Debug` lines and every `Warning`/`Error` above are unconditional and unaffected by this gating. (→ `docs/configuration.md`)
-
-**Trust model — Option A (key-with-content).** The team signing **public** key is embedded in `index.json` (`SigningPublicKey`) for **all** teams — static-vs-dynamic is a property of the *consuming machine*, not the team, so the key is inert for static consumers. Precedence (`SignatureGate.VerifyWithPrecedence`): registry key wins → else delivered key (**dynamic teams only**) → else unsigned per `RequireSignedIndex`. The delivered key is never used for static teams and never overrides a registry key. Dynamic teams are **rotation-free** (the key travels with the content). (→ `docs/security.md`)
-
-**Status.** Structurally complete and offline/fake-tested, shipping behind `Entra:Enabled=false`. **Live validation on an Entra-joined box is still pending** — the unproven seams are the DeviceId read, the device fetch HTTP, and `EntraGroupClient`'s name→id + `checkMemberGroups` calls. Operational prerequisites before enabling: `Device.Read.All` consent (plus `GroupMember.Read.All` for group teams), device data provisioned across the fleet, verified cache ACLs, GPO deployment of the Entra registry config.
+Everything else — attribute schemes, group teams, Graph permissions and batching, grace/cap/logging, trust model, status and prerequisites: `docs/entra-dynamic-teams.md` (config keys: `docs/configuration.md`; key trust: `docs/security.md`).
 
 ---
 
@@ -74,28 +71,7 @@ NewsService-only feature, gated by `Entra:Enabled` (default `false`). Each poll 
 
 ## Critical Rules
 
-**JSON serialization** — two option sets; use the right one for the context.
-
-*NewsService / NewsViewer* — general cache and telemetry I/O:
-```csharp
-new JsonSerializerOptions {
-    WriteIndented = true,
-    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    PropertyNameCaseInsensitive = true,
-    Converters = { new JsonStringEnumConverter() }
-}
-```
-
-*NewsCentral* — index file generation and signing (`JsonConfiguration.GetIndexJsonOptions()`):
-```csharp
-new JsonSerializerOptions {
-    WriteIndented = true,
-    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    Converters = { new JsonStringEnumConverter(), new SmartDateTimeConverter() }
-}
-```
-`SmartDateTimeConverter` writes UTC `DateTime` with a `Z` suffix and `Unspecified` (schedule times) without one, and truncates to whole seconds. **This truncation is what keeps the ECDSA signature byte-consistent with the persisted file** — without it, sub-second precision present in memory is stripped on write, causing every verifier to return `Invalid`. Verifiers (NewsService, NewsViewer) deserialize with standard ISO parsing, which faithfully round-trips whole-second timestamps.
+**JSON serialization** — two option sets. NewsService/NewsViewer use the general cache/telemetry set; NewsCentral index generation and signing uses `JsonConfiguration.GetIndexJsonOptions()`, whose `SmartDateTimeConverter` truncates timestamps to whole seconds — **that truncation keeps the ECDSA signature byte-consistent with the persisted file** (without it every verifier returns `Invalid`). Exact option sets: `docs/data-model.md`.
 
 **Assignments are immutable after creation.** There is no edit path. To change a scheduled assignment, delete it and create a new one.
 
@@ -107,7 +83,7 @@ new JsonSerializerOptions {
 
 **`Company` is a single build-time constant, not configuration.** Authored once in `Directory.Build.props` (`<Company>`), surfaced to code as `SolutionConstants.Company` (generated into `NewsCentral.Shared`), and consumed by all three components; an MSBuild target fails the build if it is empty. It is **absent from every `appsettings.json`** — no runtime default, no fallback — and is **not** registry-overridable (it defines the hive path `HKLM\Software\{Company}\NewsCentral\{Component}`). A `Company` **mismatch fails silently**: `OpenSubKey` returns `null` with no error, so every GPO/registry override is quietly ignored and the component runs on shipped defaults (the exact drift that motivated making it one constant). See `docs/configuration.md`.
 
-**NewsViewer startup** — `appsettings.json` is required (`optional: false`); the `appsettings.Development.json` overlay is `optional: true`. Missing base file = hard startup failure. `Main()` checks the `Active` master switch first (registry DWORD 0/1, default `true`) and returns silently if `false` — no poster, no wallpaper style re-assert, no state write, no dialog. `Main()` then validates `CacheRootPath` (not `Company` — that is the build constant) and exits with `MessageBox` if it is empty.
+**NewsViewer startup** — `appsettings.json` is required (`optional: false`) and `Main()` checks the `Active` switch first; details in `docs/newsviewer-spec.md`.
 
 **Razor comments must never contain an `@` token or an HTML tag.** `@* … *@`/`<!-- … -->` must avoid `@media`/`@code` and tags like `<style>` — Razor parses comments too, and this has broken the build before. Write "media query"/"style block" in prose instead.
 
@@ -147,6 +123,14 @@ No direct inter-process communication. All coordination is via the shared cache 
 
 ---
 
+## Working Rules
+
+- Never stage `.gitignore` or `NewsViewer/appsettings.json`; stage by explicit path.
+- Build/test: `dotnet build` and `dotnet test` at the repo root; both test suites must pass before a commit.
+- Commit with `git commit -F <tempfile>` (not a long inline `-m`); report build and test results before committing.
+
+---
+
 ## Reference Documents
 
 These are not auto-loaded. Read the ones a task touches; a prompt's READ FIRST list is authoritative.
@@ -157,8 +141,8 @@ These are not auto-loaded. Read the ones a task touches; a prompt's READ FIRST l
 | docs/azure-setup.md | Azure/Entra app regs, RBAC, Graph consent |
 | docs/config-review-spec.md | the config review page in NewsCentral |
 | docs/configuration.md | any registry/appsettings key or its type |
-| docs/data-model.md | models, index.json, resolved-teams.json schema |
-| docs/entra-dynamic-teams.md | Entra attribute/group team resolution |
+| docs/data-model.md | models, index.json, resolved-teams.json schema, JSON serialization option sets |
+| docs/entra-dynamic-teams.md | Entra attribute/group team resolution, Graph mechanics, grace/cap/logging, key-trust and status |
 | docs/future.md | deferred work, NewsTester |
 | docs/newscentral-spec.md | authoring app services, pages, roles |
 | docs/newsservice-spec.md | sync cycle, display surfaces, telemetry |
