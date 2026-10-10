@@ -89,6 +89,7 @@
     │       LogicalDayStartHour     REG_SZ
     ├── Ui\
     │       Theme                   REG_SZ   "Dark" or "Light"
+    │       ShowDeliveredImages     DWORD    (1 = poster form offers Wallpaper / Lock screen buttons; default 0)
     ├── Delivery\
     │       WallpaperStyle              REG_SZ   (style only — the image is NewsService/CSP-owned)
     │       WallpaperBackgroundColor    REG_SZ
@@ -263,6 +264,10 @@
 
 .PARAMETER Theme
     Dark or Light. Default Dark. NewsViewer only.
+
+.PARAMETER ShowDeliveredImages
+    When $true, the NewsViewer poster form shows Wallpaper / Lock screen buttons that display the image
+    NewsService currently delivers (Ui\ShowDeliveredImages, DWORD 0/1). Default false. NewsViewer only.
 
 .PARAMETER TelemetryUploadEnabled
     When bound, sets Telemetry:UploadEnabled — $false stops forwarding session
@@ -462,6 +467,8 @@ param(
     [ValidateSet("Dark","Light")]
     [string] $Theme,
 
+    [Nullable[bool]] $ShowDeliveredImages,
+
     [Nullable[bool]] $Active,
 
     # ── Telemetry / Logging (NewsService only) ────────────────────────────────────
@@ -493,7 +500,7 @@ $newParameterNames = @(
     "DefaultLockScreenPath", "PublishedImagePath", "LockScreenEnabled", "WallpaperEnabled",
     "DefaultWallpaperPath", "WallpaperStyle", "WallpaperBackgroundColor",
     "LogicalDayStartHour", "Theme", "TelemetryUploadEnabled", "LogLevel", "EventLogLevel",
-    "AzureUseWinHttpProxy", "Active"
+    "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages"
 )
 
 # Full parameter -> allowed-component map for the two fleet components. Covers every
@@ -518,7 +525,7 @@ $componentAllowedParams = @{
         "AzureTenantId", "AzureClientId", "AzureAccountName", "AzureContainerName",
         "AzureAuthMode", "AzureCertificateThumbprint", "AzureClientSecret", "AzureUseWinHttpProxy",
         "BypassDailyGate", "BypassImageIntegrityCheck", "LogicalDayStartHour", "Theme",
-        "WallpaperStyle", "WallpaperBackgroundColor", "Active"
+        "WallpaperStyle", "WallpaperBackgroundColor", "Active", "ShowDeliveredImages"
     )
 }
 
@@ -886,6 +893,10 @@ if ($PSBoundParameters.ContainsKey("LogicalDayStartHour")) {
 }
 if ($PSBoundParameters.ContainsKey("Theme")) {
     Set-RegValue -Path "$base\Ui" -Name "Theme" -Value $Theme -Type String
+}
+if ($PSBoundParameters.ContainsKey("ShowDeliveredImages")) {
+    $dword = if ($ShowDeliveredImages) { 1 } else { 0 }
+    Set-RegValue -Path "$base\Ui" -Name "ShowDeliveredImages" -Value $dword -Type DWord
 }
 
 # ── Telemetry\ ───────────────────────────────────────────────────────────────

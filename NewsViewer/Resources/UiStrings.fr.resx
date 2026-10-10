@@ -37,4 +37,10 @@
   <data name="Seconds" xml:space="preserve">
     <value>secondes</value>
   </data>
+  <data name="ShowLockScreenButton" xml:space="preserve">
+    <value>Écran de verrouillage</value>
+  </data>
+  <data name="ShowWallpaperButton" xml:space="preserve">
+    <value>Fond d'écran</value>
+  </data>
 </root>

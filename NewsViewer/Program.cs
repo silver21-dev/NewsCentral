@@ -127,6 +127,12 @@ static class Program
 
         var isOnline = ReadOnlineStatus(config.CacheRootPath);
 
+        // Optional delivered wallpaper / lock screen buttons (Ui:ShowDeliveredImages, default off). Null = the
+        // form is built without them. The resolver is read-only and never throws; failures are only logged.
+        var delivered = config.Ui.ShowDeliveredImages
+            ? DeliveredImageResolver.CreateDefault(m => System.Diagnostics.Debug.WriteLine($"[DeliveredImages] {m}"))
+            : null;
+
         // Resolve the raw duration to an effective value here (not in the view): -1 = never auto-close,
         // 0 / any other negative = unset -> 30s default, >0 = as-is. Single source of truth is
         // PresentationDefaults.
@@ -155,7 +161,7 @@ static class Program
                 var bgForm     = new BackgroundForm(a.VirtualDesktopBackgroundColor);
                 bgForm.Show();
 
-                var viewerForm = new ViewerForm(a, ip, t, vs, io, ed, recordShown: !manual);
+                var viewerForm = new ViewerForm(a, ip, t, vs, io, ed, recordShown: !manual, deliveredImages: delivered);
                 viewerForm.FormClosed += (_, _) => { bgForm.Close(); desktop.SwitchToOriginal(); };
                 Application.Run(viewerForm);
             });
@@ -168,7 +174,7 @@ static class Program
         }
         else
         {
-            Application.Run(new ViewerForm(assignment, imagePath, telemetry, viewerState, isOnline, effectiveDuration, recordShown: !manual));
+            Application.Run(new ViewerForm(assignment, imagePath, telemetry, viewerState, isOnline, effectiveDuration, recordShown: !manual, deliveredImages: delivered));
             ApplyWallpaperStyle();
         }
 

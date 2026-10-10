@@ -18,7 +18,7 @@ Registry values override `appsettings.json` values. Override is implemented via 
 
 ## Registry Layout
 
-Each component reads from its own subkey. Values set for one component do not affect another.
+Each component reads from its own subkey. Values set for one component do not affect another. (One read-only exception: NewsViewer with `Ui\ShowDeliveredImages` also reads `NewsService\Delivery\WallpaperEnabled`/`LockScreenEnabled`; see `docs/newsviewer-spec.md`.)
 
 **NewsService**
 ```
@@ -94,6 +94,7 @@ HKLM\Software\[Company]\NewsCentral\NewsViewer\
 │       LogicalDayStartHour  REG_SZ   (int 0..23; default 0 = calendar day — see below; MUST be REG_SZ)
 ├── Ui\
 │       Theme   REG_SZ   ("Dark" | "Light"; default Dark — viewer color theme, resolved once at launch; "light" case-insensitive selects Light, anything else Dark; registry-only, no appsettings key)
+│       ShowDeliveredImages   REG_DWORD   (0/1; default 0 - poster form offers Wallpaper / Lock screen buttons for the image NewsService delivers; read-only reads of NewsService\Delivery flags are an exception to the own-subkey rule - see docs/newsviewer-spec.md)
 ├── Hmac\
 │       SecretKey   REG_SZ
 ├── Signing\

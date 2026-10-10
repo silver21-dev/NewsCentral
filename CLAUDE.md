@@ -20,7 +20,7 @@
 
 ## Architecture Principles
 
-- All components are configurable via `appsettings.json`. Registry values (`HKLM\Software\[Company]\NewsCentral\`) override `appsettings.json`. Each component has its own subkey.
+- All components are configurable via `appsettings.json`. Registry values (`HKLM\Software\[Company]\NewsCentral\`) override `appsettings.json`. Each component has its own subkey (sole exception: NewsViewer reads NewsService's `Delivery` flags, read-only).
 - Storage backend (local file share vs. Azure Blob Storage) is switchable via registry without code changes.
 - Local/file share mode is the **primary development and testing configuration**. No Azure dependency is required for full functional testing.
 - HMAC-SHA256 anti-tamper for session telemetry — NewsViewer signs, NewsService verifies; `index.json` signing moved to per-team ECDSA (see below).

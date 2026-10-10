@@ -23,6 +23,17 @@ public class ViewerConfiguration
     public HmacOptions Hmac { get; set; } = new();
     public DeliverySection Delivery { get; set; } = new();
     public DisplaySection Display { get; set; } = new();
+    public UiSection Ui { get; set; } = new();
+}
+
+public class UiSection
+{
+    /// <summary>
+    /// Registry <c>UiShowDeliveredImages</c> (DWORD 0/1). Default <c>false</c>. When <c>true</c> the poster
+    /// form shows two buttons that switch the displayed image to the wallpaper / lock screen
+    /// NewsService currently delivers. Theme is read ad hoc in Program.cs and is not on this POCO.
+    /// </summary>
+    public bool ShowDeliveredImages { get; set; } = false;
 }
 
 public class DisplaySection

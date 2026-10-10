@@ -41,4 +41,10 @@
   <data name="Seconds" xml:space="preserve">
     <value>seconds</value>
   </data>
+  <data name="ShowLockScreenButton" xml:space="preserve">
+    <value>Lock screen</value>
+  </data>
+  <data name="ShowWallpaperButton" xml:space="preserve">
+    <value>Wallpaper</value>
+  </data>
 </root>

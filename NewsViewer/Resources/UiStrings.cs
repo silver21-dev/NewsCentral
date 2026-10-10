@@ -25,4 +25,6 @@ internal static class UiStrings
     internal static string Offline => Get(nameof(Offline));
     internal static string Online => Get(nameof(Online));
     internal static string Seconds => Get(nameof(Seconds));
+    internal static string ShowLockScreenButton => Get(nameof(ShowLockScreenButton));
+    internal static string ShowWallpaperButton => Get(nameof(ShowWallpaperButton));
 }

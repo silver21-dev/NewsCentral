@@ -180,7 +180,7 @@ internal sealed class RoundedButton : Button
         var rect = new Rectangle(0, 0, Width - 1, Height - 1);
         using var path = Theme.RoundedRect(rect, Radius);
         Color fill, bord;
-        var text = ForeColor;
+        var text = Enabled ? ForeColor : Theme.TextSecondary;   // disabled buttons read as dimmed
         if (IsPrimary)
         {
             var accent = Theme.Accent;

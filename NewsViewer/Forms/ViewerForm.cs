@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using NewsCentral.Configuration;
 using NewsCentral.Models;
 using NewsCentral.Models.IndexFile;
 using NewsViewer.Resources;
@@ -52,6 +53,15 @@ public sealed class ViewerForm : Form
     // False for a --manual launch: the daily-gate marker is stamped only by scheduled launches.
     private readonly bool _recordShown;
 
+    // Optional delivered-image preview (Ui:ShowDeliveredImages). A null resolver means the feature is
+    // off: no buttons are created and the form is exactly the pre-feature layout.
+    private readonly DeliveredImageResolver? _deliveredImages;
+    private readonly Bitmap? _posterBitmap;
+    private Bitmap? _deliveredBitmap;
+    private DeliveredSurface? _activeSurface;
+    private RoundedButton? _btnWallpaper;
+    private RoundedButton? _btnLockScreen;
+
     public ViewerForm(
         PublishedAssignmentIndex assignment,
         string imagePath,
@@ -59,9 +69,11 @@ public sealed class ViewerForm : Form
         ViewerStateService viewerState,
         bool isOnline,
         int effectiveDurationSeconds,
-        bool recordShown = true)
+        bool recordShown = true,
+        DeliveredImageResolver? deliveredImages = null)
     {
         _recordShown = recordShown;
+        _deliveredImages = deliveredImages;
         _assignment = assignment;
         _imagePath = imagePath;
         _telemetry = telemetry;
@@ -122,6 +134,7 @@ public sealed class ViewerForm : Form
         Controls.Add(root);
 
         // ── PictureBox — sized to the content's aspect ratio, gray stage backing ──
+        _posterBitmap = bmp;
         _pictureBox = new PictureBox
         {
             Location = new Point(0, 0),
@@ -199,6 +212,14 @@ public sealed class ViewerForm : Form
         };
         btnMoreInfo.Click += OnMoreInfoClicked;
         _pnlSide.Controls.Add(btnMoreInfo);
+
+        // Optional delivered-image buttons - created only when the feature is on, enabled per surface
+        // from the resolver as the form opens. Placed below the auto-close card (y 196..322).
+        if (_deliveredImages is not null)
+        {
+            _btnWallpaper = CreateDeliveredButton(UiStrings.ShowWallpaperButton, 334, DeliveredSurface.Wallpaper);
+            _btnLockScreen = CreateDeliveredButton(UiStrings.ShowLockScreenButton, 382, DeliveredSurface.LockScreen);
+        }
 
         // ── Auto-close card — TableLayoutPanel guarantees no row overlap ─────
         _pnlAutoClose = new RoundedPanel
@@ -415,6 +436,103 @@ public sealed class ViewerForm : Form
         _progressFill.Width = Math.Clamp(w, 0, ProgressWidth);
     }
 
+    // ── Delivered wallpaper / lock screen preview ─────────────────────────────
+    // Purely local viewing: no telemetry, no viewerstate, no registry write. Poster telemetry is untouched.
+
+    private RoundedButton CreateDeliveredButton(string text, int top, DeliveredSurface surface)
+    {
+        var button = new RoundedButton
+        {
+            Text = text,
+            Font = Ui.Font(9.5f),
+            Size = new Size(ContentWidth, 40),
+            Location = new Point(PanelMargin, top),
+            Enabled = _deliveredImages!.Resolve(surface) is not null
+        };
+        button.Click += (_, _) => OnDeliveredButtonClicked(surface);
+        _pnlSide.Controls.Add(button);
+        return button;
+    }
+
+    private RoundedButton ButtonFor(DeliveredSurface surface) =>
+        surface == DeliveredSurface.Wallpaper ? _btnWallpaper! : _btnLockScreen!;
+
+    private void OnDeliveredButtonClicked(DeliveredSurface surface)
+    {
+        // The first click stops the auto-close countdown for the rest of the form's lifetime: the
+        // timer is stopped and the card hidden, so there is no frozen count and the checkbox cannot
+        // restart it.
+        StopCountdownPermanently();
+
+        // Clicking the active button again restores the News poster.
+        if (_activeSurface == surface)
+        {
+            ShowPoster();
+            return;
+        }
+
+        // Re-resolve on every click: the flag or file may have changed since the form opened. If the
+        // surface is gone, disable its button and keep what is currently shown - no dialog.
+        var path = _deliveredImages!.Resolve(surface);
+        var bitmap = path is null ? null : LoadUnlocked(path);
+        if (bitmap is null)
+        {
+            ButtonFor(surface).Enabled = false;
+            return;
+        }
+
+        _pictureBox.Image = bitmap;
+        _deliveredBitmap?.Dispose();
+        _deliveredBitmap = bitmap;
+        _activeSurface = surface;
+        UpdateDeliveredButtonHighlight();
+    }
+
+    private void ShowPoster()
+    {
+        _pictureBox.Image = _posterBitmap;
+        _deliveredBitmap?.Dispose();
+        _deliveredBitmap = null;
+        _activeSurface = null;
+        UpdateDeliveredButtonHighlight();
+    }
+
+    private void UpdateDeliveredButtonHighlight()
+    {
+        _btnWallpaper!.IsPrimary = _activeSurface == DeliveredSurface.Wallpaper;
+        _btnLockScreen!.IsPrimary = _activeSurface == DeliveredSurface.LockScreen;
+        _btnWallpaper.Invalidate();
+        _btnLockScreen.Invalidate();
+    }
+
+    private void StopCountdownPermanently()
+    {
+        _timer?.Stop();
+        _pnlAutoClose.Visible = false;
+    }
+
+    // FileShare.ReadWrite | Delete + a fully buffered copy: the file handle is released before the
+    // bitmap is built, so NewsService can republish or remove the image while it is displayed. Never
+    // Image.FromFile, which holds the file locked for the life of the image.
+    private static Bitmap? LoadUnlocked(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var ms = new MemoryStream();
+            fs.CopyTo(ms);
+            ms.Position = 0;
+            // A Bitmap built from a stream needs that stream open for its lifetime; copy into an
+            // independent bitmap so the MemoryStream can be disposed.
+            using var decoded = new Bitmap(ms);
+            return new Bitmap(decoded);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     // ── More info ────────────────────────────────────────────────────────────
 
     private void OnMoreInfoClicked(object? sender, EventArgs e)
@@ -436,7 +554,8 @@ public sealed class ViewerForm : Form
         _timer?.Stop();
         _timer?.Dispose();
         _toolTip.Dispose();
-        _pictureBox.Image?.Dispose();
+        _posterBitmap?.Dispose();
+        _deliveredBitmap?.Dispose();
 
         if (_recordShown)
             _viewerState.RecordShown(_assignment.PresentationId);

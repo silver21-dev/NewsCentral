@@ -94,6 +94,36 @@ overlap regardless of font/DPI). The checkbox is checked by default; unchecking
 from the current value. Counts down from the **resolved** `DisplayDurationSeconds`
 (see Display Duration below), closes at zero with reason `Timeout`.
 
+### Delivered image buttons - Ui\ShowDeliveredImages
+
+`HKLM\Software\{Company}\NewsCentral\NewsViewer\Ui\ShowDeliveredImages`, **REG_DWORD** 0/1 (`Ui:ShowDeliveredImages`
+on `ViewerConfiguration`), default **`false`**. When false, no buttons are created and the form is unchanged. When true,
+the side panel gains two buttons below the auto-close card - **Wallpaper** and **Lock screen** (`UiStrings` keys
+`ShowWallpaperButton` / `ShowLockScreenButton`, EN/ES/FR/DE) - that switch the image shown in the same form between the News
+poster and the wallpaper / lock screen image NewsService currently delivers through PersonalizationCSP. The buttons exist
+on the form whether it was opened by a scheduled launch or `--manual`; form creation and launch logic are otherwise unchanged.
+
+- **Availability** is decided by `NewsCentral.Configuration.DeliveredImageResolver` (in `NewsCentral.Shared`, unit tested). A
+  surface is available only if NewsService's own flag for it is on (`Delivery\WallpaperEnabled` / `Delivery\LockScreenEnabled`;
+  when the value is absent the NewsService default from `ConfigManifests` applies, not a copy of the literal), AND
+  PersonalizationCSP (`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP`, 64-bit view) holds a non-empty
+  `DesktopImagePath` / `LockScreenImagePath`, AND that file exists. It never throws; any failure is a warning and the surface
+  counts as unavailable. Each button's `Enabled` state comes from the resolver when the form opens, and the surface is
+  re-resolved on every click - if it has become unavailable the button is disabled and the current image stays, with no dialog.
+- **Behavior.** A click replaces the displayed image (scaled to fit, aspect ratio preserved); clicking the active button
+  again restores the poster; switching directly between wallpaper and lock screen works. The active button is drawn in the
+  accent style.
+- **No file locks.** Images are read with `FileShare.ReadWrite | FileShare.Delete` into memory and the bitmap is built from
+  that copy (never `Image.FromFile`), and the previous delivered bitmap is disposed on every switch - so NewsService can
+  republish or delete the image while it is on screen.
+- **Countdown.** The first click on either button stops the auto-close countdown for the rest of the form's lifetime: the
+  timer is stopped and the auto-close card is hidden. Closing is then manual (Close).
+- **No telemetry.** Viewing the wallpaper or lock screen emits no telemetry and no tracking; the poster session record is
+  unchanged.
+- **Registry-access exception.** Every NewsViewer registry access here is read-only. Reading
+  `HKLM\Software\{Company}\NewsCentral\NewsService\Delivery` is a **documented exception to the per-component-subkey
+  invariant** (each component otherwise reads only its own subkey); PersonalizationCSP is a Windows key, not a component subkey.
+
 ### Theme selection — Ui\Theme
 
 Two `Theme` palettes are defined in `FluentControls.cs`: **Dark (the default)** and **Light**
