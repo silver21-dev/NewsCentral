@@ -180,6 +180,12 @@ a re-check at each natural session boundary. There is deliberately no repeating/
 guaranteeing timely delivery of new content is the service's responsibility (it syncs content into
 the cache); the viewer only needs to re-evaluate at logon and unlock.
 
+3. **Start menu shortcut (optional, on demand)** - a shortcut whose target is
+   `"%ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe" --manual`. The `--manual` switch
+   shows today's poster on demand, bypassing the daily gate without stamping it. It is not an
+   automatic trigger and does not change the Run/unlock behavior above; `Active = false` still
+   makes it exit silently.
+
 **Task definition file:** the most robust way to create this task is to import a task-definition XML
 (`schtasks /create /xml ...`). `schtasks` has historically been sensitive to file encoding — UTF-16 LE
 with BOM is the safe choice.

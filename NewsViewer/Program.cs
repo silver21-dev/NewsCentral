@@ -12,7 +12,7 @@ namespace NewsViewer;
 static class Program
 {
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
         // Single-instance guard, session-scoped. HKLM Run (logon) and the Workstation Unlock task can
         // double-launch on a fast lock/unlock cycle; two concurrent runs race on the HKCU wallpaper
@@ -37,6 +37,13 @@ static class Program
         // deliberately left in place; deactivation is not a revert. (The wallpaper image is
         // NewsService's concern and is unaffected either way.)
         if (!config.Active) return;
+
+        // --manual (case-insensitive; unknown args ignored): an on-demand launch, e.g. from the Start menu
+        // shortcut. It bypasses the daily gate and does not stamp it. Evaluated AFTER Active, so a
+        // deactivated machine still exits silently.
+        bool manual = args.Any(a => string.Equals(a, "--manual", StringComparison.OrdinalIgnoreCase));
+        if (manual)
+            System.Diagnostics.Debug.WriteLine("[Manual] manual launch (--manual): daily gate bypassed, gate marker not written");
 
         // UI theme — resolved ONCE here and consumed via Theme.Current (the same
         // resolve-once-then-pass pattern as duration resolution). Registry Ui\Theme
@@ -109,7 +116,7 @@ static class Program
         var viewerState = new ViewerStateService(userStatePath, config.Display.LogicalDayStartHour);
         var telemetry   = new TelemetryWriter(config.CacheRootPath, hmac);
         bool bypass     = config.BypassDailyGate;
-        bool alreadyShown = !bypass && viewerState.AlreadyShownToday();
+        bool alreadyShown = !bypass && !manual && viewerState.AlreadyShownToday();
 
         // Show once per day then exit. The wallpaper style still re-asserts on an already-shown day.
         if (alreadyShown)
@@ -148,7 +155,7 @@ static class Program
                 var bgForm     = new BackgroundForm(a.VirtualDesktopBackgroundColor);
                 bgForm.Show();
 
-                var viewerForm = new ViewerForm(a, ip, t, vs, io, ed);
+                var viewerForm = new ViewerForm(a, ip, t, vs, io, ed, recordShown: !manual);
                 viewerForm.FormClosed += (_, _) => { bgForm.Close(); desktop.SwitchToOriginal(); };
                 Application.Run(viewerForm);
             });
@@ -161,7 +168,7 @@ static class Program
         }
         else
         {
-            Application.Run(new ViewerForm(assignment, imagePath, telemetry, viewerState, isOnline, effectiveDuration));
+            Application.Run(new ViewerForm(assignment, imagePath, telemetry, viewerState, isOnline, effectiveDuration, recordShown: !manual));
             ApplyWallpaperStyle();
         }
 

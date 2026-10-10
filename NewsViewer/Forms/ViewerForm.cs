@@ -49,6 +49,8 @@ public sealed class ViewerForm : Form
     private readonly int _effectiveDurationSeconds;
     private readonly DateTime _sessionStart = DateTime.UtcNow;
     private string _closeReason = "UserClose";
+    // False for a --manual launch: the daily-gate marker is stamped only by scheduled launches.
+    private readonly bool _recordShown;
 
     public ViewerForm(
         PublishedAssignmentIndex assignment,
@@ -56,8 +58,10 @@ public sealed class ViewerForm : Form
         TelemetryWriter telemetry,
         ViewerStateService viewerState,
         bool isOnline,
-        int effectiveDurationSeconds)
+        int effectiveDurationSeconds,
+        bool recordShown = true)
     {
+        _recordShown = recordShown;
         _assignment = assignment;
         _imagePath = imagePath;
         _telemetry = telemetry;
@@ -434,7 +438,8 @@ public sealed class ViewerForm : Form
         _toolTip.Dispose();
         _pictureBox.Image?.Dispose();
 
-        _viewerState.RecordShown(_assignment.PresentationId);
+        if (_recordShown)
+            _viewerState.RecordShown(_assignment.PresentationId);
 
         _telemetry.WriteSession(
             _assignment.PresentationId,

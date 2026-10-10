@@ -9,7 +9,7 @@ NewsViewer is a **one-shot process**: launch → evaluate the daily gate → ren
 
 - Registered in `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` for system startup
 - Registered in Task Scheduler triggered by Workstation Unlock event
-- Optionally launchable from the Windows Start menu
+- Optionally launchable from the Windows Start menu (shortcut target `NewsViewer.exe --manual`; see Manual launch below)
 - `appsettings.json` must be declared in `NewsViewer.csproj` as `<Content Include="appsettings.json">` with `CopyToOutputDirectory = PreserveNewest` so it is deployed alongside the executable
 - **Configuration layers** (registry always wins): `appsettings.json` (shipped, neutral, **committed** — a tracked artifact, never gitignored — loaded `optional: false`, so a missing file is a hard startup failure) → `appsettings.Development.json` (optional, gitignored dev overlay, loaded `optional: true`, **never published** via `CopyToPublishDirectory=Never`; documented shape in `appsettings.Development.json.example`) → registry (GPO). `appsettings.json` is the base layer the MSI installs and GPO sits on top of. See `docs/configuration.md` → appsettings.json — NewsViewer.
 - `Main()` evaluates the `Active` master switch (registry `Active`, DWORD 0/1 at the hive root; default `true`) first, ahead of every other startup check, and returns immediately when `false` — no poster, no wallpaper style re-assert, no `viewerstate.json` write, no telemetry, no dialog. The last-applied wallpaper style is left as-is (the wallpaper image is NewsService's concern, unaffected by NewsViewer's `Active` switch either way).
@@ -35,6 +35,10 @@ A **logical day** runs from `Display:LogicalDayStartHour` (default `0` = calenda
 **State file.** The gate state lives in `%LOCALAPPDATA%\NewsCentral\viewerstate.json` — **per-user, and NOT part of the `%ProgramData%\NewsCentral\` machine cache.** Consequence for testing: **wiping the `%ProgramData%` cache does not reset the daily gate** — delete `viewerstate.json` (or set `BypassDailyGate`) to force a re-display. `LastShownDate` stores the logical-day key (the `LogicalDayStartHour` boundary is already baked in), so the gate is a plain string-equality check with no time component. See `docs/data-model.md` → viewerstate.json.
 
 **Rationale.** A night-shift worker who starts at 22:00 and unlocks again at 01:00 is still inside the *same* logical day and must not be shown the poster twice. Worked example — `LogicalDayStartHour = 5` (05:00 boundary) cleanly covers morning, afternoon, and night shifts: everything from 05:00 through 04:59 the next morning counts as one day, so a night-shift unlock after midnight does not re-trigger.
+
+### Manual launch - `--manual`
+
+`NewsViewer.exe --manual` (case-insensitive; unknown arguments are ignored) is the on-demand launch used by the Start menu shortcut. `Active` is still evaluated first, so `Active = false` exits silently even with `--manual`. A manual launch skips the daily-gate check and does **not** write the gate marker, so it neither depends on nor disturbs the scheduled once-per-day display. Everything else - the single-instance mutex, remote/virtual-session exit, poster selection, the no-poster behavior, session telemetry and the wallpaper style re-assert - follows the scheduled path unchanged. A manual launch is noted with a `[Manual]` debug line.
 
 ### Deliberate gap — no same-day delivery (design decision)
 
