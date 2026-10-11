@@ -195,8 +195,9 @@ internal sealed class RoundedButton : Button
         }
         using (var b = new SolidBrush(fill)) e.Graphics.FillPath(b, path);
         using (var p = new Pen(bord)) e.Graphics.DrawPath(p, path);
-        TextRenderer.DrawText(e.Graphics, Text, Font, rect, text,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+        var flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak;
+        if (RightToLeft == RightToLeft.Yes) flags |= TextFormatFlags.RightToLeft;   // keeps punctuation such as the status dot on the correct side
+        TextRenderer.DrawText(e.Graphics, Text, Font, rect, text, flags);
     }
 
     // Positive amount blends toward white, negative toward black (fraction of the distance).

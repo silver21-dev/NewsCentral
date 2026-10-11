@@ -82,6 +82,12 @@ public sealed class ViewerForm : Form
         _isOnline = isOnline;
         _effectiveDurationSeconds = effectiveDurationSeconds;
 
+        // Mirrored layout for right-to-left UI cultures (Arabic). Computed once; when false every
+        // position below is exactly the LTR layout. Form.RightToLeftLayout is deliberately NOT used —
+        // the mirroring is explicit.
+        bool rtl = CultureInfo.CurrentUICulture.TextInfo.IsRightToLeft;
+        int Rx(int width) => rtl ? SidePanelWidth - PanelMargin - width : PanelMargin;   // right-align a narrow side-panel control
+
         // ── Image — loaded FIRST so the window can adapt to the content's aspect ratio ──
         // Missing file / decode failure → null bitmap → 1600×900 fallback area and continue
         // (the pre-adaptive silent-tolerance behavior, preserved).
@@ -138,7 +144,7 @@ public sealed class ViewerForm : Form
         _posterBitmap = bmp;
         _pictureBox = new PictureBox
         {
-            Location = new Point(0, 0),
+            Location = new Point(rtl ? SidePanelWidth : 0, 0),
             Size = new Size(_imageW, _imageH),
             SizeMode = PictureBoxSizeMode.Zoom,
             BackColor = Theme.Current.Stage,
@@ -146,17 +152,21 @@ public sealed class ViewerForm : Form
         };
         root.Controls.Add(_pictureBox);
 
-        // ── Side panel — fixed column, gray surface, left separator ─────────
+        // ── Side panel — fixed column, gray surface, separator on the image side ─────────
         _pnlSide = new Panel
         {
-            Location = new Point(_imageW, 0),
+            Location = new Point(rtl ? 0 : _imageW, 0),
             Size = new Size(SidePanelWidth, _formH),
-            BackColor = Theme.Current.PanelBg
+            BackColor = Theme.Current.PanelBg,
+            RightToLeft = rtl ? RightToLeft.Yes : RightToLeft.Inherit   // inherited by every child control
         };
         _pnlSide.Paint += (_, e) =>
         {
             using var pen = new Pen(Theme.Current.Border);
-            e.Graphics.DrawLine(pen, 0, 0, 0, _pnlSide.Height);
+            {
+            int x = rtl ? _pnlSide.Width - 1 : 0;   // separator faces the image
+            e.Graphics.DrawLine(pen, x, 0, x, _pnlSide.Height);
+        }
         };
         root.Controls.Add(_pnlSide);
 
@@ -171,6 +181,7 @@ public sealed class ViewerForm : Form
             AutoSize = true,
             Location = new Point(PanelMargin, 16)
         };
+        if (rtl) lblWordmark.Left = Rx(lblWordmark.GetPreferredSize(Size.Empty).Width);
         _pnlSide.Controls.Add(lblWordmark);
 
         // Status pill — rounded surface chip; the text is drawn in its Paint handler so no
@@ -186,9 +197,13 @@ public sealed class ViewerForm : Form
             Location = new Point(PanelMargin, 48),
             Size = new Size(TextRenderer.MeasureText(statusText, pillFont).Width + 20, 22)
         };
-        statusPill.Paint += (_, e) => TextRenderer.DrawText(
-            e.Graphics, statusText, pillFont, statusPill.ClientRectangle, statusColor,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        if (rtl) statusPill.Left = Rx(statusPill.Width);
+        statusPill.Paint += (_, e) =>
+        {
+            var pillFlags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter;
+            if (statusPill.RightToLeft == RightToLeft.Yes) pillFlags |= TextFormatFlags.RightToLeft;
+            TextRenderer.DrawText(e.Graphics, statusText, pillFont, statusPill.ClientRectangle, statusColor, pillFlags);
+        };
         _pnlSide.Controls.Add(statusPill);
 
         // Primary action — accent-filled Close.
@@ -251,11 +266,12 @@ public sealed class ViewerForm : Form
         {
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlowDirection = FlowDirection.LeftToRight,
+            FlowDirection = rtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight,
             WrapContents = false,
             BackColor = Theme.Current.Surface,
             Margin = new Padding(0, 0, 0, 6)
         };
+        if (rtl) header.Anchor = AnchorStyles.Top | AnchorStyles.Right;   // hug the card's right edge
 
         _chkAutoClose = new CheckBox
         {
@@ -263,7 +279,7 @@ public sealed class ViewerForm : Form
             Checked = true,
             AutoSize = false,
             Size = new Size(16, 16),
-            Margin = new Padding(0, 1, 7, 0),
+            Margin = rtl ? new Padding(7, 1, 0, 0) : new Padding(0, 1, 7, 0),
             BackColor = Theme.Current.Surface,
             FlatStyle = FlatStyle.Standard,
             Cursor = Cursors.Hand
@@ -332,7 +348,7 @@ public sealed class ViewerForm : Form
         // ── Caption bar — hairline divider ties it to the image above ────────
         var pnlPoster = new Panel
         {
-            Location = new Point(0, _imageH),
+            Location = new Point(rtl ? SidePanelWidth : 0, _imageH),
             Size = new Size(_imageW, PosterStripHeight),
             BackColor = Theme.Current.PanelBg
         };
@@ -357,7 +373,8 @@ public sealed class ViewerForm : Form
             Location = new Point(0, 1),
             Size = new Size(_imageW, PosterStripHeight - 1),
             TextAlign = ContentAlignment.MiddleCenter,
-            Padding = new Padding(0)
+            Padding = new Padding(0),
+            RightToLeft = RightToLeft.No   // authored content, not UI text: must not inherit RTL
         };
         pnlPoster.Controls.Add(_lblPosterText);
 
