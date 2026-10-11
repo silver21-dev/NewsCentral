@@ -79,7 +79,7 @@ Client size = `(imageW + 220 + 2×5) × (imageH + 44 + 2×5)`: 16:9 content yiel
 
 A **fixed, always-visible column** (the earlier hover-reveal / slide-in trigger and the 8px
 trigger strip have been removed); 16px outer margins, 12px between items. Top to bottom: the
-**NewsCentral wordmark** (13pt SemiBold-weight — Segoe UI Variable Display, Segoe UI fallback;
+**NewsCentral wordmark** (centered in the side panel; 13pt SemiBold-weight — Segoe UI Variable Display, Segoe UI fallback;
 GDI+ has no SemiBold `FontStyle`, so Bold is the nearest weight), the **status pill** (rounded
 surface chip showing `● Online` / `● Offline` in the theme's OnlineFg/OfflineFg), **Close** —
 the accent-filled primary action (`RoundedButton.IsPrimary`), **More information** — a
@@ -147,7 +147,7 @@ satellites **de / es / fr / pt / ar / zh-Hans / zh-Hant** exist (`UiStrings.es.r
 **Fallback chains:** zh-CN/zh-SG → zh-Hans; zh-TW/zh-HK/zh-MO → zh-Hant; pt-BR/pt-PT → pt; ar-* → ar; anything else → EN.
 **CJK fonts:** when `CurrentUICulture` reaches zh-Hans the UI font family is `Microsoft YaHei UI`; zh-Hant uses `Microsoft JhengHei UI` (both fall back to `Segoe UI` if missing via `Ui.Resolve`). Latin, Cyrillic and Arabic cultures keep Segoe UI Variable.
 
-**Right-to-left (Arabic):** when `CurrentUICulture.TextInfo.IsRightToLeft` is true the viewer mirrors its layout explicitly (`Form.RightToLeftLayout` is not used). The side panel sits on the left with its separator on its right edge, the image and poster strip move right, the side panel is `RightToLeft.Yes` (inherited by its children), narrow controls (wordmark, status pill) are right-aligned, and the auto-close header flows right-to-left so the checkbox sits right of the caption. `RoundedButton` and the status pill add `TextFormatFlags.RightToLeft` when their effective `RightToLeft` is `Yes`. The poster text label is forced `RightToLeft.No` — it is authored content, not UI text. LTR cultures are laid out exactly as before.
+**Right-to-left (Arabic):** when `CurrentUICulture.TextInfo.IsRightToLeft` is true the viewer mirrors its layout explicitly (`Form.RightToLeftLayout` is not used). The side panel sits on the left with its separator on its right edge, the image and poster strip move right, the side panel is `RightToLeft.Yes` (inherited by its children), the status pill is right-aligned, and the auto-close header flows right-to-left so the checkbox sits right of the caption. `RoundedButton` and the status pill add `TextFormatFlags.RightToLeft` when their effective `RightToLeft` is `Yes`. The poster text label is forced `RightToLeft.No` — it is authored content, not UI text. LTR cultures are laid out exactly as before.
 
 **Debug-only `--culture <name>`:** in Debug builds only, `--culture <name>` (e.g. `--culture ar-SA`) forces `CurrentUICulture`/`DefaultThreadCurrentUICulture` before any form is built, for localization testing; an invalid name is ignored (logged via `Debug.WriteLine`), `CurrentCulture` is untouched, and it combines with `--manual` in any order.
 

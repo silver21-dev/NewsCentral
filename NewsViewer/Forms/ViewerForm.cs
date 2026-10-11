@@ -178,10 +178,12 @@ public sealed class ViewerForm : Form
             Font = Ui.Font(13f, FontStyle.Bold),   // GDI+ has no SemiBold FontStyle; Bold is the nearest weight
             ForeColor = Theme.Current.TextPrimary,
             BackColor = Color.Transparent,
-            AutoSize = true,
-            Location = new Point(PanelMargin, 16)
+            AutoSize = false,   // spans the content column and centers the text, in LTR and RTL alike
+            Location = new Point(PanelMargin, 16),
+            Width = ContentWidth,
+            TextAlign = ContentAlignment.MiddleCenter
         };
-        if (rtl) lblWordmark.Left = Rx(lblWordmark.GetPreferredSize(Size.Empty).Width);
+        lblWordmark.Height = TextRenderer.MeasureText(lblWordmark.Text, lblWordmark.Font).Height;
         _pnlSide.Controls.Add(lblWordmark);
 
         // Status pill — rounded surface chip; the text is drawn in its Paint handler so no
