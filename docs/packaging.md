@@ -146,11 +146,11 @@ is called out here: without it, that auth mode simply fails.
 the executable. `appsettings.Development.json` is a developer-only file, excluded from the publish
 output, and must never appear in the package.
 
-**Localization satellite assemblies:** the publish output contains culture subfolders (`es/`, `fr/`,
-`de/`), each holding `NewsViewer.resources.dll`. These MUST be deployed alongside `NewsViewer.exe` —
+**Localization satellite assemblies:** the publish output contains culture subfolders (`de/ es/ fr/ pt/ ar/ zh-Hans/ zh-Hant/`),
+each holding `NewsViewer.resources.dll`. These MUST be deployed alongside `NewsViewer.exe` —
 packaging that copies only top-level files will silently drop all translations (the app then falls
 back to English). Neutral cultures cover regional variants via the standard .NET fallback chain
-(`de` serves `de-DE`/`de-AT`/`de-CH`, etc.).
+(`de` serves `de-DE`/`de-AT`/`de-CH`, etc.; `zh-Hans`/`zh-Hant` are neutral script cultures).
 
 NewsViewer runs per-user, in the interactive session, non-elevated. It is launched by two
 complementary mechanisms.

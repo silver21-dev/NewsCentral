@@ -139,9 +139,13 @@ appsettings key.
 All user-facing viewer strings live in `NewsViewer/Resources/UiStrings.resx` (default EN),
 read through the `UiStrings` accessor class (`ResourceManager` + `CurrentUICulture`) — adding
 `UiStrings.<culture>.resx` satellite files localizes the viewer with no code change. Culture
-satellites **es / fr / de** exist (`UiStrings.es.resx` etc.); the culture is resolved from
+satellites **de / es / fr / pt / ar / zh-Hans / zh-Hant** exist (`UiStrings.es.resx` etc.); the culture is resolved from
 `CurrentUICulture` at each lookup, and a further culture is added by dropping in another
 `UiStrings.<culture>.resx` — no code change.
+
+**Languages:** EN (default), de, es, fr, pt (Brazilian wording, serves pt-PT too), ar, zh-Hans, zh-Hant.
+**Fallback chains:** zh-CN/zh-SG → zh-Hans; zh-TW/zh-HK/zh-MO → zh-Hant; pt-BR/pt-PT → pt; ar-* → ar; anything else → EN.
+**CJK fonts:** when `CurrentUICulture` reaches zh-Hans the UI font family is `Microsoft YaHei UI`; zh-Hant uses `Microsoft JhengHei UI` (both fall back to `Segoe UI` if missing via `Ui.Resolve`). Latin, Cyrillic and Arabic cultures keep Segoe UI Variable.
 
 **Debug-only `--culture <name>`:** in Debug builds only, `--culture <name>` (e.g. `--culture ar-SA`) forces `CurrentUICulture`/`DefaultThreadCurrentUICulture` before any form is built, for localization testing; an invalid name is ignored (logged via `Debug.WriteLine`), `CurrentCulture` is untouched, and it combines with `--manual` in any order.
 

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!-- Portuguese, Brazilian wording (pt) satellite for UiStrings.resx — same keys as the default (EN) file. -->
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="AppName" xml:space="preserve">
+    <value>NewsCentral</value>
+  </data>
+  <data name="AutoCloseTooltip" xml:space="preserve">
+    <value>Desmarque para parar o temporizador e manter esta janela aberta</value>
+  </data>
+  <data name="Close" xml:space="preserve">
+    <value>Fechar</value>
+  </data>
+  <data name="FormClosesIn" xml:space="preserve">
+    <value>A janela fecha em</value>
+  </data>
+  <data name="MoreInformation" xml:space="preserve">
+    <value>Clique para ver mais informações.</value>
+  </data>
+  <data name="Offline" xml:space="preserve">
+    <value>● Offline</value>
+  </data>
+  <data name="Online" xml:space="preserve">
+    <value>● Online</value>
+  </data>
+  <data name="Seconds" xml:space="preserve">
+    <value>segundos</value>
+  </data>
+  <data name="ShowLockScreenButton" xml:space="preserve">
+    <value>Tela de bloqueio</value>
+  </data>
+  <data name="ShowWallpaperButton" xml:space="preserve">
+    <value>Papel de parede</value>
+  </data>
+</root>

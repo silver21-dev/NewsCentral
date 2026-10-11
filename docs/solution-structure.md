@@ -128,7 +128,7 @@ NewsViewer\
 │   ├── FluentControls.cs             Theme (Light/Dark palettes; Theme.Current selected via Ui\Theme registry, default Dark) + RoundedPanel/RoundedButton (custom-painted; IsPrimary accent fill)
 │   └── BackgroundForm.cs             fullscreen solid-colour background for virtual desktop
 ├── Resources\
-│   ├── UiStrings.resx                user-facing strings, default EN (satellite UiStrings.<culture>.resx per language)
+│   ├── UiStrings.resx                user-facing strings, default EN (satellites de, es, fr, pt, ar, zh-Hans, zh-Hant)
 │   └── UiStrings.cs                  static accessor — ResourceManager + CurrentUICulture
 ├── NativeMethods.cs                  Win32 P/Invoke — desktop, thread, process APIs
 ├── JsonDefaults.cs                   shared JsonSerializerOptions (same standard as NewsService)

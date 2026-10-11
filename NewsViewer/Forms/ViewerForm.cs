@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using NewsCentral.Configuration;
 using NewsCentral.Models;
 using NewsCentral.Models.IndexFile;
@@ -574,8 +575,23 @@ public sealed class ViewerForm : Form
     // No other `new Font(...)` may appear in this form.
     private static class Ui
     {
-        private static readonly string TextFamily = Resolve("Segoe UI Variable Text");
-        private static readonly string DisplayFamily = Resolve("Segoe UI Variable Display");
+        // CurrentUICulture is fixed for the life of this one-shot process (--culture is applied in
+        // Main before any form), so the family is resolved once. CJK cultures use a CJK-capable UI
+        // font for both variants; Resolve falls back to Segoe UI if it is missing.
+        private static readonly string TextFamily = Resolve(CjkFamily() ?? "Segoe UI Variable Text");
+        private static readonly string DisplayFamily = Resolve(CjkFamily() ?? "Segoe UI Variable Display");
+
+        // zh-Hans (zh-CN, zh-SG, ...) and zh-Hant (zh-TW, zh-HK, zh-MO, ...) are found by walking the
+        // culture's parent chain; null for every other culture.
+        private static string? CjkFamily()
+        {
+            for (var c = CultureInfo.CurrentUICulture; !string.IsNullOrEmpty(c.Name); c = c.Parent)
+            {
+                if (string.Equals(c.Name, "zh-Hans", StringComparison.OrdinalIgnoreCase)) return "Microsoft YaHei UI";
+                if (string.Equals(c.Name, "zh-Hant", StringComparison.OrdinalIgnoreCase)) return "Microsoft JhengHei UI";
+            }
+            return null;
+        }
 
         private static string Resolve(string family)
         {
