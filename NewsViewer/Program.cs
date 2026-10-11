@@ -45,6 +45,30 @@ static class Program
         if (manual)
             System.Diagnostics.Debug.WriteLine("[Manual] manual launch (--manual): daily gate bypassed, gate marker not written");
 
+#if DEBUG
+        // --culture <name> (Debug builds only): force the UI culture for localization testing, in any
+        // argument order relative to --manual. Set on the default AND the current thread (the Virtual
+        // Desktop UI thread below inherits the default) before any Form is constructed. An invalid name
+        // is ignored. CurrentCulture (dates/numbers) is deliberately untouched.
+        int cultureIdx = Array.FindIndex(args, a => string.Equals(a, "--culture", StringComparison.OrdinalIgnoreCase));
+        if (cultureIdx >= 0 && cultureIdx + 1 < args.Length)
+        {
+            try
+            {
+                var ci = System.Globalization.CultureInfo.GetCultureInfo(args[cultureIdx + 1]);
+                System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = ci;
+                System.Globalization.CultureInfo.CurrentUICulture = ci;
+                System.Diagnostics.Debug.WriteLine($"[Culture] UI culture forced to {ci.Name} (--culture)");
+            }
+            catch (System.Globalization.CultureNotFoundException)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Culture] invalid --culture value '{args[cultureIdx + 1]}' ignored");
+            }
+        }
+        else if (cultureIdx >= 0)
+            System.Diagnostics.Debug.WriteLine("[Culture] --culture given without a value; ignored");
+#endif
+
         // UI theme — resolved ONCE here and consumed via Theme.Current (the same
         // resolve-once-then-pass pattern as duration resolution). Registry Ui\Theme
         // (REG_SZ "Dark" | "Light", surfaced as Ui:Theme) overrides the code default:

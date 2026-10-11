@@ -143,6 +143,8 @@ satellites **es / fr / de** exist (`UiStrings.es.resx` etc.); the culture is res
 `CurrentUICulture` at each lookup, and a further culture is added by dropping in another
 `UiStrings.<culture>.resx` — no code change.
 
+**Debug-only `--culture <name>`:** in Debug builds only, `--culture <name>` (e.g. `--culture ar-SA`) forces `CurrentUICulture`/`DefaultThreadCurrentUICulture` before any form is built, for localization testing; an invalid name is ignored (logged via `Debug.WriteLine`), `CurrentCulture` is untouched, and it combines with `--manual` in any order.
+
 ## Display Duration
 
 `DisplayDurationSeconds` carries three meanings via a sentinel model:
