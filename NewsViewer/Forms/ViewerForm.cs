@@ -266,7 +266,7 @@ public sealed class ViewerForm : Form
         {
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlowDirection = rtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight,
+            FlowDirection = FlowDirection.LeftToRight,   // under RTL the inherited RightToLeft.Yes already mirrors this flow; an explicit RightToLeft would reverse it back
             WrapContents = false,
             BackColor = Theme.Current.Surface,
             Margin = new Padding(0, 0, 0, 6)
@@ -452,6 +452,8 @@ public sealed class ViewerForm : Form
             ? (int)Math.Round(ProgressWidth * (double)_secondsRemaining / _totalSeconds)
             : 0;
         _progressFill.Width = Math.Clamp(w, 0, ProgressWidth);
+        if (_progressFill.RightToLeft == RightToLeft.Yes)
+            _progressFill.Left = ProgressWidth - _progressFill.Width;   // shrink toward the right edge
     }
 
     // ── Delivered wallpaper / lock screen preview ─────────────────────────────
