@@ -262,6 +262,7 @@ public sealed class ViewerForm : Form
         cardLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         cardLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         cardLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        if (rtl) cardLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));   // cell spans the card so the header can hug its right edge
         _pnlAutoClose.Controls.Add(cardLayout);
 
         var header = new FlowLayoutPanel
