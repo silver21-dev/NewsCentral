@@ -26,6 +26,18 @@ The two triggers are **complementary, not redundant**:
 
 On always-on machines that are locked rather than logged off, **Unlock is the only trigger** for every logical day after the first. There is deliberately **no repeating/timer trigger** in this release — re-evaluation is event-driven (logon or unlock), and the daily gate below decides whether each launch actually shows anything.
 
+
+### Launch triggers — content-changed event (planned)
+
+NewsService writes a dedicated EventLog entry whenever it has accepted a changed team index and the content is fully in the local cache (`ServiceEventIds.ContentChanged` in `NewsCentral.Shared`; written directly via `EventLog`, independent of `ILogger` levels, always on):
+
+| | |
+|---|---|
+| **Log** | `Application` (`Logging:EventLog:LogName`) |
+| **Source** | `NewsService` (`Logging:EventLog:SourceName`) |
+| **EventID** | `2001` (`ContentChanged`), Information |
+
+The event-triggered NewsViewer scheduled task that consumes it arrives in **M4**; NewsViewer itself does not use it yet. NewsService does not filter by content type — NewsViewer will decide relevance. It is emitted once per accepted index change (per team), only after the index and all its images are cached, and never for an unchanged, rejected or partially synced index.
 ## The daily gate
 
 The gate is **date-only** and evaluated once per launch. `ViewerStateService.AlreadyShownToday()` takes **no presentation id** — it disturbs the user at most once per **logical day**, regardless of which presentation is active.

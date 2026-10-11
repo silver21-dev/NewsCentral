@@ -46,7 +46,8 @@ public sealed class SyncService(
     TelemetryUploader telemetry,
     EntraTeamResolutionService entra,
     IConfiguration configuration,
-    ILogger<SyncService> logger)
+    ILogger<SyncService> logger,
+    IContentChangedNotifier? contentChanged = null)
 {
     private static readonly JsonSerializerOptions Json = JsonDefaults.Options;
 
@@ -254,21 +255,28 @@ public sealed class SyncService(
         logger.LogInformation("Team {Team}: index changed — syncing {Count} assignment(s)",
             teamFolder, remoteIndex.PublishedAssignments.Count);
 
+        var allImagesCached = true;
         foreach (var assignment in remoteIndex.PublishedAssignments)
         {
             ct.ThrowIfCancellationRequested();
-            await SyncImageAsync(teamFolder, assignment, ct);
+            if (!await SyncImageAsync(teamFolder, assignment, ct)) allImagesCached = false;
         }
 
         // Write the new index only after all images are safely cached.
         await cache.WriteTextAsync($"{teamFolder}/index.json", remoteJson);
         logger.LogInformation("Team {Team}: sync complete", teamFolder);
+
+        // Exactly once per accepted change, only after the index and every image are in the cache so an
+        // event-triggered NewsViewer finds the new files. A partial sync (an image missing from the
+        // repository) is not announced. Thrown download/write errors never reach here.
+        if (allImagesCached) NotifyContentChanged();
     }
 
-    private async Task SyncImageAsync(
+    /// <summary>True when the image is cached and current (or the assignment has none); false when it was not found in the repository.</summary>
+    private async Task<bool> SyncImageAsync(
         string teamFolder, PublishedAssignmentIndex assignment, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(assignment.Content.ImagePath)) return;
+        if (string.IsNullOrEmpty(assignment.Content.ImagePath)) return true;
 
         var relativePath = assignment.Content.ImagePath;
         var storedHash   = cache.ReadStoredHash(relativePath);
@@ -276,18 +284,25 @@ public sealed class SyncService(
         if (storedHash == assignment.Content.ImageHash && cache.FileExists(relativePath))
         {
             logger.LogDebug("Image up-to-date: {Path}", relativePath);
-            return;
+            return true;
         }
 
         var bytes = await repository.ReadBytesAsync(relativePath, ct);
         if (bytes is null)
         {
             logger.LogWarning("Image not found in repository: {Path}", relativePath);
-            return;
+            return false;
         }
 
         await cache.WriteBytesAsync(relativePath, bytes);
         logger.LogDebug("Image synced: {Path} ({Bytes} bytes)", relativePath, bytes.Length);
+        return true;
+    }
+
+    private void NotifyContentChanged()
+    {
+        try { contentChanged?.NotifyContentChanged(); }
+        catch (Exception ex) { logger.LogWarning(ex, "Content-changed notification failed"); }
     }
 
     // ── Step 2 — display surfaces (lock screen, then wallpaper) ────────────────
