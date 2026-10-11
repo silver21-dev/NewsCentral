@@ -86,7 +86,6 @@ public sealed class ViewerForm : Form
         // position below is exactly the LTR layout. Form.RightToLeftLayout is deliberately NOT used —
         // the mirroring is explicit.
         bool rtl = CultureInfo.CurrentUICulture.TextInfo.IsRightToLeft;
-        int Rx(int width) => rtl ? SidePanelWidth - PanelMargin - width : PanelMargin;   // right-align a narrow side-panel control
 
         // ── Image — loaded FIRST so the window can adapt to the content's aspect ratio ──
         // Missing file / decode failure → null bitmap → 1600×900 fallback area and continue
@@ -199,7 +198,7 @@ public sealed class ViewerForm : Form
             Location = new Point(PanelMargin, 48),
             Size = new Size(TextRenderer.MeasureText(statusText, pillFont).Width + 20, 22)
         };
-        if (rtl) statusPill.Left = Rx(statusPill.Width);
+        statusPill.Left = (SidePanelWidth - statusPill.Width) / 2;   // centered under the wordmark
         statusPill.Paint += (_, e) =>
         {
             var pillFlags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter;
@@ -262,7 +261,7 @@ public sealed class ViewerForm : Form
         cardLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         cardLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         cardLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        if (rtl) cardLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));   // cell spans the card so the header can hug its right edge
+        cardLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));   // cell spans the card so the header can center
         _pnlAutoClose.Controls.Add(cardLayout);
 
         var header = new FlowLayoutPanel
@@ -274,7 +273,7 @@ public sealed class ViewerForm : Form
             BackColor = Theme.Current.Surface,
             Margin = new Padding(0, 0, 0, 6)
         };
-        if (rtl) header.Anchor = AnchorStyles.Top | AnchorStyles.Right;   // hug the card's right edge
+        header.Anchor = AnchorStyles.Top;   // centered in the card
 
         _chkAutoClose = new CheckBox
         {
