@@ -4,6 +4,7 @@ using NewsCentral.Configuration;
 using NewsCentral.Models;
 using NewsCentral.Models.IndexFile;
 using NewsCentral.Security;
+using NewsCentral.Ui;
 using NewsCentral.Launch;
 using NewsViewer.Configuration;
 using NewsViewer.Forms;
@@ -112,6 +113,15 @@ static class Program
             ? Theme.Light
             : Theme.Dark;
 
+        // Poster window palette: the theme plus the fleet-wide frame colours (Ui:FrameColor / FrameTextColor).
+        // With no usable frame colour Theme.Poster is Theme.Current itself, so the default look is untouched;
+        // an unusable value falls back as documented and is noted in the launch log. The notification form
+        // keeps Theme.Current.
+        var (posterPalette, frameIssues) = FramePaletteBuilder.Build(
+            Theme.Current.ToChrome(), config.Ui.FrameColor, config.Ui.FrameTextColor);
+        Theme.Poster = posterPalette == Theme.Current.ToChrome() ? Theme.Current : Theme.Current.WithChrome(posterPalette);
+        var frameNote = string.Join(",", frameIssues.Notes());
+
         // Company is a build-time constant (SolutionConstants.Company), enforced at build time — it is
         // not read from config and cannot be empty here. Only CacheRootPath still needs validating.
         if (string.IsNullOrWhiteSpace(config.CacheRootPath))
@@ -181,6 +191,10 @@ static class Program
         // A poster that wants a Virtual Desktop gets the standard desktop in a remote session (logged).
         var vdFallbackNote = assignment is { UseVirtualDesktop: true } && remoteSession ? "VirtualDesktopFallback" : null;
 
+        // Notes appended to this launch's decision line: the virtual-desktop fallback and any unusable frame colour.
+        var launchNote = new[] { vdFallbackNote, frameNote }.Where(s => !string.IsNullOrEmpty(s)).ToArray() is { Length: > 0 } noteParts
+            ? string.Join(",", noteParts) : null;
+
         Directory.CreateDirectory(userStatePath);
 
         var hmac        = new HmacService(config.Hmac);        // telemetry only — unchanged
@@ -202,12 +216,12 @@ static class Program
         {
             if (assignment is null)
             {
-                launchLog.Append(triggerName, "Exit", "NoContent", null);
+                launchLog.Append(triggerName, "Exit", "NoContent", null, note: launchNote);
                 ApplyWallpaperStyle();
                 return;
             }
 
-            launchLog.Append(triggerName, "MiniForm", "Test", contentKey, title, note: vdFallbackNote);
+            launchLog.Append(triggerName, "MiniForm", "Test", contentKey, title, note: launchNote);
             var test = ShowNotification(null, ExpandedPosterFactory(assignment, imagePath ?? string.Empty, writeTelemetry: false, source: null), null);
             if (test?.Outcome == NotificationOutcome.Expanded)
                 ShowExpandedFallback(test, assignment, imagePath ?? string.Empty, writeTelemetry: false, source: null);
@@ -240,7 +254,7 @@ static class Program
 
         if (decision.Action == LaunchAction.Exit)
         {
-            launchLog.Append(triggerName, "Exit", decision.Reason, decision.ContentKey);
+            launchLog.Append(triggerName, "Exit", decision.Reason, decision.ContentKey, note: launchNote);
             // The wallpaper style is still the terminal step before exit.
             ApplyWallpaperStyle();
             return;
@@ -375,7 +389,7 @@ static class Program
 
         if (decision.Action == LaunchAction.MiniForm)
         {
-            launchLog.Append(triggerName, "MiniForm", decision.Reason, decision.ContentKey, decision.Title, note: vdFallbackNote);
+            launchLog.Append(triggerName, "MiniForm", decision.Reason, decision.ContentKey, decision.Title, note: launchNote);
 
             // The marker is written once the form is actually on screen (Shown), not on the decision. One
             // record per shown notification (shown time, outcome, time to outcome) goes through the existing
@@ -400,7 +414,7 @@ static class Program
             return;
         }
 
-        launchLog.Append(triggerName, "FullPoster", decision.Reason, decision.ContentKey, note: vdFallbackNote);
+        launchLog.Append(triggerName, "FullPoster", decision.Reason, decision.ContentKey, note: launchNote);
         ShowPoster(assignment!, imagePath!, recordShown: !manual, countdownStopped: false, writeTelemetry: true);
         ApplyWallpaperStyle();
 

@@ -134,7 +134,7 @@ public sealed class ViewerForm : Form
             _imageW + SidePanelWidth + 2 * FrameThickness,
             _imageH + PosterStripHeight + 2 * FrameThickness);
         StartPosition = FormStartPosition.CenterScreen;
-        BackColor = Theme.Current.WindowFrame;
+        BackColor = Theme.Poster.WindowFrame;
         TopMost = true;
         Text = "NewsViewer";
         Paint += OnFramePaint;
@@ -144,7 +144,7 @@ public sealed class ViewerForm : Form
         {
             Location = new Point(FrameThickness, FrameThickness),
             Size = new Size(_formW, _formH),
-            BackColor = Theme.Current.PanelBg
+            BackColor = Theme.Poster.PanelBg
         };
         Controls.Add(root);
 
@@ -155,7 +155,7 @@ public sealed class ViewerForm : Form
             Location = new Point(rtl ? SidePanelWidth : 0, 0),
             Size = new Size(_imageW, _imageH),
             SizeMode = PictureBoxSizeMode.Zoom,
-            BackColor = Theme.Current.Stage,
+            BackColor = Theme.Poster.Stage,
             Image = bmp
         };
         root.Controls.Add(_pictureBox);
@@ -165,12 +165,12 @@ public sealed class ViewerForm : Form
         {
             Location = new Point(rtl ? 0 : _imageW, 0),
             Size = new Size(SidePanelWidth, _formH),
-            BackColor = Theme.Current.PanelBg,
+            BackColor = Theme.Poster.PanelBg,
             RightToLeft = rtl ? RightToLeft.Yes : RightToLeft.Inherit   // inherited by every child control
         };
         _pnlSide.Paint += (_, e) =>
         {
-            using var pen = new Pen(Theme.Current.Border);
+            using var pen = new Pen(Theme.Poster.Border);
             {
             int x = rtl ? _pnlSide.Width - 1 : 0;   // separator faces the image
             e.Graphics.DrawLine(pen, x, 0, x, _pnlSide.Height);
@@ -184,7 +184,7 @@ public sealed class ViewerForm : Form
         {
             Text = UiStrings.AppName,
             Font = Ui.Font(13f, FontStyle.Bold),   // GDI+ has no SemiBold FontStyle; Bold is the nearest weight
-            ForeColor = Theme.Current.TextPrimary,
+            ForeColor = Theme.Poster.TextPrimary,
             BackColor = Color.Transparent,
             AutoSize = false,   // spans the content column and centers the text, in LTR and RTL alike
             Location = new Point(PanelMargin, 16),
@@ -236,6 +236,7 @@ public sealed class ViewerForm : Form
             Size = new Size(ContentWidth, 48),
             Location = new Point(PanelMargin, 136)
         };
+        StyleSecondaryButton(btnMoreInfo);
         btnMoreInfo.Click += OnMoreInfoClicked;
         _pnlSide.Controls.Add(btnMoreInfo);
 
@@ -252,8 +253,8 @@ public sealed class ViewerForm : Form
         {
             Location = new Point(PanelMargin, 196),
             Size = new Size(ContentWidth, 126),
-            FillColor = Theme.Current.Surface,
-            BorderColor = Theme.Current.Border,
+            FillColor = Theme.Poster.Surface,
+            BorderColor = Theme.Poster.Border,
             Padding = new Padding(1)
         };
         _pnlSide.Controls.Add(_pnlAutoClose);
@@ -263,7 +264,7 @@ public sealed class ViewerForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 4,
-            BackColor = Theme.Current.Surface,
+            BackColor = Theme.Poster.Surface,
             Padding = new Padding(11, 9, 11, 9)
         };
         cardLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -279,7 +280,7 @@ public sealed class ViewerForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             FlowDirection = FlowDirection.LeftToRight,   // under RTL the inherited RightToLeft.Yes already mirrors this flow; an explicit RightToLeft would reverse it back
             WrapContents = false,
-            BackColor = Theme.Current.Surface,
+            BackColor = Theme.Poster.Surface,
             Margin = new Padding(0, 0, 0, 6)
         };
         header.Anchor = AnchorStyles.Top;   // centered in the card
@@ -291,7 +292,7 @@ public sealed class ViewerForm : Form
             AutoSize = false,
             Size = new Size(16, 16),
             Margin = rtl ? new Padding(7, 1, 0, 0) : new Padding(0, 1, 7, 0),
-            BackColor = Theme.Current.Surface,
+            BackColor = Theme.Poster.Surface,
             FlatStyle = FlatStyle.Standard,
             Cursor = Cursors.Hand
         };
@@ -302,8 +303,8 @@ public sealed class ViewerForm : Form
             Text = UiStrings.FormClosesIn,
             AutoSize = true,
             Font = Ui.Font(9.5f),
-            ForeColor = Theme.Current.TextPrimary,
-            BackColor = Theme.Current.Surface,
+            ForeColor = Theme.Poster.TextPrimary,
+            BackColor = Theme.Poster.Surface,
             Margin = new Padding(0, 2, 0, 0),
             Cursor = Cursors.Hand
         };
@@ -318,8 +319,8 @@ public sealed class ViewerForm : Form
             Text = string.Empty,
             AutoSize = true,
             Font = Ui.Font(11f),
-            ForeColor = Theme.Current.TextPrimary,
-            BackColor = Theme.Current.Surface,
+            ForeColor = Theme.Poster.TextPrimary,
+            BackColor = Theme.Poster.Surface,
             Anchor = AnchorStyles.None,
             Margin = new Padding(0)
         };
@@ -330,8 +331,8 @@ public sealed class ViewerForm : Form
             Text = UiStrings.Seconds,
             AutoSize = true,
             Font = Ui.Font(8.5f),
-            ForeColor = Theme.Current.TextSecondary,
-            BackColor = Theme.Current.Surface,
+            ForeColor = Theme.Poster.TextSecondary,
+            BackColor = Theme.Poster.Surface,
             Anchor = AnchorStyles.None,
             Margin = new Padding(0, 2, 0, 6)
         };
@@ -340,7 +341,7 @@ public sealed class ViewerForm : Form
         var progressTrack = new Panel
         {
             Size = new Size(ProgressWidth, 5),
-            BackColor = Theme.Current.Border,
+            BackColor = Theme.Poster.ProgressTrack,
             Anchor = AnchorStyles.None,
             Margin = new Padding(0)
         };
@@ -348,7 +349,7 @@ public sealed class ViewerForm : Form
         {
             Location = new Point(0, 0),
             Size = new Size(ProgressWidth, 5),
-            BackColor = Theme.Current.Accent
+            BackColor = Theme.Poster.ProgressFill
         };
         progressTrack.Controls.Add(_progressFill);
         cardLayout.Controls.Add(progressTrack, 0, 3);
@@ -361,11 +362,11 @@ public sealed class ViewerForm : Form
         {
             Location = new Point(rtl ? SidePanelWidth : 0, _imageH),
             Size = new Size(_imageW, PosterStripHeight),
-            BackColor = Theme.Current.PanelBg
+            BackColor = Theme.Poster.PanelBg
         };
         pnlPoster.Paint += (_, e) =>
         {
-            using var pen = new Pen(Theme.Current.Border);
+            using var pen = new Pen(Theme.Poster.Border);
             e.Graphics.DrawLine(pen, 0, 0, pnlPoster.Width, 0);
         };
         root.Controls.Add(pnlPoster);
@@ -378,7 +379,7 @@ public sealed class ViewerForm : Form
         {
             Text = posterText,
             Font = Ui.Font(12.5f),
-            ForeColor = Theme.Current.TextPrimary,
+            ForeColor = Theme.Poster.TextPrimary,
             BackColor = Color.Transparent,
             AutoSize = false,
             Location = new Point(0, 1),
@@ -423,7 +424,7 @@ public sealed class ViewerForm : Form
     {
         int w = ClientSize.Width;
         int h = ClientSize.Height;
-        using var edge = new Pen(Theme.Current.FrameEdge);
+        using var edge = new Pen(Theme.Poster.FrameEdge);
         e.Graphics.DrawRectangle(edge, 0, 0, w - 1, h - 1);
         e.Graphics.DrawRectangle(edge, FrameThickness - 1, FrameThickness - 1,
             w - 2 * (FrameThickness - 1) - 1, h - 2 * (FrameThickness - 1) - 1);
@@ -446,17 +447,17 @@ public sealed class ViewerForm : Form
     {
         if (_chkAutoClose.Checked)
         {
-            _lblCountdown.ForeColor = Theme.Current.TextPrimary;
-            _lblCountdownUnit.ForeColor = Theme.Current.TextSecondary;
-            _progressFill.BackColor = Theme.Current.Accent;
+            _lblCountdown.ForeColor = Theme.Poster.TextPrimary;
+            _lblCountdownUnit.ForeColor = Theme.Poster.TextSecondary;
+            _progressFill.BackColor = Theme.Poster.ProgressFill;
             _timer?.Start();
         }
         else
         {
             _timer?.Stop();
-            _lblCountdown.ForeColor = Theme.Current.AccentPaused;
-            _lblCountdownUnit.ForeColor = Theme.Current.AccentPaused;
-            _progressFill.BackColor = Theme.Current.AccentPaused;
+            _lblCountdown.ForeColor = Theme.Poster.AccentPaused;
+            _lblCountdownUnit.ForeColor = Theme.Poster.AccentPaused;
+            _progressFill.BackColor = Theme.Poster.AccentPaused;
         }
     }
 
@@ -474,6 +475,22 @@ public sealed class ViewerForm : Form
     // ── Delivered wallpaper / lock screen preview ─────────────────────────────
     // Purely local viewing: no telemetry, no viewerstate, no registry write. Poster telemetry is untouched.
 
+    // Secondary (ghost/surface) buttons take the poster palette: with a frame colour configured they follow
+    // it (cards and their hover/press shades, text colour); without one Theme.Poster is Theme.Current and
+    // every value below equals the control's own default. The accent-filled Close button is left alone.
+    private static void StyleSecondaryButton(RoundedButton button)
+    {
+        var t = Theme.Poster;
+        button.Theme = t;
+        button.NormalColor = t.Surface;
+        button.HoverColor = t.SurfaceHover;
+        button.PressColor = t.SurfacePress;
+        button.BorderColor = t.Border;
+        button.HoverBorderColor = t.BorderHover;
+        button.PressBorderColor = t.BorderPress;
+        button.ForeColor = t.TextPrimary;
+    }
+
     private RoundedButton CreateDeliveredButton(string text, int top, DeliveredSurface surface)
     {
         var button = new RoundedButton
@@ -484,6 +501,7 @@ public sealed class ViewerForm : Form
             Location = new Point(PanelMargin, top),
             Enabled = _deliveredImages!.Resolve(surface) is not null
         };
+        StyleSecondaryButton(button);
         button.Click += (_, _) => OnDeliveredButtonClicked(surface);
         _pnlSide.Controls.Add(button);
         return button;

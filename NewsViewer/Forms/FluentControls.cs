@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Drawing.Drawing2D;
+using NewsCentral.Ui;
 
 namespace NewsViewer.Forms;
 
@@ -29,6 +30,35 @@ internal sealed class Theme
     internal Color OnlineFg { get; init; }
     internal Color OfflineFg { get; init; }
 
+
+    // Countdown progress bar. Unset (the built-in palettes) = the border colour for the track and the
+    // accent for the fill, exactly as the poster always drew them; the frame palette sets both explicitly.
+    private Color? _progressTrack;
+    private Color? _progressFill;
+    internal Color ProgressTrack { get => _progressTrack ?? Border; init => _progressTrack = value; }
+    internal Color ProgressFill { get => _progressFill ?? Accent; init => _progressFill = value; }
+
+    private static Rgb ToRgb(Color c) => new(c.R, c.G, c.B);
+    private static Color ToColor(Rgb c) => Color.FromArgb(c.R, c.G, c.B);
+
+    /// <summary>The chrome colours the frame settings can change (see <see cref="FramePaletteBuilder"/>).</summary>
+    internal ChromePalette ToChrome() => new(
+        ToRgb(PanelBg), ToRgb(Surface), ToRgb(SurfaceHover), ToRgb(SurfacePress), ToRgb(Border),
+        ToRgb(BorderHover), ToRgb(BorderPress), ToRgb(Accent), ToRgb(AccentPaused), ToRgb(TextPrimary),
+        ToRgb(TextSecondary), ToRgb(WindowFrame), ToRgb(FrameEdge), ToRgb(ProgressTrack), ToRgb(ProgressFill));
+
+    /// <summary>A copy of this theme with the chrome colours of <paramref name="p"/>; Stage and the
+    /// online/offline colours are kept.</summary>
+    internal Theme WithChrome(ChromePalette p) => new()
+    {
+        PanelBg = ToColor(p.PanelBg), Surface = ToColor(p.Surface), SurfaceHover = ToColor(p.SurfaceHover),
+        SurfacePress = ToColor(p.SurfacePress), Border = ToColor(p.Border), BorderHover = ToColor(p.BorderHover),
+        BorderPress = ToColor(p.BorderPress), Accent = ToColor(p.Accent), AccentPaused = ToColor(p.AccentPaused),
+        TextPrimary = ToColor(p.TextPrimary), TextSecondary = ToColor(p.TextSecondary),
+        Stage = Stage, WindowFrame = ToColor(p.WindowFrame), FrameEdge = ToColor(p.FrameEdge),
+        OnlineFg = OnlineFg, OfflineFg = OfflineFg,
+        ProgressTrack = ToColor(p.ProgressTrack), ProgressFill = ToColor(p.ProgressFill)
+    };
     internal const int Radius = 0;
 
     internal static readonly Theme Light = new()
@@ -74,6 +104,13 @@ internal sealed class Theme
     // Declared AFTER Light/Dark: static initializers run in textual order, so Dark must
     // already exist when this default is evaluated. Program.cs overwrites it at startup.
     internal static Theme Current { get; set; } = Dark;
+
+    /// <summary>
+    /// The palette of the POSTER window only: <see cref="Current"/> with the fleet-wide frame colours
+    /// (Ui:FrameColor / Ui:FrameTextColor) applied. The same object as <see cref="Current"/> when no frame
+    /// colour is configured, so the default look is untouched. The notification form never uses it.
+    /// </summary>
+    internal static Theme Poster { get; set; } = Dark;
 
     internal static GraphicsPath RoundedRect(Rectangle r, int radius)
     {
