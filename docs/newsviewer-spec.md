@@ -53,22 +53,41 @@ NewsService does not filter by content type — NewsViewer decides relevance. Th
 | 4 | no selected poster item (or unusable image / no qualifying monitor) | `Exit(NoContent)` |
 | 5 | session not visible: not `WTSActive`, not unlocked, or the input desktop is not `Default` (any failure counts as not visible) | `Exit(NotVisible)` |
 | 6 | `--trigger content` and idle > 2 minutes (`LaunchDecider.IdleThreshold`; `GetLastInputInfo`, wrap-safe) | `Exit(Idle)` |
-| 7 | busy: `SHQueryUserNotificationState` is NOT_PRESENT, BUSY, RUNNING_D3D_FULL_SCREEN, PRESENTATION_MODE or APP (`QUIET_TIME` and `ACCEPTS_NOTIFICATIONS` are not busy; a failed call is not busy) | `Exit(Busy)` |
+| 7 | busy: `SHQueryUserNotificationState` is NOT_PRESENT, BUSY, RUNNING_D3D_FULL_SCREEN, PRESENTATION_MODE or APP (`QUIET_TIME` and `ACCEPTS_NOTIFICATIONS` are not busy; a failed call is not busy), **or** the full-screen-foreground heuristic below | `Exit(Busy)` |
 | 8 | daily gate not hit, or `BypassDailyGate` | `FullPoster` (gate consumed as before) |
 | 9 | `Ui:NotifyNewContent` = false | `Exit(NotifyDisabled)` |
 | 10 | marker empty (first run after upgrade) | marker := current key, `Exit(MarkerInitialized)` — no notification for a poster the user already saw |
 | 11 | marker = current key | `Exit(AlreadySeen)` |
-| 12 | otherwise | `MiniForm(key, title)` |
+| 12 | otherwise | `MiniForm(key, title)` — the "News arrived!" notification (see below) |
 
 Rules 5–7 also guard the full poster: it is never shown behind a locked screen, on the secure desktop, to an away user on content arrival, or over a presentation. The gate is not consumed in those cases, so a later trigger retries. Every exit still performs the wallpaper style re-assert, as before.
 
 **Marker.** `ContentKey` = presentation id + version + image hash (`ContentKeys.For`), so it changes when an item is republished or its image is replaced. The per-user marker ("last content this user saw or was notified about") is stored as `lastContentKey` in `%LOCALAPPDATA%\NewsCentral\viewerstate.json` next to the gate state (atomic temp-file write; the gate update preserves it). It is written when the full poster is displayed (including `--manual`) and for `MarkerInitialized`. **Until the mini form lands (M3), rule 12 only records `MiniForm (pending M3)` in the launch log and does not write the marker.**
 
-**Launch log.** `%LOCALAPPDATA%\NewsCentral\launch.log` — one line per launch: ISO timestamp, `trigger=content|none`, `decision=`, `reason=`, `key=`, and `title=` (MiniForm only). Capped at 64 KB (the newest half is kept); I/O never throws; no user names or paths.
+**Busy rule — full-screen foreground heuristic.** `SHQueryUserNotificationState` does not report browser full screen (F11, full-screen video) as busy, so `IsBusy()` also checks the foreground window (`FullScreenHeuristic`, pure, in `NewsCentral.Shared`; the P/Invoke gathering is in `LaunchProbes`): busy when the window rectangle covers the **whole monitor** (`rcMonitor` of `MonitorFromWindow(MONITOR_DEFAULTTONEAREST)`, not the work area) **and** `IsZoomed` is false. Not busy: no foreground window, a window of this process, the desktop/shell classes `Progman`, `WorkerW` and `Shell_TrayWnd`, a **maximized** window (it can cover the monitor when the taskbar auto-hides), a window that only fills the work area, and any failure of the calls. Busy = the notification-state rule OR this rule; it applies to every non-manual launch (full poster and notification alike).
 
-**Debug builds only:** `--reset-launch-state` clears this user's gate state, marker and launch log, then exits.
+**Launch log.** `%LOCALAPPDATA%\NewsCentral\launch.log` — one line per launch: ISO timestamp, `trigger=content|none`, `decision=`, `reason=`, `key=`, and `title=` (MiniForm only). `key=` is the content key exactly as stored in `viewerstate.json` (its own `|` separators intact). When a notification form closes, a second line is appended: `decision=MiniForm | reason=Outcome | key=… | outcome=Expanded|Dismissed|TimedOut`. A failure before the form is shown logs `decision=MiniForm | reason=Error(<exception type>)` and writes no marker. Capped at 64 KB (the newest half is kept); I/O never throws; no user names or paths.
+
+**Debug builds only:** `--reset-launch-state` clears this user's gate state, marker and launch log, then exits. `--test-notify` shows the notification for the currently selected item, bypassing the decision; it writes no marker and no telemetry (an Expanded poster included), logs `decision=MiniForm reason=Test` plus the outcome line, and combines with `--culture`.
+
+### New-content notification
+
+When the decision is `MiniForm`, NewsViewer shows a small "News arrived!" form instead of the full poster (`NotificationForm`, countdown/outcome rules in the pure `NotificationCountdown`).
+
+- **Appearance.** About 320×72 DIPs (scaled for the system DPI), borderless, accent stripe on the leading edge, `Theme.Current` colors and fonts. Line 1: the localized heading `NotifyHeading` ("News arrived!", bold). Line 2: the poster title with an ellipsis (`NotifyTitleFallback`, "Today's news", when empty). A close × at the top-right; the cursor is a hand over the whole form.
+- **Placement.** Primary monitor's working area, 5 DIPs from the bottom-right corner (`NotificationPlacement`). Under a right-to-left UI culture (Arabic) the form is mirrored: bottom-left, stripe and × on the mirrored sides.
+- **No focus.** `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST`, `ShowWithoutActivation`, `ShowInTaskbar = false`: the form never takes focus or keystrokes and has no taskbar button.
+- **Timing.** 60 s (`NotificationCountdown.NotifyDurationSeconds`, a code constant). The countdown is paused while the mouse is over the form (polled against the form bounds on each one-second tick) and while the session is locked (`WTSRegisterSessionNotification` + `WM_WTSSESSION_CHANGE` lock/unlock, unregistered on close). It disappears silently on timeout.
+- **Outcomes.** Click anywhere except × → **Expanded**: the form closes and the standard poster form opens for the **same item the decision chose** (no re-selection) with the countdown already stopped (the path the delivered-image buttons use; the daily gate is not stamped again). × → **Dismissed**. Countdown reaches 0 → **TimedOut**.
+- **Marker.** `lastContentKey` is written in the form's `Shown` handler, i.e. only once the form is actually on screen. A form that fails to show leaves the marker untouched, so the notification is retried by the next trigger.
+- **Process lifetime.** The process, and with it the single-instance mutex, stays alive while the notification (and, after Expanded, the poster) is open; a launch in that window logs `AlreadyRunning`. The wallpaper style re-assert runs after the form closes.
+- **Tracking.** See "Session Telemetry" below.
+
+**Behavior note — the marker holds only the last item.** The marker is the single most recently notified/seen content key, not a history. If an older item becomes the selected poster again (newly assigned or republished) it is a different key from the marker and notifies again.
 
 ### Known limitations
+
+The notification is shown on the **primary monitor only**.
 
 If new content arrives while the user is away from an unlocked workstation, the arrival notification is skipped. It is picked up at the next workstation unlock, session connect, or new content arrival, whichever comes first. A user who never locks their workstation may therefore not be notified of an item until the next one arrives; the notification then shows the newest item.
 
@@ -280,3 +299,18 @@ Config (`Delivery` section, NewsViewer): `WallpaperStyle` (default `Fit`), `Wall
 ## Session Telemetry
 
 Writes `session-{guid}.json` to `%programdata%\NewsCentral\uploads\` at session end. The record is a `NewsCentral.Models.SessionTelemetry` instance (defined in `NewsCentral.Shared`); `TelemetryWriter` signs it via `HmacService` before serializing to disk.
+
+### Notification records
+
+The "News arrived!" notification is tracked through the same session-file mechanism and the same gates (HMAC signing in `TelemetryWriter`; `Telemetry:UploadEnabled` and the retention sweep in NewsService) — there is no new upstream channel or setting. `SessionTelemetry` gained three **optional** fields that are omitted from the JSON when null, so the signed form of an ordinary poster record is unchanged:
+
+| Field | Meaning |
+|---|---|
+| `recordType` | `"notification"` for a notification record; absent for a poster display session |
+| `source` | `"notification"` on a poster display that was opened by expanding a notification; absent otherwise |
+| `contentKey` | the content key (`presentationId|vN|imageHash`) of a notification record |
+
+- **Notification record** (one per *shown* form): `recordType = "notification"`, `presentationId`, `teamId`, `contentKey`, `sessionStartTime` = shown, `sessionEndTime` = outcome time (time to outcome = the difference, hover and lock pauses included), `closeReason` = `Expanded` | `Dismissed` | `TimedOut`.
+- **Expanded** additionally produces the normal poster display record (same shape, its own `closeReason` as today) with `source = "notification"`.
+- `--test-notify` and `--manual` produce no notification records (`--manual` keeps its existing tracking).
+- **Rollout order.** An older NewsService verifying the HMAC of a notification record or a `source`-marked poster record deserializes without the new fields and computes a different signature, so it discards those records as invalid. Roll NewsService out before (or with) NewsViewer when HMAC is configured; ordinary poster records are unaffected either way.
