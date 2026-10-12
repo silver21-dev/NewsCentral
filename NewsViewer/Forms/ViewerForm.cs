@@ -3,6 +3,7 @@ using System.Globalization;
 using NewsCentral.Configuration;
 using NewsCentral.Models;
 using NewsCentral.Models.IndexFile;
+using NewsCentral.Ui;
 using NewsViewer.Resources;
 using NewsViewer.Services;
 
@@ -195,25 +196,27 @@ public sealed class ViewerForm : Form
         _pnlSide.Controls.Add(lblWordmark);
 
         // Status pill — rounded surface chip; the text is drawn in its Paint handler so no
-        // opaque child rectangle can cover the rounded corners.
+        // opaque child rectangle can cover the rounded corners. With a frame colour configured the chip follows
+        // the palette's card shade; the status colour is kept (PillColors.Resolve) except for text that would
+        // fall below 4.5:1 on that card. Without one it is drawn exactly as before.
         var statusText = _isOnline ? UiStrings.Online : UiStrings.Offline;
-        var statusColor = _isOnline ? Theme.Current.OnlineFg : Theme.Current.OfflineFg;
+        var statusRgb = Theme.ToRgb(_isOnline ? Theme.Current.OnlineFg : Theme.Current.OfflineFg);
+        var pill = PillColors.Resolve(Theme.Poster.ToChrome(), Theme.Current.ToChrome(), statusRgb);
+        var statusColor = Theme.ToColor(pill.Text);
+        var dotColor = Theme.ToColor(pill.Dot);
         var pillFont = Ui.Font(8.5f);
         var statusPill = new RoundedPanel
         {
             Radius = 10,
-            FillColor = Theme.Current.Surface,
-            BorderColor = Theme.Current.Border,
+            FillColor = Theme.ToColor(pill.Fill),
+            BorderColor = Theme.ToColor(pill.Border),
             Location = new Point(PanelMargin, 48),
             Size = new Size(TextRenderer.MeasureText(statusText, pillFont).Width + 20, 22)
         };
         statusPill.Left = (SidePanelWidth - statusPill.Width) / 2;   // centered under the wordmark
         statusPill.Paint += (_, e) =>
-        {
-            var pillFlags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter;
-            if (statusPill.RightToLeft == RightToLeft.Yes) pillFlags |= TextFormatFlags.RightToLeft;
-            TextRenderer.DrawText(e.Graphics, statusText, pillFont, statusPill.ClientRectangle, statusColor, pillFlags);
-        };
+            DrawPillText(e.Graphics, statusText, pillFont, statusPill.ClientRectangle, statusColor, dotColor,
+                statusPill.RightToLeft == RightToLeft.Yes);
         _pnlSide.Controls.Add(statusPill);
 
         // Primary action — accent-filled Close.
@@ -474,6 +477,36 @@ public sealed class ViewerForm : Form
 
     // ── Delivered wallpaper / lock screen preview ─────────────────────────────
     // Purely local viewing: no telemetry, no viewerstate, no registry write. Poster telemetry is untouched.
+
+    // Draws the pill text. Normally one colour for the whole string (the status colour — the original look). When
+    // the text colour differs from the dot colour (low-contrast status colour on a framed card) the leading "●"
+    // keeps the status colour and the rest takes the text colour; the dot sits on the reading-order start side.
+    private static void DrawPillText(Graphics g, string text, Font font, Rectangle rect, Color textColor, Color dotColor, bool rtl)
+    {
+        var centered = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter;
+        if (rtl) centered |= TextFormatFlags.RightToLeft;
+
+        const string dot = "●";
+        if (textColor == dotColor || !text.StartsWith(dot, StringComparison.Ordinal))
+        {
+            TextRenderer.DrawText(g, text, font, rect, textColor, centered);
+            return;
+        }
+
+        var rest = text.Substring(dot.Length).TrimStart();
+        var measure = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+        int dotW = TextRenderer.MeasureText(g, dot, font, Size.Empty, measure).Width;
+        int gap = TextRenderer.MeasureText(g, " ", font, Size.Empty, measure).Width;
+        int restW = TextRenderer.MeasureText(g, rest, font, Size.Empty, measure).Width;
+        int x0 = rect.X + Math.Max(0, (rect.Width - (dotW + gap + restW)) / 2);
+        var line = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
+
+        var dotRect = rtl ? new Rectangle(x0 + restW + gap, rect.Y, dotW, rect.Height) : new Rectangle(x0, rect.Y, dotW, rect.Height);
+        var restRect = rtl ? new Rectangle(x0, rect.Y, restW, rect.Height) : new Rectangle(x0 + dotW + gap, rect.Y, restW, rect.Height);
+        TextRenderer.DrawText(g, dot, font, dotRect, dotColor, line | TextFormatFlags.Left);
+        TextRenderer.DrawText(g, rest, font, restRect, textColor,
+            line | (rtl ? TextFormatFlags.Right | TextFormatFlags.RightToLeft : TextFormatFlags.Left));
+    }
 
     // Secondary (ghost/surface) buttons take the poster palette: with a frame colour configured they follow
     // it (cards and their hover/press shades, text colour); without one Theme.Poster is Theme.Current and

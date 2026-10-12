@@ -38,8 +38,8 @@ internal sealed class Theme
     internal Color ProgressTrack { get => _progressTrack ?? Border; init => _progressTrack = value; }
     internal Color ProgressFill { get => _progressFill ?? Accent; init => _progressFill = value; }
 
-    private static Rgb ToRgb(Color c) => new(c.R, c.G, c.B);
-    private static Color ToColor(Rgb c) => Color.FromArgb(c.R, c.G, c.B);
+    internal static Rgb ToRgb(Color c) => new(c.R, c.G, c.B);
+    internal static Color ToColor(Rgb c) => Color.FromArgb(c.R, c.G, c.B);
 
     /// <summary>The chrome colours the frame settings can change (see <see cref="FramePaletteBuilder"/>).</summary>
     internal ChromePalette ToChrome() => new(

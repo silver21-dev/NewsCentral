@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
 using NewsCentral.Launch;
+using NewsCentral.Ui;
 using NewsViewer.Resources;
 
 namespace NewsViewer.Forms;
@@ -26,6 +27,9 @@ internal sealed partial class NotificationForm : Form
     private readonly string _title;
     private readonly Action? _onShown;
     private readonly bool _rtl;
+    // The poster palette (the theme plus the frame colours); exactly the theme when none is configured.
+    private readonly NotificationColors _colors =
+        NotificationColors.From(Theme.Poster.ToChrome(), Theme.Current.ToChrome());
     private readonly int _dpi;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 1000 };
     private readonly ToolTip _toolTip = new();
@@ -63,7 +67,7 @@ internal sealed partial class NotificationForm : Form
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
         DoubleBuffered = true;
-        BackColor = Theme.Current.PanelBg;
+        BackColor = Theme.ToColor(_colors.Background);
         Cursor = Cursors.Hand;
         Text = "NewsViewer";
 
@@ -195,15 +199,15 @@ internal sealed partial class NotificationForm : Form
     {
         base.OnPaint(e);
         var g = e.Graphics;
-        var theme = Theme.Current;
+        var c = _colors;
         int w = ClientSize.Width, h = ClientSize.Height;
 
-        using (var border = new Pen(theme.Border))
+        using (var border = new Pen(Theme.ToColor(c.Border)))
             g.DrawRectangle(border, 0, 0, w - 1, h - 1);
 
         // Accent stripe on the leading edge.
         int stripe = Px(4);
-        using (var accent = new SolidBrush(theme.Accent))
+        using (var accent = new SolidBrush(Theme.ToColor(c.Accent)))
             g.FillRectangle(accent, _rtl ? w - stripe : 0, 0, stripe, h);
 
         // Text column: between the stripe and the close button.
@@ -219,19 +223,19 @@ internal sealed partial class NotificationForm : Form
         using (var titleFont = Ui.Font(9.5f))
         {
             TextRenderer.DrawText(g, UiStrings.NotifyHeading, headingFont,
-                new Rectangle(column.X, Px(10), column.Width, Px(24)), theme.TextPrimary, flags);
+                new Rectangle(column.X, Px(10), column.Width, Px(24)), Theme.ToColor(c.Heading), flags);
             // The title is authored content: drawn with the same alignment but never forced right-to-left.
             var titleFlags = _rtl ? flags & ~TextFormatFlags.RightToLeft : flags;
             TextRenderer.DrawText(g, _title, titleFont,
-                new Rectangle(column.X, Px(38), column.Width, Px(24)), theme.TextSecondary, titleFlags);
+                new Rectangle(column.X, Px(38), column.Width, Px(24)), Theme.ToColor(c.Title), titleFlags);
         }
 
         // Close ×
         if (_closeHover)
-            using (var hover = new SolidBrush(theme.SurfaceHover))
+            using (var hover = new SolidBrush(Theme.ToColor(c.CloseHoverFill)))
                 g.FillRectangle(hover, _closeRect);
         int pad = Px(9);
-        using (var pen = new Pen(_closeHover ? theme.TextPrimary : theme.TextSecondary, Math.Max(1, Px(1))))
+        using (var pen = new Pen(Theme.ToColor(_closeHover ? c.CloseIconHover : c.CloseIcon), Math.Max(1, Px(1))))
         {
             var r = Rectangle.Inflate(_closeRect, -pad, -pad);
             g.DrawLine(pen, r.Left, r.Top, r.Right - 1, r.Bottom - 1);

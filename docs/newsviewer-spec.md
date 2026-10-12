@@ -94,7 +94,7 @@ Arguments are case-insensitive; unknown arguments are ignored. The Debug-only sw
 
 When the decision is `MiniForm`, NewsViewer shows a small "News arrived!" form instead of the full poster (`NotificationForm`, countdown/outcome rules in the pure `NotificationCountdown`).
 
-- **Appearance.** About 320×72 DIPs (scaled for the system DPI), borderless, accent stripe on the leading edge, `Theme.Current` colors and fonts. Line 1: the localized heading `NotifyHeading` ("News arrived!", bold). Line 2: the poster title with an ellipsis (`NotifyTitleFallback`, "Today's news", when empty). A close × at the top-right; the cursor is a hand over the whole form.
+- **Appearance.** About 320×72 DIPs (scaled for the system DPI), borderless, accent stripe on the leading edge, the poster palette (`Theme.Poster`: the theme, with the fleet-wide frame colours applied when configured — see "Poster frame colours") and the standard fonts. Line 1: the localized heading `NotifyHeading` ("News arrived!", bold). Line 2: the poster title with an ellipsis (`NotifyTitleFallback`, "Today's news", when empty). A close × at the top-right; the cursor is a hand over the whole form.
 - **Placement.** Primary monitor's working area, 5 DIPs from the bottom-right corner (`NotificationPlacement`). Under a right-to-left UI culture (Arabic) the form is mirrored: bottom-left, stripe and × on the mirrored sides.
 - **No focus.** `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST`, `ShowWithoutActivation`, `ShowInTaskbar = false`: the form never takes focus or keystrokes and has no taskbar button.
 - **Timing.** 60 s (`NotificationCountdown.NotifyDurationSeconds`, a code constant). The countdown is paused while the mouse is over the form (polled against the form bounds on each one-second tick) and while the session is locked (`WTSRegisterSessionNotification` + `WM_WTSSESSION_CHANGE` lock/unlock, unregistered on close). It disappears silently on timeout.
@@ -236,9 +236,13 @@ case), default empty:
 
 **Affected:** the side panel and everything painted on it that is text or a card (wordmark, the "Click to see
 more information" button, the countdown card with its label, number and progress bar, the Wallpaper and Lock
-screen buttons), the title bar and its poster text, the thick outer border and its thin edge lines.
-**Not affected:** the Close (accent) button, the Online/Offline pill, the image area, the notification
-("News arrived!") form — it keeps the theme — and the Virtual Desktop background colour.
+screen buttons), the title bar and its poster text, the thick outer border and its thin edge lines, the
+Online/Offline status pill (its background follows the card shade; see below) and the **"News arrived!"
+notification form** (background = the frame colour, heading and title = the primary text colour, the close ×
+and its hover shade and the border from the derived shades; the accent stripe, placement, size and behaviour
+are unchanged).
+**Not affected:** the Close (accent) button, the image area, the green/red status dot, the accent colours, and
+the Virtual Desktop background colour.
 
 **Derivation** (`FramePaletteBuilder`, pure, in `NewsCentral.Shared`; the same rules apply on every poster
 path: scheduled, `--manual`, the Expanded notification, on a Virtual Desktop and on its remote-session
@@ -257,7 +261,14 @@ fallback; RTL layout is unaffected):
   paused state = text blended 60% toward the card.
 - **Hairlines and edge** — the separator line, card borders and the thin outer edge lines are `FrameColor`
   shifted 22% / 30% toward the same extreme.
-
+- **Notification form** — `NotificationColors`: background = `FrameColor`, border = the hairline shade, heading and
+  title = primary text (with no frame colour the title keeps the theme's dimmer secondary colour, exactly as
+  before), × = secondary text and primary text on hover, hover fill = the card hover shade, accent stripe =
+  the accent. With no usable frame colour it is exactly the theme look.
+- **Online/Offline pill** — `PillColors`: background and border follow the card shade and hairline; the dot keeps
+  its green/red status colour, and so does the text unless that colour has less than 4.5:1 contrast on the card,
+  in which case the text uses the primary text colour (the dot stays green/red). With no frame colour the pill is
+  drawn exactly as before, whatever its contrast.
 **Fallbacks** — nothing throws, and a problem never blocks the poster:
 
 - No `FrameColor` (or whitespace): the poster looks exactly as before; the palette **is** the theme.
@@ -265,7 +276,7 @@ fallback; RTL layout is unaffected):
   falls back to the theme, and the launch's `launch.log` line gets `note=FrameColorInvalid`.
 - Invalid `FrameTextColor` with a valid `FrameColor`: the automatic black/white colour is used and the line
   gets `note=FrameTextColorInvalid`. Both notes can appear together (joined with `,`, after
-  `VirtualDesktopFallback` if present).
+  `VirtualDesktopFallback` if present). The notes are appended to every decision line of that launch, notification (`MiniForm`) lines included.
 
 **Setting it** (`Set-RegistryOverrides.ps1`, NewsViewer only; values are validated as `#RRGGBB`, an empty
 string removes the value):
