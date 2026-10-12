@@ -61,3 +61,9 @@
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+###############################################################################
+# Scheduled task definitions are UTF-16 LE with BOM and CRLF (the encoding schtasks
+# /create /xml expects): never normalize or re-encode them.
+###############################################################################
+deploy/scheduled-tasks/*.xml binary
