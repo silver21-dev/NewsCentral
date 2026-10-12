@@ -448,6 +448,16 @@ Model: `NewsCentral.Models.SessionTelemetry` (in `NewsCentral.Shared`; implement
 
 `CloseReason` values: `Timeout`, `UserClose`, `UrlLaunch`
 
+**Optional fields (omitted from the JSON when null, so an ordinary poster record's signed form is unchanged):**
+
+| Field | Meaning |
+|---|---|
+| `RecordType` | `"notification"` for a "News arrived!" notification record; absent for a poster display session |
+| `Source` | `"notification"` on a poster display opened by expanding a notification; absent otherwise |
+| `ContentKey` | content key (`presentationId\|vN\|imageHash`) of a notification record |
+
+A notification record reuses `SessionStartTime` (shown), `SessionEndTime` (outcome) and `CloseReason` (`Expanded`, `Dismissed` or `TimedOut`), so it is distinguishable **only** by `RecordType`. **Any consumer that counts or reports poster sessions must exclude `RecordType == "notification"`**, otherwise notifications are counted as poster displays and an Expanded notification is counted twice (its notification record plus the poster display record with `Source == "notification"`). Today nothing in the solution aggregates these records: NewsService's `TelemetryUploader` only verifies the HMAC and copies the file unchanged, and the authoring app does not read `uploads\`. See `docs/newsviewer-spec.md` ("Notification records").
+
 `Signature` is set by `TelemetryWriter` in NewsViewer immediately before writing the file. `TelemetryUploader` in NewsService verifies it before forwarding to the repository; files with `Invalid` signatures are discarded and logged.
 
 ## Cache Folder Structure

@@ -22,7 +22,7 @@ public class SessionTelemetry : ISignable
     // form of an ordinary poster record is byte-identical to what it was before they existed: existing
     // signatures stay valid and an older reader simply never sees them.
 
-    /// <summary>Null = a poster display session; "notification" = a "News arrived!" notification record
+    /// <summary>Null = a poster display session; "notification" = a "News arrived!" notification record. Consumers counting poster sessions MUST exclude "notification" records
     /// (SessionStartTime = shown, SessionEndTime = outcome, CloseReason = Expanded | Dismissed | TimedOut).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RecordType { get; set; }
