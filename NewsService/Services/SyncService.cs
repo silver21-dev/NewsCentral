@@ -70,6 +70,11 @@ public sealed class SyncService(
     // when that hash finally completes. Singleton + sequential cycles, so a plain Dictionary is safe.
     private readonly Dictionary<string, string> _incompleteHash = new(StringComparer.OrdinalIgnoreCase);
 
+    // Per team: the IndexHash for which cache self-heal found images it could not restore, so the
+    // Warning is raised once per team and hash and repeats drop to Debug. Cleared when a heal
+    // succeeds or the hash changes.
+    private readonly Dictionary<string, string> _unhealableHash = new(StringComparer.OrdinalIgnoreCase);
+
     public async Task RunCycleAsync(string[] teams, CancellationToken ct)
     {
         bool online = false;
@@ -279,8 +284,11 @@ public sealed class SyncService(
         if (!indexChanged)
         {
             logger.LogDebug("Team {Team}: index unchanged", teamFolder);
-            return false;
+            await SelfHealCacheAsync(teamFolder, cachedIndex!, ct);
+            return false;   // a heal is not a content change: no index rewrite, no notification
         }
+
+        _unhealableHash.Remove(teamFolder);
 
         logger.Log(retryOfIncomplete ? LogLevel.Debug : LogLevel.Information,
             "Team {Team}: index changed — syncing {Count} assignment(s)",
@@ -314,6 +322,55 @@ public sealed class SyncService(
         _incompleteHash.Remove(teamFolder);
         logger.LogInformation("Team {Team}: sync complete", teamFolder);
         return true;
+    }
+
+    /// <summary>
+    /// Unchanged-index path: checks locally (no repository access) that every image the cached index
+    /// references is still in the cache, and re-fetches only the missing ones through the normal
+    /// per-image sync. Covers files removed locally (antivirus quarantine, cleanup tools) that would
+    /// otherwise stay missing until the next publish. Never throws except for cancellation.
+    /// </summary>
+    private async Task SelfHealCacheAsync(string teamFolder, TeamIndexFile cachedIndex, CancellationToken ct)
+    {
+        try
+        {
+            var missing = cachedIndex.PublishedAssignments
+                .Where(a => !string.IsNullOrEmpty(a.Content.ImagePath) && !cache.FileExists(a.Content.ImagePath))
+                .ToList();
+            if (missing.Count == 0) return;
+
+            var restored = new List<string>();
+            var failed   = new List<string>();
+            foreach (var assignment in missing)
+            {
+                ct.ThrowIfCancellationRequested();
+                (await SyncImageAsync(teamFolder, assignment, ct) ? restored : failed).Add(assignment.Content.ImagePath);
+            }
+
+            if (restored.Count > 0)
+                logger.LogWarning("Team {Team}: cache self-heal restored {Count} image(s): {Images}",
+                    teamFolder, restored.Count, string.Join(", ", restored));
+
+            if (failed.Count == 0)
+            {
+                _unhealableHash.Remove(teamFolder);
+                return;
+            }
+            ReportUnhealable(teamFolder, cachedIndex.IndexHash, string.Join(", ", failed));
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            ReportUnhealable(teamFolder, cachedIndex.IndexHash, ex.Message);
+        }
+    }
+
+    private void ReportUnhealable(string teamFolder, string indexHash, string detail)
+    {
+        bool repeat = _unhealableHash.TryGetValue(teamFolder, out var known) && known == indexHash;
+        _unhealableHash[teamFolder] = indexHash;
+        logger.Log(repeat ? LogLevel.Debug : LogLevel.Warning,
+            "Team {Team}: cache self-heal could not restore: {Detail}", teamFolder, detail);
     }
 
     /// <summary>True when the image is cached and current (or the assignment has none); false when it could not be downloaded or cached.</summary>
