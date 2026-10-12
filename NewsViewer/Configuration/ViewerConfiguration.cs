@@ -34,6 +34,13 @@ public class UiSection
     /// NewsService currently delivers. Theme is read ad hoc in Program.cs and is not on this POCO.
     /// </summary>
     public bool ShowDeliveredImages { get; set; } = false;
+
+    /// <summary>
+    /// Registry <c>Ui\NotifyNewContent</c> (DWORD 0/1). Default <c>true</c>. When <c>true</c>, new
+    /// content arriving after today's poster was already shown triggers a "News arrived!" notification
+    /// (decided in LaunchDecision). <c>false</c> = previous behavior: silent exit.
+    /// </summary>
+    public bool NotifyNewContent { get; set; } = true;
 }
 
 public class DisplaySection

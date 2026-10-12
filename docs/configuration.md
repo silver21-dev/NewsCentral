@@ -95,6 +95,7 @@ HKLM\Software\[Company]\NewsCentral\NewsViewer\
 ├── Ui\
 │       Theme   REG_SZ   ("Dark" | "Light"; default Dark — viewer color theme, resolved once at launch; "light" case-insensitive selects Light, anything else Dark; registry-only, no appsettings key)
 │       ShowDeliveredImages   REG_DWORD   (0/1; default 0 - poster form offers Wallpaper / Lock screen buttons for the image NewsService delivers; read-only reads of NewsService\Delivery flags are an exception to the own-subkey rule - see docs/newsviewer-spec.md)
+│       NotifyNewContent   REG_DWORD   (0/1; default 1 - show a "News arrived!" notification when new content arrives after today's poster was shown; 0 = silent exit as before)
 ├── Hmac\
 │       SecretKey   REG_SZ
 ├── Signing\

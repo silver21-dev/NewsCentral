@@ -135,6 +135,9 @@ public static class ConfigManifests
             Key("Ui:ShowDeliveredImages", "false", @"Ui\ShowDeliveredImages", RegistryValueType.Dword,
                 ControlKind.Toggle, OverridableState.Overridable,
                 "true | false (registry: DWORD 0/1); true = the poster form shows Wallpaper / Lock screen buttons that display the image NewsService currently delivers (each enabled only when its Delivery:WallpaperEnabled / Delivery:LockScreenEnabled flag is on and the PersonalizationCSP file exists)"),
+            Key("Ui:NotifyNewContent", "true", @"Ui\NotifyNewContent", RegistryValueType.Dword,
+                ControlKind.Toggle, OverridableState.Overridable,
+                "true | false (registry: DWORD 0/1); true = show a 'News arrived!' notification when new content arrives after today's poster was shown. false = previous behavior (silent exit)."),
         }
     };
 

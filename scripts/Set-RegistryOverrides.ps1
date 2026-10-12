@@ -90,6 +90,7 @@
     ├── Ui\
     │       Theme                   REG_SZ   "Dark" or "Light"
     │       ShowDeliveredImages     DWORD    (1 = poster form offers Wallpaper / Lock screen buttons; default 0)
+    │       NotifyNewContent        DWORD    (0 = no "News arrived!" notification; default 1)
     ├── Delivery\
     │       WallpaperStyle              REG_SZ   (style only — the image is NewsService/CSP-owned)
     │       WallpaperBackgroundColor    REG_SZ
@@ -268,6 +269,11 @@
 .PARAMETER ShowDeliveredImages
     When $true, the NewsViewer poster form shows Wallpaper / Lock screen buttons that display the image
     NewsService currently delivers (Ui\ShowDeliveredImages, DWORD 0/1). Default false. NewsViewer only.
+
+.PARAMETER NotifyNewContent
+    When $false, NewsViewer does not show the "News arrived!" notification when new content arrives
+    after today's poster was shown (previous behavior: silent exit). Ui\NotifyNewContent, DWORD 0/1.
+    Default true. NewsViewer only.
 
 .PARAMETER TelemetryUploadEnabled
     When bound, sets Telemetry:UploadEnabled — $false stops forwarding session
@@ -468,6 +474,7 @@ param(
     [string] $Theme,
 
     [Nullable[bool]] $ShowDeliveredImages,
+    [Nullable[bool]] $NotifyNewContent,
 
     [Nullable[bool]] $Active,
 
@@ -500,7 +507,7 @@ $newParameterNames = @(
     "DefaultLockScreenPath", "PublishedImagePath", "LockScreenEnabled", "WallpaperEnabled",
     "DefaultWallpaperPath", "WallpaperStyle", "WallpaperBackgroundColor",
     "LogicalDayStartHour", "Theme", "TelemetryUploadEnabled", "LogLevel", "EventLogLevel",
-    "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages"
+    "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages", "NotifyNewContent"
 )
 
 # Full parameter -> allowed-component map for the two fleet components. Covers every
@@ -525,7 +532,7 @@ $componentAllowedParams = @{
         "AzureTenantId", "AzureClientId", "AzureAccountName", "AzureContainerName",
         "AzureAuthMode", "AzureCertificateThumbprint", "AzureClientSecret", "AzureUseWinHttpProxy",
         "BypassDailyGate", "BypassImageIntegrityCheck", "LogicalDayStartHour", "Theme",
-        "WallpaperStyle", "WallpaperBackgroundColor", "Active", "ShowDeliveredImages"
+        "WallpaperStyle", "WallpaperBackgroundColor", "Active", "ShowDeliveredImages", "NotifyNewContent"
     )
 }
 
@@ -897,6 +904,10 @@ if ($PSBoundParameters.ContainsKey("Theme")) {
 if ($PSBoundParameters.ContainsKey("ShowDeliveredImages")) {
     $dword = if ($ShowDeliveredImages) { 1 } else { 0 }
     Set-RegValue -Path "$base\Ui" -Name "ShowDeliveredImages" -Value $dword -Type DWord
+}
+if ($PSBoundParameters.ContainsKey("NotifyNewContent")) {
+    $dword = if ($NotifyNewContent) { 1 } else { 0 }
+    Set-RegValue -Path "$base\Ui" -Name "NotifyNewContent" -Value $dword -Type DWord
 }
 
 # ── Telemetry\ ───────────────────────────────────────────────────────────────

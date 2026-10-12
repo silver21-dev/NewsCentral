@@ -401,6 +401,7 @@ HKLM\Software\{Company}\NewsCentral\NewsViewer\
 ├── Ui\
 │       Theme                   REG_SZ   "Dark" | "Light"
 │       ShowDeliveredImages      REG_DWORD  0/1 (default 0; Wallpaper / Lock screen buttons on the poster form)
+│       NotifyNewContent         REG_DWORD  0/1 (default 1; "News arrived!" notification on new content)
 │
 ├── Signing\
 │       RequireSignedIndex      REG_SZ   "false"
