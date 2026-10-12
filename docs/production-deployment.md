@@ -488,6 +488,53 @@ Other silent-failure candidates, in order of likelihood:
 > gate by deleting `%LOCALAPPDATA%\NewsCentral\viewerstate.json`. EventLog logging for NewsViewer is a
 > planned follow-up (`docs/packaging.md`).
 
+### 8.4 Verbose logging for troubleshooting
+
+NewsService logs its per-cycle detail (index unchanged, image up to date, retries of an incomplete sync,
+cache self-heal repeats) at **Debug**, which is off by default (`Logging:LogLevel:Default` = `Information`).
+NewsViewer has no logging to raise.
+
+**Dev box** — an environment variable; the `__` maps to `:`, and the category prefix `NewsService` covers
+every `NewsService.*` logger without turning on framework noise:
+
+```
+set Logging__LogLevel__NewsService=Debug
+dotnet run --project NewsService
+```
+
+`dotnet run` starts in the **Production** environment (NewsService ships no `launchSettings.json`) unless
+`DOTNET_ENVIRONMENT=Development` is set, so the built-in `appsettings.Development.json` mechanism is not
+used. The dev overlay file is nevertheless loaded explicitly and unconditionally when present (see below),
+so no environment switch is needed for it.
+
+**Fleet** — the registry `Logging\` key, via the deployment script (REG_SZ, written under
+`HKLM\Software\{Company}\NewsCentral\NewsService\Logging\LogLevel`):
+
+```powershell
+.\scripts\Set-RegistryOverrides.ps1 -Company "<Company>" -ComponentName NewsService -LogLevel Debug
+# back to normal:
+.\scripts\Set-RegistryOverrides.ps1 -Company "<Company>" -ComponentName NewsService -LogLevel Information
+```
+
+The script only writes `Logging:LogLevel:Default`, which raises **every** category (including
+`Microsoft.*`) to Debug — expect a lot of output; restart the service afterwards and revert when done. A
+single-category value (`Logging\LogLevel\NewsService`, REG_SZ `Debug`) can be created by hand and is read
+the same way.
+
+**Precedence as implemented** (`NewsService/Program.cs`; later wins): `appsettings.json` →
+`appsettings.{Environment}.json` (host default) → environment variables → command-line arguments →
+`appsettings.Development.json` (explicit, optional) → **registry** (always last). So the registry beats
+the dev overlay, which beats an environment variable. Within the logging system itself, the **most specific
+matching category** wins regardless of source: a registry `Default=Warning` does not turn off an
+environment-variable `NewsService=Debug`, because they are different keys.
+
+**Where Debug appears.** The host's Console and Debug-output providers honour `Logging:LogLevel:*`
+(Console is only visible under `dotnet run`, not as a service). The **EventLog provider has its own
+minimum level**, `Logging:EventLog:LogLevel:Default` (shipped `Information`, `-EventLogLevel` in the
+script), which takes precedence over the general section for that provider — so Debug never reaches the
+Windows Event Log unless that value is lowered too. There is no file sink. The `ContentChanged` event
+(2001) is written directly and is unaffected by any of these levels.
+
 ---
 
 ## Upgrading an existing installation
