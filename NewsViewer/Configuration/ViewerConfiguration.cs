@@ -41,6 +41,20 @@ public class UiSection
     /// (decided in LaunchDecision). <c>false</c> = previous behavior: silent exit.
     /// </summary>
     public bool NotifyNewContent { get; set; } = true;
+
+    /// <summary>
+    /// Registry <c>Ui\FrameColor</c> (REG_SZ, <c>#RRGGBB</c>). Colour of the poster window's side panel,
+    /// title bar and outer border. Empty/absent = the theme's colours. An invalid value falls back to the
+    /// theme and is noted in the launch log (<c>FrameColorInvalid</c>).
+    /// </summary>
+    public string? FrameColor { get; set; }
+
+    /// <summary>
+    /// Registry <c>Ui\FrameTextColor</c> (REG_SZ, <c>#RRGGBB</c>). Text colour on the frame surfaces. Empty =
+    /// automatic black/white by contrast once <see cref="FrameColor"/> is set (ignored while it is not). An
+    /// invalid value alone falls back to the automatic colour (<c>FrameTextColorInvalid</c>).
+    /// </summary>
+    public string? FrameTextColor { get; set; }
 }
 
 public class DisplaySection

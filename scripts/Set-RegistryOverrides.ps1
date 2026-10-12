@@ -92,6 +92,8 @@
     │       Theme                   REG_SZ   "Dark" or "Light"
     │       ShowDeliveredImages     DWORD    (1 = poster form offers Wallpaper / Lock screen buttons; default 0)
     │       NotifyNewContent        DWORD    (0 = no "News arrived!" notification; default 1)
+    │       FrameColor              REG_SZ   (#RRGGBB colour of the poster side panel, title bar and border; empty/absent = theme)
+    │       FrameTextColor          REG_SZ   (#RRGGBB text colour on those surfaces; empty/absent = automatic black/white)
     ├── Delivery\
     │       WallpaperStyle              REG_SZ   (style only — the image is NewsService/CSP-owned)
     │       WallpaperBackgroundColor    REG_SZ
@@ -270,6 +272,16 @@
 .PARAMETER ShowDeliveredImages
     When $true, the NewsViewer poster form shows Wallpaper / Lock screen buttons that display the image
     NewsService currently delivers (Ui\ShowDeliveredImages, DWORD 0/1). Default false. NewsViewer only.
+
+.PARAMETER FrameColor
+    Colour of the NewsViewer poster window's side panel, title bar and outer border, as #RRGGBB
+    (Ui\FrameColor, REG_SZ). An empty string removes the value (= theme colours). NewsViewer only.
+    Example: -FrameColor '#1E3A5F'
+
+.PARAMETER FrameTextColor
+    Text colour on those surfaces, as #RRGGBB (Ui\FrameTextColor, REG_SZ). An empty string removes the
+    value: with a FrameColor set the text is then black or white by contrast, otherwise the theme's.
+    Ignored while no FrameColor is set. NewsViewer only. Example: -FrameTextColor '#FFD700'
 
 .PARAMETER ShowInRemoteSessions
     When $false, NewsViewer exits silently (logged as RemoteSession) in remote sessions (RDP, Citrix, Horizon)
@@ -481,6 +493,19 @@ param(
 
     [Nullable[bool]] $ShowDeliveredImages,
     [Nullable[bool]] $NotifyNewContent,
+
+    # #RRGGBB or empty (empty removes the value). Anything else is rejected before any write.
+    [ValidateScript({
+        if ($_ -eq '' -or $_ -match '^#[0-9A-Fa-f]{6}$') { $true }
+        else { throw "-FrameColor must be #RRGGBB (e.g. '#1E3A5F') or an empty string to remove the value." }
+    })]
+    [string] $FrameColor,
+
+    [ValidateScript({
+        if ($_ -eq '' -or $_ -match '^#[0-9A-Fa-f]{6}$') { $true }
+        else { throw "-FrameTextColor must be #RRGGBB (e.g. '#FFD700') or an empty string to remove the value." }
+    })]
+    [string] $FrameTextColor,
     [Nullable[bool]] $ShowInRemoteSessions,
 
     [Nullable[bool]] $Active,
@@ -514,7 +539,7 @@ $newParameterNames = @(
     "DefaultLockScreenPath", "PublishedImagePath", "LockScreenEnabled", "WallpaperEnabled",
     "DefaultWallpaperPath", "WallpaperStyle", "WallpaperBackgroundColor",
     "LogicalDayStartHour", "Theme", "TelemetryUploadEnabled", "LogLevel", "EventLogLevel",
-    "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions"
+    "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions", "FrameColor", "FrameTextColor"
 )
 
 # Full parameter -> allowed-component map for the two fleet components. Covers every
@@ -539,7 +564,7 @@ $componentAllowedParams = @{
         "AzureTenantId", "AzureClientId", "AzureAccountName", "AzureContainerName",
         "AzureAuthMode", "AzureCertificateThumbprint", "AzureClientSecret", "AzureUseWinHttpProxy",
         "BypassDailyGate", "BypassImageIntegrityCheck", "LogicalDayStartHour", "Theme",
-        "WallpaperStyle", "WallpaperBackgroundColor", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions"
+        "WallpaperStyle", "WallpaperBackgroundColor", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions", "FrameColor", "FrameTextColor"
     )
 }
 
@@ -915,6 +940,19 @@ if ($PSBoundParameters.ContainsKey("ShowDeliveredImages")) {
 if ($PSBoundParameters.ContainsKey("ShowInRemoteSessions")) {
     $dword = if ($ShowInRemoteSessions) { 1 } else { 0 }
     Set-RegValue -Path "$base\Display" -Name "ShowInRemoteSessions" -Value $dword -Type DWord
+}
+foreach ($frameParam in @(
+        @{ Name = "FrameColor";     Value = $FrameColor },
+        @{ Name = "FrameTextColor"; Value = $FrameTextColor })) {
+    if ($PSBoundParameters.ContainsKey($frameParam.Name)) {
+        # An empty string removes the value (theme / automatic); anything else was validated as #RRGGBB.
+        if ([string]::IsNullOrEmpty($frameParam.Value)) {
+            Remove-RegValue -Path "$base\Ui" -Name $frameParam.Name
+        }
+        else {
+            Set-RegValue -Path "$base\Ui" -Name $frameParam.Name -Value $frameParam.Value.ToUpperInvariant() -Type String
+        }
+    }
 }
 if ($PSBoundParameters.ContainsKey("NotifyNewContent")) {
     $dword = if ($NotifyNewContent) { 1 } else { 0 }
