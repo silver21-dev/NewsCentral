@@ -41,6 +41,14 @@ internal sealed partial class NotificationForm : Form
 
     public NotificationOutcome? Outcome => _countdown.Outcome;
 
+    /// <summary>Creates, shows and activates the poster on Expanded (null = none / opened later by the caller).</summary>
+    [System.ComponentModel.Browsable(false), System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Func<Form?>? ExpandedFormFactory { get; init; }
+
+    /// <summary>The poster the factory produced; the caller runs the message loop on it after this form closes.</summary>
+    [System.ComponentModel.Browsable(false), System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Form? ExpandedForm { get; private set; }
+
     /// <param name="title">Poster title; empty falls back to the localized "Today's news".</param>
     /// <param name="onShown">Called once, from the Shown handler (the form is actually on screen).</param>
     public NotificationForm(string? title, Action? onShown)
@@ -70,6 +78,10 @@ internal sealed partial class NotificationForm : Form
         _closeRect = new Rectangle(_rtl ? inset : w - c - inset, inset, c, c);
 
         _toolTip.SetToolTip(this, UiStrings.NotifyOpenTooltip);
+
+        // Screen readers announce the notification: "<heading>: <title>".
+        AccessibleName = $"{UiStrings.NotifyHeading}: {_title}";
+        AccessibleRole = AccessibleRole.Alert;
 
         _timer.Tick += (_, _) =>
         {
@@ -165,8 +177,16 @@ internal sealed partial class NotificationForm : Form
     {
         base.OnMouseClick(e);
         if (e.Button != MouseButtons.Left) return;
-        if (_closeRect.Contains(e.Location) ? _countdown.Dismiss() : _countdown.Expand())
-            Finish();
+        bool close = _closeRect.Contains(e.Location);
+        if (!(close ? _countdown.Dismiss() : _countdown.Expand())) return;
+
+        // Expanded: build, show and activate the poster BEFORE this form closes (see Program.cs).
+        if (!close)
+        {
+            try { ExpandedForm = ExpandedFormFactory?.Invoke(); }
+            catch { ExpandedForm = null; }
+        }
+        Finish();
     }
 
     // ── Painting ──────────────────────────────────────────────────────────────────

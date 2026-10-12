@@ -171,6 +171,7 @@ static class Program
         var contentKey = assignment is null ? null : ContentKeys.For(assignment);
         var title      = assignment is null ? null
             : !string.IsNullOrWhiteSpace(assignment.PosterText) ? assignment.PosterText : assignment.PresentationName;
+        bool activationRefused = false;   // set when SetForegroundWindow refused the expanded poster (logged)
 
 #if DEBUG
         // --test-notify (Debug builds only): shows the "News arrived!" form for the currently selected item,
@@ -186,9 +187,9 @@ static class Program
             }
 
             launchLog.Append(triggerName, "MiniForm", "Test", contentKey, title);
-            var test = ShowNotification(null);
+            var test = ShowNotification(null, ExpandedPosterFactory(assignment, imagePath ?? string.Empty, writeTelemetry: false, source: null), null);
             if (test?.Outcome == NotificationOutcome.Expanded)
-                ShowPoster(assignment, imagePath ?? string.Empty, recordShown: false, countdownStopped: true, writeTelemetry: false);
+                ShowExpandedFallback(test, assignment, imagePath ?? string.Empty, writeTelemetry: false, source: null);
 
             ApplyWallpaperStyle();
             GC.KeepAlive(mutex);
@@ -222,11 +223,10 @@ static class Program
             return;
         }
 
-        // Shows the standard poster form for `assignment` (on a Virtual Desktop when the assignment asks
-        // for one). Shared by the normal full-poster launch and the notification's Expanded outcome, so
-        // both open exactly the same form. Blocks until the form is closed.
-        void ShowPoster(PublishedAssignmentIndex item, string itemImage, bool recordShown, bool countdownStopped,
-            bool writeTelemetry, string? source = null)
+        // Builds the standard poster form for `item`. Shared by the normal full-poster launch and the
+        // notification's Expanded outcome, so both open exactly the same form.
+        ViewerForm BuildViewer(PublishedAssignmentIndex item, string itemImage, bool recordShown, bool countdownStopped,
+            bool writeTelemetry, string? source)
         {
             var isOnline = ReadOnlineStatus(config.CacheRootPath);
 
@@ -241,6 +241,16 @@ static class Program
             // PresentationDefaults.
             int effectiveDuration = PresentationDefaults.ResolveDuration(item.DisplayDurationSeconds);
 
+            return new ViewerForm(item, itemImage, telemetry, viewerState, isOnline, effectiveDuration,
+                recordShown: recordShown, deliveredImages: delivered,
+                startCountdownStopped: countdownStopped, writeTelemetry: writeTelemetry, source: source);
+        }
+
+        // Shows the standard poster form for `item` (on a Virtual Desktop when the assignment asks for one).
+        // Blocks until the form is closed.
+        void ShowPoster(PublishedAssignmentIndex item, string itemImage, bool recordShown, bool countdownStopped,
+            bool writeTelemetry, string? source = null)
+        {
             if (item.UseVirtualDesktop)
             {
                 // Application.EnableVisualStyles() and other WinForms startup calls on the main
@@ -258,9 +268,7 @@ static class Program
                     var bgForm     = new BackgroundForm(item.VirtualDesktopBackgroundColor);
                     bgForm.Show();
 
-                    var viewerForm = new ViewerForm(item, itemImage, telemetry, viewerState, isOnline, effectiveDuration,
-                        recordShown: recordShown, deliveredImages: delivered,
-                        startCountdownStopped: countdownStopped, writeTelemetry: writeTelemetry, source: source);
+                    var viewerForm = BuildViewer(item, itemImage, recordShown, countdownStopped, writeTelemetry, source);
                     viewerForm.FormClosed += (_, _) => { bgForm.Close(); desktop.SwitchToOriginal(); };
                     Application.Run(viewerForm);
                 });
@@ -270,22 +278,67 @@ static class Program
             }
             else
             {
-                Application.Run(new ViewerForm(item, itemImage, telemetry, viewerState, isOnline, effectiveDuration,
-                    recordShown: recordShown, deliveredImages: delivered,
-                    startCountdownStopped: countdownStopped, writeTelemetry: writeTelemetry, source: source));
+                Application.Run(BuildViewer(item, itemImage, recordShown, countdownStopped, writeTelemetry, source));
             }
         }
 
-        // Shows the "News arrived!" form and blocks until it closes. `onShown` runs from the form's Shown
-        // handler (the form is on screen) - the only place the content marker is written. The outcome line
-        // is appended when the form closes; a failure before the form is shown is logged and writes no marker.
-        NotificationForm? ShowNotification(Action? onShown)
+        // Expanded outcome, same-desktop poster: the form is created, shown and ACTIVATED from inside the
+        // click handler (the click is input to this process, so the foreground rules allow it) while the
+        // notification is still open - closing the notification first could let Windows hand activation to
+        // another window. The caller then runs the message loop on the already-shown form. A poster that
+        // wants a Virtual Desktop cannot be built on this thread, so it gets no factory and is opened by
+        // ShowPoster after the notification closes (the desktop switch brings it to the front).
+        Func<Form?>? ExpandedPosterFactory(PublishedAssignmentIndex item, string itemImage, bool writeTelemetry, string? source) =>
+            item.UseVirtualDesktop
+                ? null
+                : () =>
+                {
+                    var poster = BuildViewer(item, itemImage, recordShown: false, countdownStopped: true, writeTelemetry, source);
+                    poster.Show();
+                    activationRefused = !ForegroundWindow.Activate(poster);
+                    return poster;
+                };
+
+        // Falls back to the regular poster path when the Expanded poster was NOT already shown and run by the
+        // notification itself (a Virtual Desktop poster, or a factory failure). The daily gate was consumed
+        // earlier today, so it is not stamped again.
+        void ShowExpandedFallback(NotificationForm notification, PublishedAssignmentIndex item, string itemImage,
+            bool writeTelemetry, string? source)
+        {
+            if (notification.ExpandedForm is null)
+                ShowPoster(item, itemImage, recordShown: false, countdownStopped: true, writeTelemetry, source);
+        }
+
+        // Shows the "News arrived!" form and blocks until it - and, after Expanded, the poster it opened - is
+        // closed. One message loop serves both: ending the notification's own loop would dispose every window
+        // on this thread, the freshly opened poster included, so the loop only ends when the last of the two
+        // closes. `onShown` runs from the form's Shown handler (the form is on screen) - the only place the
+        // content marker is written. When the notification closes (before the poster is run to completion) the
+        // outcome line is appended and `onClosed` runs; a failure before the form is shown is logged and
+        // writes no marker.
+        NotificationForm? ShowNotification(Action? onShown, Func<Form?>? expandedPoster, Action<NotificationForm>? onClosed)
         {
             NotificationForm? form = null;
             try
             {
-                form = new NotificationForm(title, onShown);
-                Application.Run(form);
+                var context = new ApplicationContext();   // no MainForm: the loop ends only via ExitThread
+                form = new NotificationForm(title, onShown) { ExpandedFormFactory = expandedPoster };
+                var shown = form;
+                shown.FormClosed += (_, _) =>
+                {
+                    if (shown.ShownUtc is not null)
+                    {
+                        var outcome = shown.Outcome?.ToString() ?? "Closed";
+                        if (shown.Outcome == NotificationOutcome.Expanded && activationRefused) outcome += " (activation refused)";
+                        launchLog.Append(triggerName, "MiniForm", "Outcome", contentKey, outcome: outcome);
+                        onClosed?.Invoke(shown);
+                    }
+
+                    if (shown.ExpandedForm is { } poster) poster.FormClosed += (_, _) => context.ExitThread();
+                    else context.ExitThread();
+                };
+                shown.Show();
+                Application.Run(context);
             }
             catch (Exception ex)
             {
@@ -294,9 +347,6 @@ static class Program
                 return null;
             }
 
-            if (form.ShownUtc is not null)
-                launchLog.Append(triggerName, "MiniForm", "Outcome", contentKey,
-                    outcome: form.Outcome?.ToString() ?? "Closed");
             return form;
         }
 
@@ -304,21 +354,23 @@ static class Program
         {
             launchLog.Append(triggerName, "MiniForm", decision.Reason, decision.ContentKey, decision.Title);
 
-            // The marker is written once the form is actually on screen (Shown), not on the decision.
-            var notification = ShowNotification(() => viewerState.WriteContentMarker(decision.ContentKey!));
-
-            // One record per shown notification (shown time, outcome, time to outcome) through the existing
-            // session-file mechanism. Written before the poster opens so a long-open poster cannot delay it.
-            if (notification is { ShownUtc: { } shownUtc, OutcomeUtc: { } outcomeUtc, Outcome: { } outcome })
-                telemetry.WriteNotification(assignment!.PresentationId, assignment.SourceTeamFolderName,
-                    decision.ContentKey!, shownUtc, outcomeUtc, outcome.ToString());
+            // The marker is written once the form is actually on screen (Shown), not on the decision. One
+            // record per shown notification (shown time, outcome, time to outcome) goes through the existing
+            // session-file mechanism as soon as the notification closes, before a long-open poster runs.
+            var notification = ShowNotification(
+                () => viewerState.WriteContentMarker(decision.ContentKey!),
+                ExpandedPosterFactory(assignment!, imagePath!, writeTelemetry: true, SessionTelemetry.NotificationSource),
+                n =>
+                {
+                    if (n is { ShownUtc: { } shownUtc, OutcomeUtc: { } outcomeUtc, Outcome: { } outcome })
+                        telemetry.WriteNotification(assignment!.PresentationId, assignment.SourceTeamFolderName,
+                            decision.ContentKey!, shownUtc, outcomeUtc, outcome.ToString());
+                });
 
             // Expanded: the standard poster for the SAME item the decision chose (no re-selection), countdown
-            // already stopped, its display record marked source "notification". The daily gate was consumed
-            // earlier today, so it is not stamped again.
+            // already stopped, its display record marked source "notification".
             if (notification?.Outcome == NotificationOutcome.Expanded)
-                ShowPoster(assignment!, imagePath!, recordShown: false, countdownStopped: true, writeTelemetry: true,
-                    source: SessionTelemetry.NotificationSource);
+                ShowExpandedFallback(notification, assignment!, imagePath!, writeTelemetry: true, SessionTelemetry.NotificationSource);
 
             ApplyWallpaperStyle();
             GC.KeepAlive(mutex);
