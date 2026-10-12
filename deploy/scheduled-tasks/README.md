@@ -8,8 +8,8 @@ themselves (decision rules, notification) is in `docs/newsviewer-spec.md`; insta
 
 | File | Task | Trigger | Arguments |
 |---|---|---|---|
-| `NewsViewer-Launch.xml` | `\NewsCentral\NewsViewer Launch` | session state change: **unlock**, **RemoteConnect** (RDP connect / reconnect), **ConsoleConnect** (fast user switching back to a local session) | none |
-| `NewsViewer-ContentArrived.xml` | `\NewsCentral\NewsViewer Content Arrived` | event: log `Application`, provider `NewsService`, **EventID 2001** (ContentChanged, once per sync cycle) | `--trigger content` |
+| `NewsViewer-Launch.xml` | `\{Company}\NewsCentral\NewsViewer Launch` | session state change: **unlock**, **RemoteConnect** (RDP connect / reconnect), **ConsoleConnect** (fast user switching back to a local session) | none |
+| `NewsViewer-ContentArrived.xml` | `\{Company}\NewsCentral\NewsViewer Content Arrived` | event: log `Application`, provider `NewsService`, **EventID 2001** (ContentChanged, once per sync cycle) | `--trigger content` |
 
 `NewsViewer Launch` replaces the legacy Workstation Unlock task (`\{Company}\NewsCentral\NewsViewer`),
 which must be removed so an unlock does not start NewsViewer twice.
@@ -34,12 +34,17 @@ connect or content event. Without the argument the idle check is skipped.
 
 ## Placeholders
 
-Both files contain the install path with the `{Company}` placeholder:
+Both files carry the `{Company}` placeholder in the task's own path (`RegistrationInfo/URI`, which places
+the task in the `\{Company}\NewsCentral\` Task Scheduler folder, next to the legacy task) and in the install
+path:
 
 ```
+URI:               \{Company}\NewsCentral\NewsViewer Launch   (or ... Content Arrived)
 Command:           "C:\Program Files\{Company}\NewsCentral\NewsViewer\NewsViewer.exe"
 WorkingDirectory:  C:\Program Files\{Company}\NewsCentral\NewsViewer
 ```
+
+The task name actually registered is the one passed to `schtasks /Create /TN`; keep it equal to the URI.
 
 The installer (or `Register-NewsViewerTasks.ps1`) substitutes the real company name, or the actual
 folder for a non-standard location such as a dev box. The event subscription in

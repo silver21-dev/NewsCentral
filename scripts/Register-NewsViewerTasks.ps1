@@ -20,24 +20,25 @@
 
 .DESCRIPTION
     Tasks (definitions: deploy/scheduled-tasks/*.xml, UTF-16 LE with BOM):
-      \NewsCentral\NewsViewer Launch           unlock / RDP connect / console connect, no arguments
-      \NewsCentral\NewsViewer Content Arrived  NewsService event 2001, argument "--trigger content"
+      \<Company>\NewsCentral\NewsViewer Launch           unlock / RDP connect / console connect, no arguments
+      \<Company>\NewsCentral\NewsViewer Content Arrived  NewsService event 2001, argument "--trigger content"
 
     For each task the script loads the XML, substitutes the Command and WorkingDirectory for the real
     install path, rewrites the Content Arrived event subscription to the configured log/source, writes a
     temporary UTF-16 copy, registers it with "schtasks /Create /XML ... /F" and deletes the temporary file.
     It then registers the NewsService event source when it is missing and removes the legacy Workstation
-    Unlock task. Running it twice gives the same result (/F replaces the tasks; an existing event source
-    and an already-removed legacy task are reported, not errors).
+    Unlock task and any leftover dev-box tasks at the old \NewsCentral\ path. Running it twice gives the same
+    result (/F replaces the tasks; an existing event source and already-removed old tasks are reported, not
+    errors).
 
     The event log name and source MUST match NewsService's Logging:EventLog:LogName / SourceName, or the
     Content Arrived task never fires. The defaults here are NewsService's defaults (Application /
     NewsService); a different value triggers a warning so it is a conscious choice.
 
 .PARAMETER Company
-    The company name of the installed product (SolutionConstants.Company; defines the install folder and the
-    legacy task path). Required unless -ExePath is given. Without it the legacy task cannot be located by
-    its default name and is skipped with a warning (pass -LegacyTaskName to remove it anyway).
+    The company name of the installed product (SolutionConstants.Company). Required in every mode (also with
+    -ExePath and -Uninstall): it defines the Task Scheduler folder the tasks live in
+    (\<Company>\NewsCentral\), the default install folder and the legacy task path.
 
 .PARAMETER InstallDir
     NewsViewer install folder. Default: C:\Program Files\<Company>\NewsCentral\NewsViewer.
@@ -68,14 +69,14 @@
 .EXAMPLE
     # Dev box: point the tasks at a Debug build
     $exe = Get-ChildItem .\NewsViewer\bin\Debug -Recurse -Filter NewsViewer.exe | Select-Object -First 1 -ExpandProperty FullName
-    .\scripts\Register-NewsViewerTasks.ps1 -ExePath $exe
+    .\scripts\Register-NewsViewerTasks.ps1 -Company Contoso -ExePath $exe
 
 .EXAMPLE
-    .\scripts\Register-NewsViewerTasks.ps1 -Uninstall
+    .\scripts\Register-NewsViewerTasks.ps1 -Company Contoso -Uninstall
 #>
 [CmdletBinding()]
 param(
-    [string]$Company,
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$Company,
     [string]$InstallDir,
     [string]$ExePath,
     [string]$EventLogName    = "Application",
@@ -88,8 +89,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ── Constants ────────────────────────────────────────────────────────────────
-$LaunchTask  = '\NewsCentral\NewsViewer Launch'
-$ContentTask = '\NewsCentral\NewsViewer Content Arrived'
+if ($Company -notmatch '^[^\\/:*?"<>|]+$') {
+    throw "-Company must not contain any of \ / : * ? `" < > | (it becomes a Task Scheduler folder name)."
+}
+$LaunchTask  = "\$Company\NewsCentral\NewsViewer Launch"
+$ContentTask = "\$Company\NewsCentral\NewsViewer Content Arrived"
+# Earlier dev-box registrations lived directly under \NewsCentral\ (no company folder); install removes them.
+$OldDevTasks = @('\NewsCentral\NewsViewer Launch', '\NewsCentral\NewsViewer Content Arrived')
 $ContentEventId = 2001
 # NewsService defaults (NewsService/appsettings.json Logging:EventLog) - a deviation is warned about.
 $DefaultLogName    = "Application"
@@ -131,9 +137,6 @@ if ($Uninstall) {
 }
 
 # ── Parameter validation ─────────────────────────────────────────────────────
-if (-not $ExePath -and [string]::IsNullOrWhiteSpace($Company)) {
-    throw "-Company is required unless -ExePath is given."
-}
 foreach ($pair in @(@("EventLogName", $EventLogName), @("EventSourceName", $EventSourceName))) {
     # The values are embedded in an XPath subscription query inside XML: keep them free of quotes and markup.
     if ([string]::IsNullOrWhiteSpace($pair[1]) -or $pair[1] -notmatch '^[^''"<>&]+$') {
@@ -180,6 +183,10 @@ function Register-Task {
     $command = $doc.SelectSingleNode("//t:Exec/t:Command", $ns)
     $workDir = $doc.SelectSingleNode("//t:Exec/t:WorkingDirectory", $ns)
     if (-not $command -or -not $workDir) { throw "$XmlFile has no Exec/Command or Exec/WorkingDirectory." }
+    # The task's own path comes from RegistrationInfo/URI ("{Company}" placeholder in the shipped file).
+    $uri = $doc.SelectSingleNode("//t:RegistrationInfo/t:URI", $ns)
+    if (-not $uri) { throw "$XmlFile has no RegistrationInfo/URI." }
+    $uri.InnerText = $TaskName
     $command.InnerText = '"' + $exe + '"'
     $workDir.InnerText = $workingDir
 
@@ -231,24 +238,18 @@ else {
 
 # ── Legacy Workstation Unlock task ───────────────────────────────────────────
 Write-Host ""
-Write-Step "Legacy Workstation Unlock task"
-$legacy = $LegacyTaskName
-if ($legacy -match '\{Company\}') {
-    if ([string]::IsNullOrWhiteSpace($Company)) {
-        Write-Warning "-LegacyTaskName contains {Company} but -Company was not given: the legacy task was NOT looked up. Pass -Company or an explicit -LegacyTaskName."
-        $legacy = $null
-    }
-    else { $legacy = $legacy.Replace("{Company}", $Company) }
-}
-if ($legacy) {
-    if (Test-TaskExists $legacy) {
-        if ((Invoke-Schtasks @("/Delete", "/TN", $legacy, "/F")) -ne 0) {
-            throw "schtasks /Delete failed for '$legacy': $($script:SchtasksOutput.Trim())"
+Write-Step "Legacy Workstation Unlock task and old dev-box tasks"
+$legacy = $LegacyTaskName.Replace("{Company}", $Company)
+foreach ($old in @($legacy) + $OldDevTasks) {
+    $label = if ($old -eq $legacy) { "legacy " } else { "old dev " }
+    if (Test-TaskExists $old) {
+        if ((Invoke-Schtasks @("/Delete", "/TN", $old, "/F")) -ne 0) {
+            throw "schtasks /Delete failed for '$old': $($script:SchtasksOutput.Trim())"
         }
-        Write-Host "  removed   $legacy"
+        Write-Host "  removed   $label$old"
     }
     else {
-        Write-Host "  not found $legacy (nothing to remove)"
+        Write-Host "  not found $label$old (nothing to remove)"
     }
 }
 

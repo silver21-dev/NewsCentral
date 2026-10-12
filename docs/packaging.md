@@ -54,9 +54,9 @@ means runtime behaviour can change without a component redeploy.
 The registry hive path (and the install folder) embed a Company name:
 
 - Registry: `HKLM\Software\{Company}\NewsCentral\{Component}`
-- Legacy scheduled task: `\{Company}\NewsCentral\NewsViewer` — the Workstation Unlock task the new launch
-  tasks replace; it is removed on install. The new tasks live in `\NewsCentral\` and carry no Company in
-  their path.
+- Scheduled tasks: `\{Company}\NewsCentral\NewsViewer Launch` and
+  `\{Company}\NewsCentral\NewsViewer Content Arrived`. The legacy Workstation Unlock task the new launch
+  tasks replace is `\{Company}\NewsCentral\NewsViewer`; it is removed on install.
 
 `Company` is fixed at build time from `Directory.Build.props` in the source tree (surfaced in code as
 `SolutionConstants.Company`). The packaging team must build from source so this value is available,
@@ -168,11 +168,11 @@ value plus two scheduled tasks (below).
    Value: "%ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe"
    ```
 
-2. **Scheduled task `\NewsCentral\NewsViewer Launch`** — session presence. Triggers: workstation
+2. **Scheduled task `\{Company}\NewsCentral\NewsViewer Launch`** — session presence. Triggers: workstation
    **unlock**, **RemoteConnect** (RDP connect / reconnect) and **ConsoleConnect** (fast user switching
    back to a local session). No arguments. **Replaces the legacy Workstation Unlock task.**
 
-3. **Scheduled task `\NewsCentral\NewsViewer Content Arrived`** — new content. Event trigger on
+3. **Scheduled task `\{Company}\NewsCentral\NewsViewer Content Arrived`** — new content. Event trigger on
    Application log / provider `NewsService` / **EventID 2001** (ContentChanged, once per sync cycle,
    written by NewsService after the cache is materialized). Argument **`--trigger content`**, which turns
    on the idle check (an away user is not interrupted).
@@ -238,9 +238,9 @@ Both components — remove:
   optional: skipped, it leaves the machine with a permanently enforced lock screen and wallpaper
   that no remaining software can ever clear.
 - NewsViewer: delete the `HKLM\...\Run\NewsViewer` value and **both** scheduled tasks,
-  `\NewsCentral\NewsViewer Launch` and `\NewsCentral\NewsViewer Content Arrived` (and, on a machine
-  that still has it, the legacy `\{Company}\NewsCentral\NewsViewer` task). The reference script removes
-  the two new tasks with `-Uninstall`.
+  `\{Company}\NewsCentral\NewsViewer Launch` and `\{Company}\NewsCentral\NewsViewer Content Arrived`
+  (and, on a machine that still has it, the legacy `\{Company}\NewsCentral\NewsViewer` task). The
+  reference script removes the two new tasks with `-Company <Company> -Uninstall`.
 - The machine content cache under `%ProgramData%\NewsCentral\` (and its per-team subfolders).
 
 Deliberately left in place (do NOT remove):
@@ -257,9 +257,8 @@ Deliberately left in place (do NOT remove):
 - **The NewsService EventLog source.** Removing an EventLog source is fussy and unnecessary; an orphaned
   source is conventional and harmless.
 
-Scheduled-task folders: deleting the tasks leaves an empty `\NewsCentral` task folder (and, after removing
-the legacy task, an empty `\{Company}\NewsCentral` one). Removing them is optional; leaving them is
-harmless.
+Scheduled-task folder: deleting the tasks leaves an empty `\{Company}\NewsCentral` task folder. Removing it
+is optional; leaving it is harmless.
 
 Task-delete must be tolerant: `schtasks /delete` returns non-zero if the task is already gone. The
 uninstall action must not treat that as a failure.

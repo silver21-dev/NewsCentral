@@ -584,12 +584,14 @@ The "News arrived!" notification (NewsViewer) and the launch surface behind it
 
 ```
 $exe = Get-ChildItem .\NewsViewer\bin\Debug -Recurse -Filter NewsViewer.exe | Select-Object -First 1 -ExpandProperty FullName
-.\scripts\Register-NewsViewerTasks.ps1 -ExePath $exe
+.\scripts\Register-NewsViewerTasks.ps1 -Company "<Company>" -ExePath $exe
 ```
 
-It registers both tasks with that path, makes sure the event source exists and prints each task's
-triggers, arguments and command. Re-running is harmless; `-Uninstall` removes the two tasks. A legacy
-task is only looked up when `-Company` is given (or via `-LegacyTaskName`).
+`-Company` is required in every mode (it names the `\<Company>\NewsCentral\` task folder). The script
+registers both tasks with that path, makes sure the event source exists, removes the legacy unlock task
+(`\<Company>\NewsCentral\NewsViewer`) and any leftover dev-box tasks at the old `\NewsCentral\` path, and
+prints each task's triggers, arguments and command. Re-running is harmless; `-Company "<Company>"
+-Uninstall` removes the two tasks.
 
 ### 8.6 Field validation checklist (notification and launch surface)
 
