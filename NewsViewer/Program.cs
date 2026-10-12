@@ -133,10 +133,17 @@ static class Program
         // (NewsService/Worker.cs, commit f8cd54b).
         var teams = TeamConfigurationReader.GetTeams(configuration);
 
-        // Remote/virtual sessions get neither the poster nor the wallpaper style re-assert. The
-        // style step otherwise runs on any local interactive session — it is NOT gated behind a
-        // qualifying monitor.
-        if (IsRemoteOrVirtualSession()) return;
+        // Environment probes (remote session, visibility, shell, idle, busy), evaluated lazily by the launch
+        // decision. Remote sessions (RDP, Citrix, Horizon) are supported: they are no longer excluded here.
+        // Display:ShowInRemoteSessions = false restores the old exit, now a logged decision (RemoteSession).
+        bool simulateRemote = false;
+#if DEBUG
+        // --simulate-remote (Debug builds only): IsRemoteSession() reports true, to exercise the switch and the
+        // Virtual Desktop fallback without an RDP session. Combinable with the other switches.
+        simulateRemote = args.Any(a => string.Equals(a, "--simulate-remote", StringComparison.OrdinalIgnoreCase));
+#endif
+        var probes = new LaunchProbes(simulateRemote);
+        bool remoteSession = probes.IsRemoteSession();
 
         var selector = new PresentationSelector(
             config.CacheRootPath, configuration, config.BypassImageIntegrityCheck);
@@ -149,6 +156,15 @@ static class Program
         // image / HKCU-controls-fit finding.
         void ApplyWallpaperStyle()
         {
+            // Never in a remote session, whatever Display:ShowInRemoteSessions says: on a session host
+            // NewsService's wallpaper surface may be off, and each user's HKCU style / background colour
+            // must not be rewritten.
+            if (!LaunchDecider.ShouldAssertWallpaperStyle(remoteSession))
+            {
+                System.Diagnostics.Debug.WriteLine("[Wallpaper] style re-assert skipped (remote session)");
+                return;
+            }
+
             new WallpaperService(config.Delivery.WallpaperStyle, config.Delivery.WallpaperBackgroundColor)
                 .ApplyWallpaperStyle();
             System.Diagnostics.Debug.WriteLine("[Wallpaper] style re-asserted");
@@ -157,8 +173,13 @@ static class Program
         // Resolve the active display (poster) assignment — may be absent.
         var (assignment, imagePath) = selector.SelectActive(teams);
 
-        // A poster requires an active assignment, a verified image AND a Full-HD-or-better monitor.
-        bool contentAvailable = assignment is not null && imagePath is not null && HasQualifyingMonitor();
+        // A poster requires an active assignment and a verified image; a Full-HD-or-better monitor is a
+        // separate rule of its own in the decision (NoQualifyingMonitor).
+        bool contentAvailable = assignment is not null && imagePath is not null;
+        bool hasQualifyingMonitor = HasQualifyingMonitor();
+
+        // A poster that wants a Virtual Desktop gets the standard desktop in a remote session (logged).
+        var vdFallbackNote = assignment is { UseVirtualDesktop: true } && remoteSession ? "VirtualDesktopFallback" : null;
 
         Directory.CreateDirectory(userStatePath);
 
@@ -186,7 +207,7 @@ static class Program
                 return;
             }
 
-            launchLog.Append(triggerName, "MiniForm", "Test", contentKey, title);
+            launchLog.Append(triggerName, "MiniForm", "Test", contentKey, title, note: vdFallbackNote);
             var test = ShowNotification(null, ExpandedPosterFactory(assignment, imagePath ?? string.Empty, writeTelemetry: false, source: null), null);
             if (test?.Outcome == NotificationOutcome.Expanded)
                 ShowExpandedFallback(test, assignment, imagePath ?? string.Empty, writeTelemetry: false, source: null);
@@ -204,13 +225,15 @@ static class Program
             Manual           = manual,
             ContentTrigger   = contentTrigger,
             ContentAvailable = contentAvailable,
+            HasQualifyingMonitor = hasQualifyingMonitor,
+            ShowInRemoteSessions = config.Display.ShowInRemoteSessions,
             ContentKey       = contentKey,
             Title            = title,
             GateHit          = viewerState.AlreadyShownToday(),
             BypassDailyGate  = config.BypassDailyGate,
             NotifyNewContent = config.Ui.NotifyNewContent,
             Marker           = viewerState.ReadContentMarker()
-        }, new LaunchProbes());
+        }, probes);
 
         if (decision.WriteMarker && decision.ContentKey is not null)
             viewerState.WriteContentMarker(decision.ContentKey);
@@ -251,7 +274,7 @@ static class Program
         void ShowPoster(PublishedAssignmentIndex item, string itemImage, bool recordShown, bool countdownStopped,
             bool writeTelemetry, string? source = null)
         {
-            if (item.UseVirtualDesktop)
+            if (LaunchDecider.UseVirtualDesktop(item.UseVirtualDesktop, remoteSession))
             {
                 // Application.EnableVisualStyles() and other WinForms startup calls on the main
                 // thread create hidden internal windows (the WinForms parking window, etc.).
@@ -289,7 +312,7 @@ static class Program
         // wants a Virtual Desktop cannot be built on this thread, so it gets no factory and is opened by
         // ShowPoster after the notification closes (the desktop switch brings it to the front).
         Func<Form?>? ExpandedPosterFactory(PublishedAssignmentIndex item, string itemImage, bool writeTelemetry, string? source) =>
-            item.UseVirtualDesktop
+            LaunchDecider.UseVirtualDesktop(item.UseVirtualDesktop, remoteSession)
                 ? null
                 : () =>
                 {
@@ -352,7 +375,7 @@ static class Program
 
         if (decision.Action == LaunchAction.MiniForm)
         {
-            launchLog.Append(triggerName, "MiniForm", decision.Reason, decision.ContentKey, decision.Title);
+            launchLog.Append(triggerName, "MiniForm", decision.Reason, decision.ContentKey, decision.Title, note: vdFallbackNote);
 
             // The marker is written once the form is actually on screen (Shown), not on the decision. One
             // record per shown notification (shown time, outcome, time to outcome) goes through the existing
@@ -377,7 +400,7 @@ static class Program
             return;
         }
 
-        launchLog.Append(triggerName, "FullPoster", decision.Reason, decision.ContentKey);
+        launchLog.Append(triggerName, "FullPoster", decision.Reason, decision.ContentKey, note: vdFallbackNote);
         ShowPoster(assignment!, imagePath!, recordShown: !manual, countdownStopped: false, writeTelemetry: true);
         ApplyWallpaperStyle();
 
@@ -413,12 +436,6 @@ static class Program
 
     private static bool HasQualifyingMonitor() =>
         Screen.AllScreens.Any(s => s.Bounds.Width >= 1920 && s.Bounds.Height >= 1080);
-
-    // RDP and Citrix ICA both set SM_REMOTESESSION (TerminalServerSession).
-    // VMware Horizon sets the ViewClient_Machine_Name environment variable.
-    private static bool IsRemoteOrVirtualSession() =>
-        SystemInformation.TerminalServerSession ||
-        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ViewClient_Machine_Name"));
 
     private static bool ReadOnlineStatus(string cacheRootPath)
     {

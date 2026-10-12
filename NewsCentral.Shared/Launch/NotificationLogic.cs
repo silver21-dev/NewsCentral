@@ -92,7 +92,7 @@ public static class NotificationPlacement
 public static class LaunchLogLine
 {
     public static string Format(DateTimeOffset timestamp, string trigger, string decision, string reason,
-        string? contentKey, string? title = null, string? outcome = null)
+        string? contentKey, string? title = null, string? outcome = null, string? note = null)
     {
         var line = string.Join(" | ",
             timestamp.ToString("yyyy-MM-ddTHH:mm:sszzz"),
@@ -102,6 +102,7 @@ public static class LaunchLogLine
             $"key={Key(contentKey)}");
         if (title is not null) line += $" | title={Field(title)}";
         if (outcome is not null) line += $" | outcome={outcome}";
+        if (note is not null) line += $" | note={Field(note)}";
         return line;
     }
 

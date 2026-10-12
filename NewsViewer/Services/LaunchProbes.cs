@@ -17,6 +17,46 @@ internal sealed partial class LaunchProbes : ILaunchProbes
     private const uint DesktopReadObjects = 0x0001;
     private const int UoiName = 2;
 
+    private const int SmRemoteSession = 0x1000;
+    private const int WtsClientProtocolType = 16;   // USHORT: 0 = console, 1 = ICA, 2 = RDP
+
+    private readonly bool _simulateRemote;
+    private bool? _remote;
+
+    /// <param name="simulateRemote">Debug-only <c>--simulate-remote</c>: <see cref="IsRemoteSession"/> reports true.</param>
+    public LaunchProbes(bool simulateRemote = false) => _simulateRemote = simulateRemote;
+
+    // Cached: the answer cannot change during this one-shot process, and Program consults it more than once.
+    public bool IsRemoteSession() => _remote ??= _simulateRemote || DetectRemote();
+
+    // Any one signal is enough (RemoteDetection.IsRemote); an unreadable signal simply does not count.
+    private static bool DetectRemote()
+    {
+        bool smRemote = false, horizon = false;
+        int? protocol = null;
+        try { smRemote = GetSystemMetrics(SmRemoteSession) != 0; } catch { }
+        try { horizon = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ViewClient_Machine_Name")); } catch { }
+        try { protocol = QueryClientProtocolType(); } catch { }
+        return RemoteDetection.IsRemote(smRemote, horizon, protocol);
+    }
+
+    private static int? QueryClientProtocolType()
+    {
+        if (!WTSQuerySessionInformationW(IntPtr.Zero, WtsCurrentSession, WtsClientProtocolType,
+                out var buffer, out var bytes) || buffer == IntPtr.Zero)
+            return null;
+        try { return bytes >= 2 ? Marshal.ReadInt16(buffer) : null; }
+        finally { WTSFreeMemory(buffer); }
+    }
+
+    // A published-app (seamless) session runs apps without Explorer, so there is no taskbar window and no
+    // desktop to show a poster on. A failed probe counts as "has a shell": never block on a probe error.
+    public bool HasShell()
+    {
+        try { return FindWindowW("Shell_TrayWnd", null) != IntPtr.Zero; }
+        catch { return true; }
+    }
+
     public bool IsSessionVisible()
     {
         try { return IsSessionActiveAndUnlocked() && IsInputDesktopDefault(); }
@@ -170,6 +210,12 @@ internal sealed partial class LaunchProbes : ILaunchProbes
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool IsZoomed(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    private static partial int GetSystemMetrics(int nIndex);
+
+    [LibraryImport("user32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial IntPtr FindWindowW(string? lpClassName, string? lpWindowName);
 
     [LibraryImport("shell32.dll")]
     private static partial int SHQueryUserNotificationState(out int pquns);

@@ -17,11 +17,11 @@ internal sealed class LaunchLog
     public LaunchLog(string userStatePath) => _path = Path.Combine(userStatePath, FileName);
 
     public void Append(string trigger, string decision, string reason, string? contentKey,
-        string? title = null, string? outcome = null)
+        string? title = null, string? outcome = null, string? note = null)
     {
         try
         {
-            var line = LaunchLogLine.Format(DateTimeOffset.Now, trigger, decision, reason, contentKey, title, outcome);
+            var line = LaunchLogLine.Format(DateTimeOffset.Now, trigger, decision, reason, contentKey, title, outcome, note);
 
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             File.AppendAllText(_path, line + "\n");

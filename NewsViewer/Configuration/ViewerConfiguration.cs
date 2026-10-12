@@ -48,6 +48,14 @@ public class DisplaySection
     private int _logicalDayStartHour;
 
     /// <summary>
+    /// Registry <c>Display\ShowInRemoteSessions</c> (DWORD 0/1). Default <c>true</c>: posters and
+    /// notifications are shown in remote sessions (RDP, Citrix, Horizon). <c>false</c> = previous
+    /// behavior, a silent exit logged as <c>RemoteSession</c>. The wallpaper style re-assert never
+    /// runs in a remote session regardless of this value.
+    /// </summary>
+    public bool ShowInRemoteSessions { get; set; } = true;
+
+    /// <summary>
     /// Hour (0..23, local) at which the once-per-day display gate rolls over. Default 0 = calendar
     /// day. Clamped on read: an out-of-range value degrades to 0 rather than throwing. Must be
     /// provisioned as REG_SZ — RegistryConfigurationProvider coerces REG_DWORD 0/1 to "False"/"True".

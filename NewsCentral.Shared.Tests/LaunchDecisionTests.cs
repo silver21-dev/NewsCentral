@@ -15,10 +15,14 @@ public sealed class LaunchDecisionTests
         public bool Visible { get; set; } = true;
         public TimeSpan Idle { get; set; } = TimeSpan.Zero;
         public bool Busy { get; set; }
+        public bool Remote { get; set; }
+        public bool Shell { get; set; } = true;
         public List<string> Calls { get; } = new();
         public bool IsSessionVisible() { Calls.Add("visible"); return Visible; }
         public TimeSpan IdleTime() { Calls.Add("idle"); return Idle; }
         public bool IsBusy() { Calls.Add("busy"); return Busy; }
+        public bool IsRemoteSession() { Calls.Add("remote"); return Remote; }
+        public bool HasShell() { Calls.Add("shell"); return Shell; }
     }
 
     // Defaults describe "today's poster already shown, new content, user present": the MiniForm case.

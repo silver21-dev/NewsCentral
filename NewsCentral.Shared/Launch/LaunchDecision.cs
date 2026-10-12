@@ -30,8 +30,13 @@ public sealed record LaunchInputs
     public bool Manual { get; init; }
     /// <summary>Launched with <c>--trigger content</c> (the ContentChanged event task).</summary>
     public bool ContentTrigger { get; init; }
-    /// <summary>A poster item was selected and its image is usable (and a qualifying monitor exists).</summary>
+    /// <summary>A poster item was selected and its image is usable.</summary>
     public bool ContentAvailable { get; init; }
+    /// <summary>At least one monitor is Full HD or better (a poster needs one). Checked right after
+    /// <see cref="ContentAvailable"/>, where it used to be folded into it.</summary>
+    public bool HasQualifyingMonitor { get; init; } = true;
+    /// <summary><c>Display:ShowInRemoteSessions</c>; false = exit in remote sessions (previous behavior).</summary>
+    public bool ShowInRemoteSessions { get; init; } = true;
     public string? ContentKey { get; init; }
     public string? Title { get; init; }
     /// <summary>Today's poster was already shown (daily gate hit).</summary>
@@ -45,8 +50,13 @@ public sealed record LaunchInputs
 /// <summary>Environment checks, evaluated lazily and only when the decision reaches them.</summary>
 public interface ILaunchProbes
 {
+    /// <summary>This is a remote session: RDP, Citrix ICA or VMware Horizon (see <see cref="RemoteDetection"/>).</summary>
+    bool IsRemoteSession();
     /// <summary>Session is active, unlocked, and the input desktop is "Default". Any failure = false.</summary>
     bool IsSessionVisible();
+    /// <summary>The session has a shell (taskbar window). A published-app / seamless session does not, and
+    /// has no desktop to show a poster on. A failed probe counts as "has a shell".</summary>
+    bool HasShell();
     /// <summary>Time since the user's last input.</summary>
     TimeSpan IdleTime();
     /// <summary>A full-screen app, presentation, or do-not-disturb state is active.</summary>
@@ -70,41 +80,79 @@ public static class LaunchDecider
         // 2. Another instance already runs in this session.
         if (!i.MutexAcquired) return new(LaunchAction.Exit, "AlreadyRunning");
 
-        // 3. --manual: an on-demand launch bypasses the gate and every check below. (It still needs
-        //    something to show; with no usable item there is nothing to display.)
+        // 3. --manual: an on-demand launch bypasses the gate and every check below, the remote-session
+        //    switch included. (It still needs something to show, and a monitor to show it on.)
         if (i.Manual)
-            return i.ContentAvailable
-                ? new(LaunchAction.FullPoster, "Manual", i.ContentKey, WriteMarker: true)
-                : new(LaunchAction.Exit, "NoContent");
+        {
+            if (!i.ContentAvailable) return new(LaunchAction.Exit, "NoContent");
+            if (!i.HasQualifyingMonitor) return new(LaunchAction.Exit, "NoQualifyingMonitor", i.ContentKey);
+            return new(LaunchAction.FullPoster, "Manual", i.ContentKey, WriteMarker: true);
+        }
 
-        // 4. Nothing to show.
+        // 4. Remote sessions are supported by default; the switch restores the old exit (now logged).
+        //    The probe is only consulted when the switch is off.
+        if (!i.ShowInRemoteSessions && probes.IsRemoteSession()) return new(LaunchAction.Exit, "RemoteSession");
+
+        // 5. Nothing to show.
         if (!i.ContentAvailable) return new(LaunchAction.Exit, "NoContent");
 
-        // 5-7. Never show behind a locked screen / on the secure desktop, to an away user on content
-        //      arrival, or over a presentation. The gate is not consumed, so a later trigger retries.
+        // 5b. No Full-HD-or-better monitor (a typical small RDP client window lands here).
+        if (!i.HasQualifyingMonitor) return new(LaunchAction.Exit, "NoQualifyingMonitor", i.ContentKey);
+
+        // 6-9. Never show behind a locked screen / on the secure desktop, in a session without a shell,
+        //      to an away user on content arrival, or over a presentation. The gate is not consumed, so
+        //      a later trigger retries.
         if (!probes.IsSessionVisible()) return new(LaunchAction.Exit, "NotVisible", i.ContentKey);
+        if (!probes.HasShell()) return new(LaunchAction.Exit, "NoShell", i.ContentKey);
         if (i.ContentTrigger && probes.IdleTime() > IdleThreshold) return new(LaunchAction.Exit, "Idle", i.ContentKey);
         if (probes.IsBusy()) return new(LaunchAction.Exit, "Busy", i.ContentKey);
 
-        // 8. Today's poster not shown yet (or the gate is bypassed): the normal full poster.
+        // 10. Today's poster not shown yet (or the gate is bypassed): the normal full poster.
         if (!i.GateHit || i.BypassDailyGate)
             return new(LaunchAction.FullPoster, "Gate", i.ContentKey, WriteMarker: true);
 
-        // 9. Notification disabled: previous behavior (silent exit).
+        // 11. Notification disabled: previous behavior (silent exit).
         if (!i.NotifyNewContent) return new(LaunchAction.Exit, "NotifyDisabled", i.ContentKey);
 
-        // 10. First run after upgrade: adopt the current content silently so a poster the user already
+        // 12. First run after upgrade: adopt the current content silently so a poster the user already
         //     saw does not raise a notification.
         if (string.IsNullOrEmpty(i.Marker))
             return new(LaunchAction.Exit, "MarkerInitialized", i.ContentKey, WriteMarker: true);
 
-        // 11. Nothing new since the user last saw or was notified.
+        // 13. Nothing new since the user last saw or was notified.
         if (string.Equals(i.Marker, i.ContentKey, StringComparison.Ordinal))
             return new(LaunchAction.Exit, "AlreadySeen", i.ContentKey);
 
-        // 12. New content since the marker.
+        // 14. New content since the marker.
         return new(LaunchAction.MiniForm, "NewContent", i.ContentKey, i.Title);
     }
+
+    /// <summary>
+    /// Whether a poster that asks for a Virtual Desktop actually gets one. Desktop switching is not reliable
+    /// in a remote session, so there it falls back to the standard desktop (normal path, gate, --manual and
+    /// Expanded alike). Console sessions are unchanged.
+    /// </summary>
+    public static bool UseVirtualDesktop(bool presentationWantsVirtualDesktop, bool remoteSession) =>
+        presentationWantsVirtualDesktop && !remoteSession;
+
+    /// <summary>
+    /// The HKCU wallpaper style / background colour re-assert never runs in a remote session, regardless of
+    /// <c>Display:ShowInRemoteSessions</c>: on a session host NewsService's wallpaper surface may be off, and
+    /// each user's own style and colour must not be rewritten.
+    /// </summary>
+    public static bool ShouldAssertWallpaperStyle(bool remoteSession) => !remoteSession;
+}
+
+/// <summary>Remote-session detection rule (the Win32 gathering lives in NewsViewer's LaunchProbes).</summary>
+public static class RemoteDetection
+{
+    /// <summary>
+    /// Remote when ANY signal says so: <c>GetSystemMetrics(SM_REMOTESESSION)</c> (RDP and Citrix ICA),
+    /// the <c>ViewClient_Machine_Name</c> environment variable (VMware Horizon), or a WTS client protocol
+    /// type other than console (0). An unreadable protocol type (null) is ignored.
+    /// </summary>
+    public static bool IsRemote(bool smRemoteSession, bool horizonEnvironment, int? wtsClientProtocolType) =>
+        smRemoteSession || horizonEnvironment || (wtsClientProtocolType is int p && p != 0);
 }
 
 /// <summary>Identity of a poster item that changes when it is republished or updated.</summary>

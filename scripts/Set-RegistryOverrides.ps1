@@ -87,6 +87,7 @@
     │   BypassImageIntegrityCheck    DWORD     (1 = skip image SHA-256 verification)
     ├── Display\
     │       LogicalDayStartHour     REG_SZ
+    │       ShowInRemoteSessions    DWORD    (0 = no poster/notification in remote sessions: RDP, Citrix, Horizon; default 1)
     ├── Ui\
     │       Theme                   REG_SZ   "Dark" or "Light"
     │       ShowDeliveredImages     DWORD    (1 = poster form offers Wallpaper / Lock screen buttons; default 0)
@@ -269,6 +270,11 @@
 .PARAMETER ShowDeliveredImages
     When $true, the NewsViewer poster form shows Wallpaper / Lock screen buttons that display the image
     NewsService currently delivers (Ui\ShowDeliveredImages, DWORD 0/1). Default false. NewsViewer only.
+
+.PARAMETER ShowInRemoteSessions
+    When $false, NewsViewer exits silently (logged as RemoteSession) in remote sessions (RDP, Citrix, Horizon)
+    instead of showing posters and notifications. Display\ShowInRemoteSessions, DWORD 0/1. Default true.
+    NewsViewer only. The wallpaper style re-assert never runs in a remote session, whatever this says.
 
 .PARAMETER NotifyNewContent
     When $false, NewsViewer does not show the "News arrived!" notification when new content arrives
@@ -475,6 +481,7 @@ param(
 
     [Nullable[bool]] $ShowDeliveredImages,
     [Nullable[bool]] $NotifyNewContent,
+    [Nullable[bool]] $ShowInRemoteSessions,
 
     [Nullable[bool]] $Active,
 
@@ -507,7 +514,7 @@ $newParameterNames = @(
     "DefaultLockScreenPath", "PublishedImagePath", "LockScreenEnabled", "WallpaperEnabled",
     "DefaultWallpaperPath", "WallpaperStyle", "WallpaperBackgroundColor",
     "LogicalDayStartHour", "Theme", "TelemetryUploadEnabled", "LogLevel", "EventLogLevel",
-    "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages", "NotifyNewContent"
+    "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions"
 )
 
 # Full parameter -> allowed-component map for the two fleet components. Covers every
@@ -532,7 +539,7 @@ $componentAllowedParams = @{
         "AzureTenantId", "AzureClientId", "AzureAccountName", "AzureContainerName",
         "AzureAuthMode", "AzureCertificateThumbprint", "AzureClientSecret", "AzureUseWinHttpProxy",
         "BypassDailyGate", "BypassImageIntegrityCheck", "LogicalDayStartHour", "Theme",
-        "WallpaperStyle", "WallpaperBackgroundColor", "Active", "ShowDeliveredImages", "NotifyNewContent"
+        "WallpaperStyle", "WallpaperBackgroundColor", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions"
     )
 }
 
@@ -904,6 +911,10 @@ if ($PSBoundParameters.ContainsKey("Theme")) {
 if ($PSBoundParameters.ContainsKey("ShowDeliveredImages")) {
     $dword = if ($ShowDeliveredImages) { 1 } else { 0 }
     Set-RegValue -Path "$base\Ui" -Name "ShowDeliveredImages" -Value $dword -Type DWord
+}
+if ($PSBoundParameters.ContainsKey("ShowInRemoteSessions")) {
+    $dword = if ($ShowInRemoteSessions) { 1 } else { 0 }
+    Set-RegValue -Path "$base\Display" -Name "ShowInRemoteSessions" -Value $dword -Type DWord
 }
 if ($PSBoundParameters.ContainsKey("NotifyNewContent")) {
     $dword = if ($NotifyNewContent) { 1 } else { 0 }
