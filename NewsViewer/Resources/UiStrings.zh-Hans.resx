@@ -28,6 +28,18 @@
   <data name="MoreInformation" xml:space="preserve">
     <value>点击查看更多信息</value>
   </data>
+  <data name="NotifyDismissTooltip" xml:space="preserve">
+    <value>忽略</value>
+  </data>
+  <data name="NotifyHeading" xml:space="preserve">
+    <value>有新消息了！</value>
+  </data>
+  <data name="NotifyOpenTooltip" xml:space="preserve">
+    <value>点击查看</value>
+  </data>
+  <data name="NotifyTitleFallback" xml:space="preserve">
+    <value>今日新闻</value>
+  </data>
   <data name="Offline" xml:space="preserve">
     <value>● 离线</value>
   </data>

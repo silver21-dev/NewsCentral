@@ -28,6 +28,18 @@
   <data name="MoreInformation" xml:space="preserve">
     <value>Cliquez pour plus d'informations.</value>
   </data>
+  <data name="NotifyDismissTooltip" xml:space="preserve">
+    <value>Ignorer</value>
+  </data>
+  <data name="NotifyHeading" xml:space="preserve">
+    <value>Nouvelles actualités !</value>
+  </data>
+  <data name="NotifyOpenTooltip" xml:space="preserve">
+    <value>Cliquez pour afficher</value>
+  </data>
+  <data name="NotifyTitleFallback" xml:space="preserve">
+    <value>Actualités du jour</value>
+  </data>
   <data name="Offline" xml:space="preserve">
     <value>● Hors ligne</value>
   </data>
