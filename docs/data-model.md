@@ -458,6 +458,39 @@ Model: `NewsCentral.Models.SessionTelemetry` (in `NewsCentral.Shared`; implement
 
 A notification record reuses `SessionStartTime` (shown), `SessionEndTime` (outcome) and `CloseReason` (`Expanded`, `Dismissed` or `TimedOut`), so it is distinguishable **only** by `RecordType`. **Any consumer that counts or reports poster sessions must exclude `RecordType == "notification"`**, otherwise notifications are counted as poster displays and an Expanded notification is counted twice (its notification record plus the poster display record with `Source == "notification"`). Today nothing in the solution aggregates these records: NewsService's `TelemetryUploader` only verifies the HMAC and copies the file unchanged, and the authoring app does not read `uploads\`. See `docs/newsviewer-spec.md` ("Notification records").
 
+**Example — notification record** (`recordType` set; `sessionStartTime` = when the form was shown, `sessionEndTime` = when the outcome was decided, `closeReason` = the outcome). As written by NewsViewer (camelCase property names):
+
+```json
+{
+  "sessionId": "3f0c2a52-6a0e-4a5e-9d2f-5a7a1f1c9b11",
+  "presentationId": "4dd97030-61df-42d2-a89d-f57a7e171b2d",
+  "teamId": "cz-its",
+  "sessionStartTime": "2026-10-12T08:15:00Z",
+  "sessionEndTime": "2026-10-12T08:15:12Z",
+  "closeReason": "Expanded",
+  "recordType": "notification",
+  "contentKey": "4dd97030-61df-42d2-a89d-f57a7e171b2d|v1|sha256:2d286bb1fa5bba7b87586a5d10e302336ae289cee236cad924fa0d93be4367d3",
+  "signature": "base64-hmac-sha256"
+}
+```
+
+`closeReason` is `Expanded`, `Dismissed` or `TimedOut`; time to outcome is `sessionEndTime - sessionStartTime` (hover and lock pauses included).
+
+**Example — poster record opened from a notification** (an Expanded notification also produces this normal poster display record, so it is counted once as a poster display and once as a notification record — filter on `recordType`):
+
+```json
+{
+  "sessionId": "b7d4f9c0-2d1e-4a07-8f0b-0c6e2f4d7a22",
+  "presentationId": "4dd97030-61df-42d2-a89d-f57a7e171b2d",
+  "teamId": "cz-its",
+  "sessionStartTime": "2026-10-12T08:15:12Z",
+  "sessionEndTime": "2026-10-12T08:16:40Z",
+  "closeReason": "UserClose",
+  "source": "notification",
+  "signature": "base64-hmac-sha256"
+}
+```
+
 `Signature` is set by `TelemetryWriter` in NewsViewer immediately before writing the file. `TelemetryUploader` in NewsService verifies it before forwarding to the repository; files with `Invalid` signatures are discarded and logged.
 
 ## Cache Folder Structure

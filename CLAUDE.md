@@ -109,7 +109,7 @@ No direct inter-process communication. All coordination is via the shared cache 
 |---|---|
 | NewsCentral | User-initiated start and shutdown; interactive Azure authentication |
 | NewsService | Automatic start as Windows Service; runs unattended; handles weeks-long uptime |
-| NewsViewer | Auto-start via HKLM Run and Task Scheduler (Workstation Unlock); optional Start menu entry |
+| NewsViewer | Auto-start via HKLM Run and two Task Scheduler tasks (unlock/connect; NewsService content-changed event); optional Start menu entry |
 | All | Configurable via `appsettings.json` with registry override under `HKLM\Software\[Company]\[NewsCentral]\` |
 
 ---
@@ -151,3 +151,4 @@ These are not auto-loaded. Read the ones a task touches; a prompt's READ FIRST l
 | docs/production-deployment.md | GPO rollout and pilot validation |
 | docs/security.md | signing phase history, auth per component |
 | docs/solution-structure.md | project/file layout and references |
+| deploy/scheduled-tasks/README.md, scripts/Register-NewsViewerTasks.ps1 | NewsViewer scheduled tasks (task XMLs, reference installer) |

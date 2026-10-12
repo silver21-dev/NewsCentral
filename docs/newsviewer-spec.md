@@ -8,7 +8,7 @@ NewsViewer is a **one-shot process**: launch → evaluate the daily gate → ren
 ## Launch Conditions
 
 - Registered in `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` for system startup
-- Registered in Task Scheduler triggered by Workstation Unlock event
+- Registered in Task Scheduler by two tasks (unlock / RDP connect / console connect, and the NewsService content-changed event; see Launch surface below, `deploy/scheduled-tasks/README.md`, `scripts/Register-NewsViewerTasks.ps1`)
 - Optionally launchable from the Windows Start menu (shortcut target `NewsViewer.exe --manual`; see Manual launch below)
 - `appsettings.json` must be declared in `NewsViewer.csproj` as `<Content Include="appsettings.json">` with `CopyToOutputDirectory = PreserveNewest` so it is deployed alongside the executable
 - **Configuration layers** (registry always wins): `appsettings.json` (shipped, neutral, **committed** — a tracked artifact, never gitignored — loaded `optional: false`, so a missing file is a hard startup failure) → `appsettings.Development.json` (optional, gitignored dev overlay, loaded `optional: true`, **never published** via `CopyToPublishDirectory=Never`; documented shape in `appsettings.Development.json.example`) → registry (GPO). `appsettings.json` is the base layer the MSI installs and GPO sits on top of. See `docs/configuration.md` → appsettings.json — NewsViewer.

@@ -539,6 +539,72 @@ Windows Event Log unless that value is lowered too. There is no file sink. The `
 > ⚠️ Lowering `-EventLogLevel` to Debug floods the Application log on every client. Use it only
 > temporarily on individual machines and revert afterwards.
 
+
+### 8.5 Rolling out new-content notifications
+
+The "News arrived!" notification (NewsViewer) and the launch surface behind it
+(`docs/newsviewer-spec.md` → "Launch triggers", "New-content notification"; installer side in
+`docs/packaging.md` → "NewsViewer launch surface").
+
+**Steps**
+
+1. **Install NewsService and NewsViewer together** (NewsService first where the order is controllable). The
+   notification records add optional fields to the HMAC-signed session telemetry; an older NewsService
+   discards those records as invalid.
+2. **Register the two scheduled tasks** from `deploy/scheduled-tasks/` — `NewsViewer Launch` (unlock,
+   RDP connect, console connect) and `NewsViewer Content Arrived` (NewsService event 2001,
+   `--trigger content`) — with the install path substituted, and **remove the legacy Workstation Unlock
+   task** (`\{Company}\NewsCentral\NewsViewer`). Keep the HKLM Run entry. Reference:
+   `scripts/Register-NewsViewerTasks.ps1`.
+3. **Register the NewsService event source** (`NewsService`, log `Application`) before NewsService first
+   runs. The Content Arrived task subscribes to exactly that log/source; if
+   `Logging:EventLog:LogName`/`SourceName` are ever changed, regenerate the task.
+4. **`Ui:NotifyNewContent`** (NewsViewer, DWORD, default on = `1`) controls the notification. To turn it
+   off fleet-wide, deliver `HKLM\Software\{Company}\NewsCentral\NewsViewer\Ui\NotifyNewContent` = `0` by
+   GPO; on a dev/pilot machine:
+
+   ```
+   .\scripts\Set-RegistryOverrides.ps1 -Company "<Company>" -ComponentName NewsViewer -NotifyNewContent $false
+   ```
+
+   With it off, a launch after today's poster was already shown exits silently, as before the feature.
+
+**Upgrade expectations (what users will and will not see)**
+
+- On the first launch after the upgrade the per-user content marker is empty: NewsViewer adopts the
+  current content silently (`MarkerInitialized` in `launch.log`). **No notification** is raised for a
+  poster the user already saw.
+- **One possible one-time notification** because the poster is now ranked newest-to-team (the later of the
+  presentation's last-modified and the assignment's publish date): a client may select a different
+  presentation than before. If the daily gate was already hit that day, that user gets one
+  "News arrived!" for it. Expected, once.
+
+**Dev-box task setup.** Instead of hand-editing the XML, point the tasks at a build with `-ExePath`
+(elevated PowerShell at the repo root):
+
+```
+$exe = Get-ChildItem .\NewsViewer\bin\Debug -Recurse -Filter NewsViewer.exe | Select-Object -First 1 -ExpandProperty FullName
+.\scripts\Register-NewsViewerTasks.ps1 -ExePath $exe
+```
+
+It registers both tasks with that path, makes sure the event source exists and prints each task's
+triggers, arguments and command. Re-running is harmless; `-Uninstall` removes the two tasks. A legacy
+task is only looked up when `-Company` is given (or via `-LegacyTaskName`).
+
+### 8.6 Field validation checklist (notification and launch surface)
+
+Not yet validated in the field. Run on the listed environment and record the result.
+
+| # | Scenario | Expected result |
+|---|---|---|
+| 1 | **Virtual Desktop (VDI) presentation** — an assignment with `UseVirtualDesktop`, notification shown, user clicks it | The poster opens on its own virtual desktop (not behind the user's windows) with the countdown stopped; closing it returns to the original desktop. `launch.log` shows `outcome=Expanded`. |
+| 2 | **Multi-team device** — two of the device's teams change in the same sync cycle | Exactly **one** event 2001 in the Application log for that cycle and **one** NewsViewer launch (`trigger=content` once in `launch.log`); one notification for the single newest-to-team item. |
+| 3 | **Windows Hello (face/fingerprint) unlock** | The unlock-triggered launch is **not** treated as idle (the idle check applies only to `--trigger content`); the poster / notification behave exactly as after a password unlock. |
+| 4 | **RDP connect / reconnect** and **fast user switching** | `RemoteConnect` / `ConsoleConnect` launch NewsViewer in the session that connected. With two simultaneous **local** sessions (fast user switching), **each** gets its own notification (Parallel tasks + the per-session `Local\` mutex): no `AlreadyRunning` caused by the other session. Note: NewsViewer exits silently in a remote/virtual session (RDP, Citrix ICA, Horizon — the remote-session suppression rule, which runs before any logging), so a `RemoteConnect` launch inside an RDP session shows nothing by design; record whether that is the intended outcome for RDP-connected users. |
+| 5 | **150% scaling / mixed DPI / multiple monitors** | The notification appears on the **primary** monitor only, at the bottom-right of its working area (bottom-left for Arabic), 5 DIPs from the corner, correctly scaled; no clipping in de/zh/pt/ar. |
+| 6 | **Fresh machine** | The event source is registered by the installer before NewsService first runs; after the first sync that changes content, event 2001 appears and the Content Arrived task fires (`Last Run Result` 0x0 in Task Scheduler). |
+| 7 | **Live Entra multi-team validation** *(carried over)* | On an Entra-joined box with `Entra:Enabled=true`, a device in several dynamic teams resolves them all (`resolved-teams.json`), one cycle produces one event, and NewsViewer selects the newest-to-team item across the union. See `docs/entra-dynamic-teams.md`. |
+
 ---
 
 ## Upgrading an existing installation
