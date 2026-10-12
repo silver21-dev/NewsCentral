@@ -5,8 +5,8 @@ namespace NewsViewer.Services;
 /// <summary>
 /// Per-user one-line-per-launch diagnostic log (<c>launch.log</c> next to the gate state). NewsViewer
 /// has no other logging. Size-capped (newest half kept above 64 KB). Plain file I/O that never
-/// throws; contains no user names or paths — only trigger, decision, reason, content key and (for a
-/// notification) the item title.
+/// throws; contains no user names or paths - only trigger, decision, reason, content key and (for a
+/// notification) the item title and outcome. Line format: <see cref="LaunchLogLine"/>.
 /// </summary>
 internal sealed class LaunchLog
 {
@@ -16,17 +16,12 @@ internal sealed class LaunchLog
 
     public LaunchLog(string userStatePath) => _path = Path.Combine(userStatePath, FileName);
 
-    public void Append(string trigger, string decision, string reason, string? contentKey, string? title = null)
+    public void Append(string trigger, string decision, string reason, string? contentKey,
+        string? title = null, string? outcome = null)
     {
         try
         {
-            var line = string.Join(" | ",
-                DateTimeOffset.Now.ToString("yyyy-MM-ddTHH:mm:sszzz"),
-                $"trigger={trigger}",
-                $"decision={decision}",
-                $"reason={reason}",
-                $"key={Clean(contentKey)}") +
-                (title is null ? string.Empty : $" | title={Clean(title)}");
+            var line = LaunchLogLine.Format(DateTimeOffset.Now, trigger, decision, reason, contentKey, title, outcome);
 
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             File.AppendAllText(_path, line + "\n");
@@ -41,7 +36,4 @@ internal sealed class LaunchLog
     {
         try { File.Delete(_path); } catch { }
     }
-
-    private static string Clean(string? s) =>
-        string.IsNullOrEmpty(s) ? "-" : s.Replace('\r', ' ').Replace('\n', ' ').Replace('|', '/');
 }

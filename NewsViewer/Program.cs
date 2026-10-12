@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using NewsCentral.Configuration;
 using NewsCentral.Models;
+using NewsCentral.Models.IndexFile;
 using NewsCentral.Security;
 using NewsCentral.Launch;
 using NewsViewer.Configuration;
@@ -171,6 +172,30 @@ static class Program
         var title      = assignment is null ? null
             : !string.IsNullOrWhiteSpace(assignment.PosterText) ? assignment.PosterText : assignment.PresentationName;
 
+#if DEBUG
+        // --test-notify (Debug builds only): shows the "News arrived!" form for the currently selected item,
+        // bypassing the launch decision. Writes NO marker and NO telemetry (an Expanded poster included);
+        // logs decision=MiniForm reason=Test. Combinable with --culture.
+        if (args.Any(a => string.Equals(a, "--test-notify", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (assignment is null)
+            {
+                launchLog.Append(triggerName, "Exit", "NoContent", null);
+                ApplyWallpaperStyle();
+                return;
+            }
+
+            launchLog.Append(triggerName, "MiniForm", "Test", contentKey, title);
+            var test = ShowNotification(null);
+            if (test?.Outcome == NotificationOutcome.Expanded)
+                ShowPoster(assignment, imagePath ?? string.Empty, recordShown: false, countdownStopped: true, writeTelemetry: false);
+
+            ApplyWallpaperStyle();
+            GC.KeepAlive(mutex);
+            return;
+        }
+#endif
+
         var decision = LaunchDecider.Decide(new LaunchInputs
         {
             Active           = config.Active,
@@ -197,71 +222,104 @@ static class Program
             return;
         }
 
+        // Shows the standard poster form for `assignment` (on a Virtual Desktop when the assignment asks
+        // for one). Shared by the normal full-poster launch and the notification's Expanded outcome, so
+        // both open exactly the same form. Blocks until the form is closed.
+        void ShowPoster(PublishedAssignmentIndex item, string itemImage, bool recordShown, bool countdownStopped,
+            bool writeTelemetry)
+        {
+            var isOnline = ReadOnlineStatus(config.CacheRootPath);
+
+            // Optional delivered wallpaper / lock screen buttons (Ui:ShowDeliveredImages, default off). Null = the
+            // form is built without them. The resolver is read-only and never throws; failures are only logged.
+            var delivered = config.Ui.ShowDeliveredImages
+                ? DeliveredImageResolver.CreateDefault(m => System.Diagnostics.Debug.WriteLine($"[DeliveredImages] {m}"))
+                : null;
+
+            // Resolve the raw duration to an effective value here (not in the view): -1 = never auto-close,
+            // 0 / any other negative = unset -> 30s default, >0 = as-is. Single source of truth is
+            // PresentationDefaults.
+            int effectiveDuration = PresentationDefaults.ResolveDuration(item.DisplayDurationSeconds);
+
+            if (item.UseVirtualDesktop)
+            {
+                // Application.EnableVisualStyles() and other WinForms startup calls on the main
+                // thread create hidden internal windows (the WinForms parking window, etc.).
+                // SetThreadDesktop silently returns false once a thread owns any window handle,
+                // so the forms end up on the original desktop instead of the new one.
+                // Using a fresh STA thread guarantees no prior window handles exist when
+                // SetThreadDesktop is called. (After a notification the main thread has already owned
+                // windows, which is exactly why this path never reuses it.)
+                var uiThread = new Thread(() =>
+                {
+                    using var desktop = new VirtualDesktopManager();
+                    desktop.SwitchToNew();
+
+                    var bgForm     = new BackgroundForm(item.VirtualDesktopBackgroundColor);
+                    bgForm.Show();
+
+                    var viewerForm = new ViewerForm(item, itemImage, telemetry, viewerState, isOnline, effectiveDuration,
+                        recordShown: recordShown, deliveredImages: delivered,
+                        startCountdownStopped: countdownStopped, writeTelemetry: writeTelemetry);
+                    viewerForm.FormClosed += (_, _) => { bgForm.Close(); desktop.SwitchToOriginal(); };
+                    Application.Run(viewerForm);
+                });
+                uiThread.SetApartmentState(ApartmentState.STA);
+                uiThread.Start();
+                uiThread.Join();
+            }
+            else
+            {
+                Application.Run(new ViewerForm(item, itemImage, telemetry, viewerState, isOnline, effectiveDuration,
+                    recordShown: recordShown, deliveredImages: delivered,
+                    startCountdownStopped: countdownStopped, writeTelemetry: writeTelemetry));
+            }
+        }
+
+        // Shows the "News arrived!" form and blocks until it closes. `onShown` runs from the form's Shown
+        // handler (the form is on screen) - the only place the content marker is written. The outcome line
+        // is appended when the form closes; a failure before the form is shown is logged and writes no marker.
+        NotificationForm? ShowNotification(Action? onShown)
+        {
+            NotificationForm? form = null;
+            try
+            {
+                form = new NotificationForm(title, onShown);
+                Application.Run(form);
+            }
+            catch (Exception ex)
+            {
+                launchLog.Append(triggerName, "MiniForm", $"Error({ex.GetType().Name})", contentKey);
+                form?.Dispose();
+                return null;
+            }
+
+            if (form.ShownUtc is not null)
+                launchLog.Append(triggerName, "MiniForm", "Outcome", contentKey,
+                    outcome: form.Outcome?.ToString() ?? "Closed");
+            return form;
+        }
+
         if (decision.Action == LaunchAction.MiniForm)
         {
-            // M3 shows the "News arrived!" form here. Until then the decision is only recorded, and the
-            // marker is deliberately NOT written so the notification is still pending when M3 lands.
-            launchLog.Append(triggerName, "MiniForm (pending M3)", decision.Reason, decision.ContentKey, decision.Title);
+            launchLog.Append(triggerName, "MiniForm", decision.Reason, decision.ContentKey, decision.Title);
+
+            // The marker is written once the form is actually on screen (Shown), not on the decision.
+            var notification = ShowNotification(() => viewerState.WriteContentMarker(decision.ContentKey!));
+
+            // Expanded: the standard poster for the SAME item the decision chose (no re-selection), countdown
+            // already stopped. The daily gate was consumed earlier today, so it is not stamped again.
+            if (notification?.Outcome == NotificationOutcome.Expanded)
+                ShowPoster(assignment!, imagePath!, recordShown: false, countdownStopped: true, writeTelemetry: true);
+
             ApplyWallpaperStyle();
+            GC.KeepAlive(mutex);
             return;
         }
 
         launchLog.Append(triggerName, "FullPoster", decision.Reason, decision.ContentKey);
-        assignment = assignment!;   // FullPoster implies a usable item
-        imagePath  = imagePath!;
-
-        var isOnline = ReadOnlineStatus(config.CacheRootPath);
-
-        // Optional delivered wallpaper / lock screen buttons (Ui:ShowDeliveredImages, default off). Null = the
-        // form is built without them. The resolver is read-only and never throws; failures are only logged.
-        var delivered = config.Ui.ShowDeliveredImages
-            ? DeliveredImageResolver.CreateDefault(m => System.Diagnostics.Debug.WriteLine($"[DeliveredImages] {m}"))
-            : null;
-
-        // Resolve the raw duration to an effective value here (not in the view): -1 = never auto-close,
-        // 0 / any other negative = unset -> 30s default, >0 = as-is. Single source of truth is
-        // PresentationDefaults.
-        int effectiveDuration = PresentationDefaults.ResolveDuration(assignment.DisplayDurationSeconds);
-
-        if (assignment.UseVirtualDesktop)
-        {
-            // Application.EnableVisualStyles() and other WinForms startup calls on the main
-            // thread create hidden internal windows (the WinForms parking window, etc.).
-            // SetThreadDesktop silently returns false once a thread owns any window handle,
-            // so the forms end up on the original desktop instead of the new one.
-            // Using a fresh STA thread guarantees no prior window handles exist when
-            // SetThreadDesktop is called.
-            var a  = assignment;
-            var ip = imagePath;
-            var t  = telemetry;
-            var vs = viewerState;
-            var io = isOnline;
-            var ed = effectiveDuration;
-
-            var uiThread = new Thread(() =>
-            {
-                using var desktop = new VirtualDesktopManager();
-                desktop.SwitchToNew();
-
-                var bgForm     = new BackgroundForm(a.VirtualDesktopBackgroundColor);
-                bgForm.Show();
-
-                var viewerForm = new ViewerForm(a, ip, t, vs, io, ed, recordShown: !manual, deliveredImages: delivered);
-                viewerForm.FormClosed += (_, _) => { bgForm.Close(); desktop.SwitchToOriginal(); };
-                Application.Run(viewerForm);
-            });
-            uiThread.SetApartmentState(ApartmentState.STA);
-            uiThread.Start();
-            uiThread.Join();
-
-            // Back on the main thread / original desktop after VD switch-back and teardown.
-            ApplyWallpaperStyle();
-        }
-        else
-        {
-            Application.Run(new ViewerForm(assignment, imagePath, telemetry, viewerState, isOnline, effectiveDuration, recordShown: !manual, deliveredImages: delivered));
-            ApplyWallpaperStyle();
-        }
+        ShowPoster(assignment!, imagePath!, recordShown: !manual, countdownStopped: false, writeTelemetry: true);
+        ApplyWallpaperStyle();
 
         // Keep the mutex rooted until the very end. `using var` guarantees disposal at method exit but
         // does NOT keep the object reachable — once the last read is behind us the GC may finalize it

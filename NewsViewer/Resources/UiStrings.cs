@@ -22,6 +22,10 @@ internal static class UiStrings
     internal static string Close => Get(nameof(Close));
     internal static string FormClosesIn => Get(nameof(FormClosesIn));
     internal static string MoreInformation => Get(nameof(MoreInformation));
+    internal static string NotifyDismissTooltip => Get(nameof(NotifyDismissTooltip));
+    internal static string NotifyHeading => Get(nameof(NotifyHeading));
+    internal static string NotifyOpenTooltip => Get(nameof(NotifyOpenTooltip));
+    internal static string NotifyTitleFallback => Get(nameof(NotifyTitleFallback));
     internal static string Offline => Get(nameof(Offline));
     internal static string Online => Get(nameof(Online));
     internal static string Seconds => Get(nameof(Seconds));
