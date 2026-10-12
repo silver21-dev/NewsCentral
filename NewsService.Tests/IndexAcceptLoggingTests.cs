@@ -47,7 +47,8 @@ public sealed class IndexAcceptLoggingTests : IDisposable
         var log   = new CapturingLogger<SyncService>();
         // Only repository, cache, configuration, and logger are exercised by SyncTeamAsync.
         var sut = new SyncService(repo, cache, lockScreen: null!, imagePublisher: null!, telemetry: null!,
-                                  entra: null!, configuration: config, logger: log);
+                                  entra: null!, configuration: config, logger: log,
+                                  contentChanged: new NullContentChangedNotifier());
         return (sut, log, repo, cache);
     }
 

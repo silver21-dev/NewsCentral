@@ -52,7 +52,7 @@ public sealed class DisplaySurfacesTests : IDisposable
 
         var sut = new SyncService(
             repository: null!, cache: cache, lockScreen: fake, imagePublisher: publisher,
-            telemetry: null!, entra: null!, configuration: config, logger: log);
+            telemetry: null!, entra: null!, configuration: config, logger: log, contentChanged: new NullContentChangedNotifier());
 
         return (sut, fake, log);
     }

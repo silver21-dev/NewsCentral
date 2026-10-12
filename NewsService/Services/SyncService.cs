@@ -47,7 +47,7 @@ public sealed class SyncService(
     EntraTeamResolutionService entra,
     IConfiguration configuration,
     ILogger<SyncService> logger,
-    IContentChangedNotifier? contentChanged = null)
+    IContentChangedNotifier contentChanged)
 {
     private static readonly JsonSerializerOptions Json = JsonDefaults.Options;
 
@@ -192,19 +192,31 @@ public sealed class SyncService(
         if (teams.Count == 0) return false;
 
         bool allOk = true;
-        foreach (var teamFolder in teams)
+        bool contentChangedThisCycle = false;
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            try
+            foreach (var teamFolder in teams)
             {
-                if (await SyncTeamAsync(teamFolder, dynamicTeams.Contains(teamFolder), ct))
-                    NotifyContentChanged();   // per team until the per-cycle coalescing commit
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    if (await SyncTeamAsync(teamFolder, dynamicTeams.Contains(teamFolder), ct))
+                        contentChangedThisCycle = true;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Failed to sync team {Team}", teamFolder);
+                    allOk = false;
+                }
             }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to sync team {Team}", teamFolder);
-                allOk = false;
-            }
+        }
+        finally
+        {
+            // One ContentChanged event per cycle, after ALL teams have finished — a task launched by it
+            // never races a team still downloading. In a finally so teams already completed are still
+            // announced if the service is stopping mid-cycle (their index is cached and would never
+            // look "changed" again).
+            if (contentChangedThisCycle) NotifyContentChanged();
         }
         return allOk;
     }
@@ -343,7 +355,7 @@ public sealed class SyncService(
 
     private void NotifyContentChanged()
     {
-        try { contentChanged?.NotifyContentChanged(); }
+        try { contentChanged.NotifyContentChanged(); }
         catch (Exception ex) { logger.LogWarning(ex, "Content-changed notification failed"); }
     }
 

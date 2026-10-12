@@ -54,7 +54,7 @@ public sealed class WorkerZeroTeamsTests : IDisposable
         var syncService = new SyncService(
             repository: repo, cache: cache, lockScreen: new NoopPersonalization(),
             imagePublisher: publisher, telemetry: telemetry, entra: null!,
-            configuration: configuration, logger: new CapturingLogger<SyncService>());
+            configuration: configuration, logger: new CapturingLogger<SyncService>(), contentChanged: new NullContentChangedNotifier());
 
         var worker = new Worker(new CapturingLogger<Worker>(), syncService, configuration, svcConfig);
 

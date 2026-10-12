@@ -39,3 +39,9 @@ public sealed class EventLogContentChangedNotifier(
         }
     }
 }
+
+/// <summary>No-op notifier for callers (and tests) that do not care about the event.</summary>
+internal sealed class NullContentChangedNotifier : IContentChangedNotifier
+{
+    public void NotifyContentChanged() { }
+}

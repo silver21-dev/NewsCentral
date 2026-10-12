@@ -31,7 +31,8 @@ public sealed class LockScreenApplyTests
         // Only lockScreen + logger + configuration (Delivery:LockScreenEnabled /
         // Delivery:PublishedImagePath) are exercised here; the rest are unused.
         new(repository: null!, cache: null!, lockScreen: fake, imagePublisher: null!, telemetry: null!,
-            entra: null!, configuration: configuration ?? EmptyConfiguration, logger: log);
+            entra: null!, configuration: configuration ?? EmptyConfiguration, logger: log,
+            contentChanged: new NullContentChangedNotifier());
 
     // ── Write branch (intended non-null) ────────────────────────────────────────
 

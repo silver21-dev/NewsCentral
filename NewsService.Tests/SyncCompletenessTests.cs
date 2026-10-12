@@ -31,7 +31,7 @@ public sealed class SyncCompletenessTests : IDisposable
         var cache  = new CacheManager(_root, JsonDefaults.Options);
         var log    = new CapturingLogger();
         var sut = new SyncService(repo, cache, lockScreen: null!, imagePublisher: null!, telemetry: null!,
-                                  entra: null!, configuration: config, logger: log);
+                                  entra: null!, configuration: config, logger: log, contentChanged: new NullContentChangedNotifier());
         return (sut, repo, cache, log);
     }
 

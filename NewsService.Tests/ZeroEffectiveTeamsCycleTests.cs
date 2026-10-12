@@ -68,7 +68,7 @@ public sealed class ZeroEffectiveTeamsCycleTests : IDisposable
 
         var sut = new SyncService(
             repository: repo, cache: cache, lockScreen: fake, imagePublisher: publisher,
-            telemetry: telemetry, entra: null!, configuration: configuration, logger: log);
+            telemetry: telemetry, entra: null!, configuration: configuration, logger: log, contentChanged: new NullContentChangedNotifier());
 
         return (sut, fake, log, cache, repo);
     }

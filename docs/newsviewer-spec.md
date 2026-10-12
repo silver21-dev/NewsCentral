@@ -37,7 +37,7 @@ NewsService writes a dedicated EventLog entry whenever it has accepted a changed
 | **Source** | `NewsService` (`Logging:EventLog:SourceName`) |
 | **EventID** | `2001` (`ContentChanged`), Information |
 
-The event-triggered NewsViewer scheduled task that consumes it arrives in **M4**; NewsViewer itself does not use it yet. NewsService does not filter by content type — NewsViewer will decide relevance. It is emitted once per accepted index change (per team), only after the index and all its images are cached, and never for an unchanged, rejected or partially synced index.
+The event-triggered NewsViewer scheduled task that consumes it arrives in **M4**; NewsViewer itself does not use it yet. NewsService does not filter by content type — NewsViewer will decide relevance. It is emitted **once per sync cycle**, after all teams have finished, when at least one team produced an accepted and complete change (the index is written last, only once every referenced image is cached). It is never emitted for an unchanged, rejected or incomplete sync; an incomplete sync leaves the previous index in effect and is retried next cycle.
 ## The daily gate
 
 The gate is **date-only** and evaluated once per launch. `ViewerStateService.AlreadyShownToday()` takes **no presentation id** — it disturbs the user at most once per **logical day**, regardless of which presentation is active.
