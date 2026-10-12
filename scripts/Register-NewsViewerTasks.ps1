@@ -108,8 +108,18 @@ function Write-Step { param([string]$Text) Write-Host $Text -ForegroundColor Cya
 # Runs schtasks and returns its exit code (output is returned through $script:SchtasksOutput).
 function Invoke-Schtasks {
     param([string[]]$Arguments)
-    $script:SchtasksOutput = & schtasks.exe @Arguments 2>&1 | Out-String
-    return $LASTEXITCODE
+    # Windows PowerShell 5.1 turns native stderr redirected with 2>&1 into ErrorRecords, and under
+    # $ErrorActionPreference = "Stop" the first one is a terminating NativeCommandError - but a missing task
+    # (exit 1 + stderr) is an expected outcome here. So the call runs with 'Continue' (restored in finally),
+    # every output item is converted to text, and success is decided by $LASTEXITCODE alone.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $script:SchtasksOutput = (& schtasks.exe @Arguments 2>&1 | ForEach-Object { "$_" }) -join "`n"
+        $code = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previous }
+    return $code
 }
 
 function Test-TaskExists {
@@ -117,19 +127,25 @@ function Test-TaskExists {
     return ((Invoke-Schtasks @("/Query", "/TN", $Name)) -eq 0)
 }
 
+# Deletes a task if it exists. Returns $true when it was removed, $false when there was nothing to remove (a
+# missing task is an expected outcome, never an error). Any other failure throws with schtasks' own output.
+function Remove-TaskIfPresent {
+    param([string]$Name)
+    if (-not (Test-TaskExists $Name)) { return $false }
+    if ((Invoke-Schtasks @("/Delete", "/TN", $Name, "/F")) -ne 0) {
+        $output = $script:SchtasksOutput.Trim()
+        if (-not (Test-TaskExists $Name)) { return $false }   # vanished between the query and the delete
+        throw "schtasks /Delete failed for '$Name': $output"
+    }
+    return $true
+}
+
 # ── Uninstall ────────────────────────────────────────────────────────────────
 if ($Uninstall) {
     Write-Step "Removing NewsViewer scheduled tasks"
     foreach ($name in @($LaunchTask, $ContentTask)) {
-        if (Test-TaskExists $name) {
-            if ((Invoke-Schtasks @("/Delete", "/TN", $name, "/F")) -ne 0) {
-                throw "schtasks /Delete failed for '$name': $($script:SchtasksOutput.Trim())"
-            }
-            Write-Host "  removed   $name"
-        }
-        else {
-            Write-Host "  not found $name"
-        }
+        if (Remove-TaskIfPresent $name) { Write-Host "  removed   $name" }
+        else { Write-Host "  not found $name" }
     }
     Write-Host ""
     Write-Host "The event source, the legacy task and the HKLM Run entry were not touched." -ForegroundColor DarkGray
@@ -242,15 +258,8 @@ Write-Step "Legacy Workstation Unlock task and old dev-box tasks"
 $legacy = $LegacyTaskName.Replace("{Company}", $Company)
 foreach ($old in @($legacy) + $OldDevTasks) {
     $label = if ($old -eq $legacy) { "legacy " } else { "old dev " }
-    if (Test-TaskExists $old) {
-        if ((Invoke-Schtasks @("/Delete", "/TN", $old, "/F")) -ne 0) {
-            throw "schtasks /Delete failed for '$old': $($script:SchtasksOutput.Trim())"
-        }
-        Write-Host "  removed   $label$old"
-    }
-    else {
-        Write-Host "  not found $label$old (nothing to remove)"
-    }
+    if (Remove-TaskIfPresent $old) { Write-Host "  removed   $label$old" }
+    else { Write-Host "  not found $label$old (nothing to remove)" }
 }
 
 # ── Verification ─────────────────────────────────────────────────────────────
