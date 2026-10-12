@@ -226,7 +226,7 @@ static class Program
         // for one). Shared by the normal full-poster launch and the notification's Expanded outcome, so
         // both open exactly the same form. Blocks until the form is closed.
         void ShowPoster(PublishedAssignmentIndex item, string itemImage, bool recordShown, bool countdownStopped,
-            bool writeTelemetry)
+            bool writeTelemetry, string? source = null)
         {
             var isOnline = ReadOnlineStatus(config.CacheRootPath);
 
@@ -260,7 +260,7 @@ static class Program
 
                     var viewerForm = new ViewerForm(item, itemImage, telemetry, viewerState, isOnline, effectiveDuration,
                         recordShown: recordShown, deliveredImages: delivered,
-                        startCountdownStopped: countdownStopped, writeTelemetry: writeTelemetry);
+                        startCountdownStopped: countdownStopped, writeTelemetry: writeTelemetry, source: source);
                     viewerForm.FormClosed += (_, _) => { bgForm.Close(); desktop.SwitchToOriginal(); };
                     Application.Run(viewerForm);
                 });
@@ -272,7 +272,7 @@ static class Program
             {
                 Application.Run(new ViewerForm(item, itemImage, telemetry, viewerState, isOnline, effectiveDuration,
                     recordShown: recordShown, deliveredImages: delivered,
-                    startCountdownStopped: countdownStopped, writeTelemetry: writeTelemetry));
+                    startCountdownStopped: countdownStopped, writeTelemetry: writeTelemetry, source: source));
             }
         }
 
@@ -307,10 +307,18 @@ static class Program
             // The marker is written once the form is actually on screen (Shown), not on the decision.
             var notification = ShowNotification(() => viewerState.WriteContentMarker(decision.ContentKey!));
 
+            // One record per shown notification (shown time, outcome, time to outcome) through the existing
+            // session-file mechanism. Written before the poster opens so a long-open poster cannot delay it.
+            if (notification is { ShownUtc: { } shownUtc, OutcomeUtc: { } outcomeUtc, Outcome: { } outcome })
+                telemetry.WriteNotification(assignment!.PresentationId, assignment.SourceTeamFolderName,
+                    decision.ContentKey!, shownUtc, outcomeUtc, outcome.ToString());
+
             // Expanded: the standard poster for the SAME item the decision chose (no re-selection), countdown
-            // already stopped. The daily gate was consumed earlier today, so it is not stamped again.
+            // already stopped, its display record marked source "notification". The daily gate was consumed
+            // earlier today, so it is not stamped again.
             if (notification?.Outcome == NotificationOutcome.Expanded)
-                ShowPoster(assignment!, imagePath!, recordShown: false, countdownStopped: true, writeTelemetry: true);
+                ShowPoster(assignment!, imagePath!, recordShown: false, countdownStopped: true, writeTelemetry: true,
+                    source: SessionTelemetry.NotificationSource);
 
             ApplyWallpaperStyle();
             GC.KeepAlive(mutex);

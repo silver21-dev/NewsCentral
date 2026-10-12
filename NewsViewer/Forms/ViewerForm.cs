@@ -55,6 +55,8 @@ public sealed class ViewerForm : Form
     private readonly bool _recordShown;
     // False only for the Debug --test-notify run: the session record is not written.
     private readonly bool _writeTelemetry;
+    // "notification" when opened from the "News arrived!" form; carried onto the session record.
+    private readonly string? _source;
 
     // Optional delivered-image preview (Ui:ShowDeliveredImages). A null resolver means the feature is
     // off: no buttons are created and the form is exactly the pre-feature layout.
@@ -75,10 +77,12 @@ public sealed class ViewerForm : Form
         bool recordShown = true,
         DeliveredImageResolver? deliveredImages = null,
         bool startCountdownStopped = false,
-        bool writeTelemetry = true)
+        bool writeTelemetry = true,
+        string? source = null)
     {
         _recordShown = recordShown;
         _writeTelemetry = writeTelemetry;
+        _source = source;
         _deliveredImages = deliveredImages;
         _assignment = assignment;
         _imagePath = imagePath;
@@ -597,6 +601,7 @@ public sealed class ViewerForm : Form
                 _assignment.SourceTeamFolderName,
                 _sessionStart,
                 DateTime.UtcNow,
-                _closeReason);
+                _closeReason,
+                _source);
     }
 }
