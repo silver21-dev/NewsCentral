@@ -92,6 +92,7 @@ HKLM\Software\[Company]\NewsCentral\NewsViewer\
 │   BypassImageIntegrityCheck    DWORD     (1 = skip image SHA-256 verification)
 ├── Display\
 │       LogicalDayStartHour  REG_SZ   (int 0..23; default 0 = calendar day — see below; MUST be REG_SZ)
+│       ShowInRemoteSessions  REG_DWORD   (0/1; default 1 - show posters and notifications in remote sessions: RDP, Citrix, Horizon; 0 = silent exit logged as RemoteSession; the wallpaper style re-assert never runs in a remote session)
 ├── Ui\
 │       Theme   REG_SZ   ("Dark" | "Light"; default Dark — viewer color theme, resolved once at launch; "light" case-insensitive selects Light, anything else Dark; registry-only, no appsettings key)
 │       ShowDeliveredImages   REG_DWORD   (0/1; default 0 - poster form offers Wallpaper / Lock screen buttons for the image NewsService delivers; read-only reads of NewsService\Delivery flags are an exception to the own-subkey rule - see docs/newsviewer-spec.md)
@@ -356,6 +357,8 @@ NewsViewer resolves configuration across three layers (registry always wins):
 ```
 
 `Active` (NewsViewer) — per-machine master switch. `bool`, default `true` (registry `Active` DWORD `0`/`1` at the hive root; absent = `true`, so an unprovisioned machine is never silently disabled). Evaluated first in `Main()`, before every other startup guard. `false` exits at startup with no action taken: no poster is shown, no wallpaper style re-assert runs, `viewerstate.json` is not written, no telemetry session file is written, and no dialog is shown. The current wallpaper style is deliberately left as-is — deactivation is not a revert. (The wallpaper *image* is NewsService's concern and is unaffected by NewsViewer's `Active` switch in either direction.)
+
+`Display:ShowInRemoteSessions` (NewsViewer) — `bool`, default `true` (registry `Display\ShowInRemoteSessions` DWORD 0/1; genuine boolean, so DWORD is correct). When `true`, posters and notifications are shown in remote sessions (RDP, Citrix, VMware Horizon). `false` restores the previous behavior: NewsViewer exits silently, logged as `reason=RemoteSession` in `launch.log`. `--manual` ignores it. Independently of this value, the HKCU wallpaper style re-assert never runs in a remote session, and a poster that wants a Virtual Desktop is shown on the standard desktop there. See `docs/newsviewer-spec.md` ("Remote sessions").
 
 `Display:LogicalDayStartHour` (NewsViewer) — the hour (local time) at which the "logical day" for the once-per-day poster gate rolls over. `int`, default `0` (= calendar day), clamped to `0..23`. Example: `5` makes the day run 05:00 → 04:59 next morning, so a night-shift unlock after midnight is still the same logical day and does not re-trigger the poster. See `docs/newsviewer-spec.md` → The daily gate.
 

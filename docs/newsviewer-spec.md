@@ -49,26 +49,31 @@ NewsService does not filter by content type — NewsViewer decides relevance. Th
 |---|---|---|
 | 1 | `Active` = false | exit silently (not logged) |
 | 2 | single-instance mutex not acquired | `Exit(AlreadyRunning)` |
-| 3 | `--manual` | `FullPoster` — bypasses the gate and every check below (still needs a usable item, else `Exit(NoContent)`) |
-| 4 | no selected poster item (or unusable image / no qualifying monitor) | `Exit(NoContent)` |
-| 5 | session not visible: not `WTSActive`, not unlocked, or the input desktop is not `Default` (any failure counts as not visible) | `Exit(NotVisible)` |
-| 6 | `--trigger content` and idle > 2 minutes (`LaunchDecider.IdleThreshold`; `GetLastInputInfo`, wrap-safe) | `Exit(Idle)` |
-| 7 | busy: `SHQueryUserNotificationState` is NOT_PRESENT, BUSY, RUNNING_D3D_FULL_SCREEN, PRESENTATION_MODE or APP (`QUIET_TIME` and `ACCEPTS_NOTIFICATIONS` are not busy; a failed call is not busy), **or** the full-screen-foreground heuristic below | `Exit(Busy)` |
-| 8 | daily gate not hit, or `BypassDailyGate` | `FullPoster` (gate consumed as before) |
-| 9 | `Ui:NotifyNewContent` = false | `Exit(NotifyDisabled)` |
-| 10 | marker empty (first run after upgrade) | marker := current key, `Exit(MarkerInitialized)` — no notification for a poster the user already saw |
-| 11 | marker = current key | `Exit(AlreadySeen)` |
-| 12 | otherwise | `MiniForm(key, title)` — the "News arrived!" notification (see below) |
+| 3 | `--manual` | `FullPoster` — bypasses the gate, the remote-session switch and every check below (still needs a usable item, else `Exit(NoContent)`, and a qualifying monitor, else `Exit(NoQualifyingMonitor)`) |
+| 4 | remote session **and** `Display:ShowInRemoteSessions` = false | `Exit(RemoteSession)` |
+| 5 | no selected poster item (or unusable image) | `Exit(NoContent)` |
+| 5b | no monitor of at least 1920×1080 (typical for a small RDP/Citrix/Horizon client window) | `Exit(NoQualifyingMonitor)` |
+| 6 | session not visible: not `WTSActive`, not unlocked, or the input desktop is not `Default` (any failure counts as not visible) | `Exit(NotVisible)` |
+| 7 | no shell: no `Shell_TrayWnd` window in this session (a published-app / seamless session; a failed probe counts as "has a shell") | `Exit(NoShell)` |
+| 8 | `--trigger content` and idle > 2 minutes (`LaunchDecider.IdleThreshold`; `GetLastInputInfo`, wrap-safe) | `Exit(Idle)` |
+| 9 | busy: `SHQueryUserNotificationState` is NOT_PRESENT, BUSY, RUNNING_D3D_FULL_SCREEN, PRESENTATION_MODE or APP (`QUIET_TIME` and `ACCEPTS_NOTIFICATIONS` are not busy; a failed call is not busy), **or** the full-screen-foreground heuristic below | `Exit(Busy)` |
+| 10 | daily gate not hit, or `BypassDailyGate` | `FullPoster` (gate consumed as before) |
+| 11 | `Ui:NotifyNewContent` = false | `Exit(NotifyDisabled)` |
+| 12 | marker empty (first run after upgrade) | marker := current key, `Exit(MarkerInitialized)` — no notification for a poster the user already saw |
+| 13 | marker = current key | `Exit(AlreadySeen)` |
+| 14 | otherwise | `MiniForm(key, title)` — the "News arrived!" notification (see below) |
 
-Rules 5–7 also guard the full poster: it is never shown behind a locked screen, on the secure desktop, to an away user on content arrival, or over a presentation. The gate is not consumed in those cases, so a later trigger retries. Every exit still performs the wallpaper style re-assert, as before.
+Rules 6–9 also guard the full poster: it is never shown behind a locked screen, on the secure desktop, in a session without a shell, to an away user on content arrival, or over a presentation. The gate is not consumed in those cases, so a later trigger retries. Every exit except those in a remote session performs the wallpaper style re-assert (see "Remote sessions"). Every exit is logged; rule 1 (`Active`) is the only silent one.
+
+The `NoQualifyingMonitor` threshold (`HasQualifyingMonitor`, at least 1920×1080 on any monitor) is unchanged; it only has its own log reason now instead of being folded into `NoContent`. A remote client window smaller than that never gets a poster or notification.
 
 **Marker.** `ContentKey` = presentation id + version + image hash (`ContentKeys.For`), so it changes when an item is republished or its image is replaced. The per-user marker ("last content this user saw or was notified about") is stored as `lastContentKey` in `%LOCALAPPDATA%\NewsCentral\viewerstate.json` next to the gate state (atomic temp-file write; the gate update preserves it). It is written when the full poster is displayed (including `--manual`) and for `MarkerInitialized`. **Until the mini form lands (M3), rule 12 only records `MiniForm (pending M3)` in the launch log and does not write the marker.**
 
 **Busy rule — full-screen foreground heuristic.** `SHQueryUserNotificationState` does not report browser full screen (F11, full-screen video) as busy, so `IsBusy()` also checks the foreground window (`FullScreenHeuristic`, pure, in `NewsCentral.Shared`; the P/Invoke gathering is in `LaunchProbes`): busy when the window rectangle covers the **whole monitor** (`rcMonitor` of `MonitorFromWindow(MONITOR_DEFAULTTONEAREST)`, not the work area) **and** `IsZoomed` is false. Not busy: no foreground window, a window of this process, the desktop/shell classes `Progman`, `WorkerW` and `Shell_TrayWnd`, a **maximized** window (it can cover the monitor when the taskbar auto-hides), a window that only fills the work area, and any failure of the calls. Busy = the notification-state rule OR this rule; it applies to every non-manual launch (full poster and notification alike).
 
-**Launch log.** `%LOCALAPPDATA%\NewsCentral\launch.log` — one line per launch: ISO timestamp, `trigger=content|none`, `decision=`, `reason=`, `key=`, and `title=` (MiniForm only). `key=` is the content key exactly as stored in `viewerstate.json` (its own `|` separators intact). When a notification form closes, a second line is appended: `decision=MiniForm | reason=Outcome | key=… | outcome=Expanded|Dismissed|TimedOut`. A failure before the form is shown logs `decision=MiniForm | reason=Error(<exception type>)` and writes no marker. Capped at 64 KB (the newest half is kept); I/O never throws; no user names or paths.
+**Launch log.** `%LOCALAPPDATA%\NewsCentral\launch.log` — one line per launch: ISO timestamp, `trigger=content|none`, `decision=`, `reason=`, `key=`, and `title=` (MiniForm only). `key=` is the content key exactly as stored in `viewerstate.json` (its own `|` separators intact). When a notification form closes, a second line is appended: `decision=MiniForm | reason=Outcome | key=… | outcome=Expanded|Dismissed|TimedOut`. A failure before the form is shown logs `decision=MiniForm | reason=Error(<exception type>)` and writes no marker. A launch whose poster wanted a Virtual Desktop but runs in a remote session carries `| note=VirtualDesktopFallback`. Capped at 64 KB (the newest half is kept); I/O never throws; no user names or paths.
 
-**Debug builds only:** `--reset-launch-state` clears this user's gate state, marker and launch log, then exits. `--test-notify` shows the notification for the currently selected item, bypassing the decision; it writes no marker and no telemetry (an Expanded poster included), logs `decision=MiniForm reason=Test` plus the outcome line, and combines with `--culture`.
+**Debug builds only:** `--reset-launch-state` clears this user's gate state, marker and launch log, then exits. `--test-notify` shows the notification for the currently selected item, bypassing the decision; it writes no marker and no telemetry (an Expanded poster included), logs `decision=MiniForm reason=Test` plus the outcome line, and combines with `--culture`. `--simulate-remote` makes the session count as remote (see "Remote sessions").
 
 ### New-content notification
 
@@ -105,7 +110,7 @@ A **logical day** runs from `Display:LogicalDayStartHour` (default `0` = calenda
 
 ### Manual launch - `--manual`
 
-`NewsViewer.exe --manual` (case-insensitive; unknown arguments are ignored) is the on-demand launch used by the Start menu shortcut. `Active` is still evaluated first, so `Active = false` exits silently even with `--manual`. A manual launch skips the daily-gate check and does **not** write the gate marker, so it neither depends on nor disturbs the scheduled once-per-day display. Everything else - the single-instance mutex, remote/virtual-session exit, poster selection, the no-poster behavior, session telemetry and the wallpaper style re-assert - follows the scheduled path unchanged. A manual launch is noted with a `[Manual]` debug line.
+`NewsViewer.exe --manual` (case-insensitive; unknown arguments are ignored) is the on-demand launch used by the Start menu shortcut. `Active` is still evaluated first, so `Active = false` exits silently even with `--manual`. A manual launch skips the daily-gate check and does **not** write the gate marker, so it neither depends on nor disturbs the scheduled once-per-day display. Everything else - the single-instance mutex, poster selection, the no-poster behavior, session telemetry and the wallpaper style re-assert - follows the scheduled path unchanged. The one exception: `--manual` also bypasses the remote-session switch and the shell and visibility checks (decision rule 3), while the Virtual Desktop fallback and the no-op wallpaper style re-assert still apply in a remote session. A manual launch is noted with a `[Manual]` debug line.
 
 ### Deliberate gap — no same-day delivery (design decision)
 
@@ -246,16 +251,31 @@ no scattered `new Font(...)`. All public control properties carry
 
 ## Virtual Desktop (overview)
 
-When `Presentation.UseVirtualDesktop = true`: creates a new Windows desktop via `CreateDesktop` / `SwitchDesktop` / `SetThreadDesktop`. Taskbar not visible. Background set to `VirtualDesktopBackgroundColor`. Auto-detected and suppressed in RDP / Citrix / VMware Horizon sessions.
+When `Presentation.UseVirtualDesktop = true`: creates a new Windows desktop via `CreateDesktop` / `SwitchDesktop` / `SetThreadDesktop`. Taskbar not visible. Background set to `VirtualDesktopBackgroundColor`. In a remote session (RDP / Citrix / VMware Horizon) desktop switching is not reliable, so the poster falls back to the standard desktop — see "Remote sessions".
 
-## Remote / Virtual Session Suppression (Phase 2)
+## Remote sessions
 
-Checked in `Program.Main` **before** the `PresentationSelector` is constructed — and well before `HasQualifyingMonitor()`, which is evaluated later in the poster-assignment guard — before any file I/O or window creation:
+NewsViewer runs in remote sessions (RDP, Citrix, VMware Horizon): posters and notifications are shown there like on the console. The exclusion that earlier phases applied (a silent early exit) was a simplification and is gone; a remote session now goes through the normal launch decision and **every exit is logged**.
 
-- **RDP and Citrix ICA** — detected via `SystemInformation.TerminalServerSession` (`GetSystemMetrics(SM_REMOTESESSION)`). Both RDP and Citrix ICA sessions set this flag.
-- **VMware Horizon** — detected via the `ViewClient_Machine_Name` environment variable, which Horizon sets in every user session.
+**Detection** (`RemoteDetection.IsRemote`, gathered in `LaunchProbes.IsRemoteSession()`): a session is remote when **any** of these is true —
 
-If either condition is true the process exits immediately and no window is shown.
+- `GetSystemMetrics(SM_REMOTESESSION)` is non-zero (RDP and Citrix ICA both set it);
+- the `ViewClient_Machine_Name` environment variable is set (VMware Horizon sets it in every user session);
+- the WTS client protocol type of the current session is not console (`WTSClientProtocolType` ≠ 0).
+
+An unreadable signal simply does not count. The result is cached for the life of the process.
+
+**Escape hatch — `Display:ShowInRemoteSessions`** (bool, REG_DWORD, default `true`; `Set-RegistryOverrides.ps1 -ShowInRemoteSessions`, NewsViewer only). `false` restores the previous behavior: the launch exits with `reason=RemoteSession` (rule 4 of the decision). `--manual` bypasses the switch.
+
+**Virtual Desktop fallback.** A poster whose presentation has `UseVirtualDesktop` is shown on the **standard desktop**, through the normal path, whenever the session is remote — gate launches, `--manual` and the Expanded notification alike (`LaunchDecider.UseVirtualDesktop`). Desktop switching (`CreateDesktop` / `SwitchDesktop`) is not reliable over a remote protocol. The launch-log line of such a launch carries `note=VirtualDesktopFallback`. The console session is unchanged.
+
+**NoShell guard.** In a published-app (seamless) session — Citrix/RDS RemoteApp — applications run without Explorer, so there is no taskbar window and no desktop to put a poster on. `HasShell()` is `FindWindowW("Shell_TrayWnd", null) != 0`; without a shell the launch exits with `reason=NoShell` (after `NotVisible`, before the idle and busy checks). A failed probe counts as "has a shell": a probe error never blocks the poster. `--manual` bypasses it.
+
+**Wallpaper style re-assert.** `ApplyWallpaperStyle()` is a **no-op whenever the session is remote**, regardless of `Display:ShowInRemoteSessions` (`LaunchDecider.ShouldAssertWallpaperStyle`). On a session host NewsService's wallpaper surface may be switched off (the documented RDS/VDI opt-out), and each user's own HKCU wallpaper style and background colour must not be rewritten there. This is the one part of the old exclusion that is kept.
+
+**Minimum monitor.** The Full-HD-or-better monitor requirement is unchanged. A remote client window smaller than 1920×1080 exits with `reason=NoQualifyingMonitor` (it used to be folded into `NoContent`). Whether to relax the threshold for remote sessions is a later decision.
+
+**Debug builds only:** `--simulate-remote` makes `IsRemoteSession()` return true, to exercise the switch and the Virtual Desktop fallback on a console session. Combinable with the other switches (`--manual`, `--test-notify`, `--culture`).
 
 ## Virtual Desktop — Full Details (Phase 2)
 
@@ -286,7 +306,7 @@ NewsViewer retains a small, deliberate **style-only** residue. Verified on Windo
 - Takes no image parameter and performs no image-existence check — there is no image to apply here.
 
 **Control flow (terminal step, re-asserted every run, unconditional — no selection, no viewerstate):**
-- Skipped entirely on remote/virtual sessions (`IsRemoteOrVirtualSession`); otherwise runs on any local interactive session and is **not** gated by `HasQualifyingMonitor`. This condition is unchanged from before the wallpaper-ownership migration.
+- **A no-op in a remote session** (`LaunchDecider.ShouldAssertWallpaperStyle`), regardless of `Display:ShowInRemoteSessions`: on a session host NewsService's wallpaper surface may be off, and each user's HKCU style and background colour must not be rewritten there (see "Remote sessions"). On a local interactive session it runs and is **not** gated by `HasQualifyingMonitor`.
 - Runs **unconditionally** — regardless of whether any wallpaper content is active, since NewsViewer no longer knows or cares whether wallpaper content exists; the style must be correct for whatever image CSP has applied, always.
 - Runs as the **terminal** step, after `ViewerForm` closes and the virtual desktop (if used) is switched back and destroyed — on the main thread / original desktop, never on the temporary VD.
 
