@@ -25,7 +25,7 @@ public sealed class PresentationSelector
 
     /// <summary>
     /// Reads index.json for each configured team, filters to News-of-the-Week assignments that are
-    /// active right now, and returns the one with the most recent PresentationLastModified. Only
+    /// active right now, and returns the one newest to the team (later of PresentationLastModified and PublishedDate). Only
     /// <see cref="DisplayTypeInfo.IsNewsOfWeek"/> content is shown as a full-screen poster — a
     /// wallpaper-only / lock-screen-only assignment is never displayed here (the wallpaper and lock
     /// screen are applied by their own independent selections). Returns null if no qualifying
@@ -44,7 +44,7 @@ public sealed class PresentationSelector
         string[] teams, Func<PublishedAssignmentIndex, bool> predicate)
     {
         var now  = DateTime.Now;
-        var best = ActiveAssignmentSelector.PickNewestActive(
+        var best = ActiveAssignmentSelector.PickNewestToTeam(
             EnumerateVerifiedAssignments(teams), now, predicate);
 
         if (best is null) return (null, null);

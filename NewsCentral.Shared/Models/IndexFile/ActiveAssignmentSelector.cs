@@ -44,4 +44,45 @@ public static class ActiveAssignmentSelector
 
         return best;
     }
+
+    /// <summary>
+    /// Poster ranking: "newest to the team" — the later of <see cref="PublishedAssignmentIndex.PresentationLastModified"/>
+    /// and the assignment's <see cref="PublishedAssignmentIndex.PublishedDate"/> (both normalized to UTC; a
+    /// missing publish date is <c>default</c> and so falls back to last-modified). Ties break on
+    /// PresentationLastModified descending, then AssignmentId ordinal ascending, so the result is
+    /// independent of enumeration order. Qualification (active window, day, predicate) is identical to
+    /// <see cref="PickNewestActive"/>, which other consumers (lock screen, wallpaper) keep using.
+    /// </summary>
+    public static PublishedAssignmentIndex? PickNewestToTeam(
+        IEnumerable<PublishedAssignmentIndex> assignments,
+        DateTime now,
+        Func<PublishedAssignmentIndex, bool> predicate)
+    {
+        PublishedAssignmentIndex? best = null;
+
+        foreach (var a in assignments)
+        {
+            if (!IsActive(a, now)) continue;
+            if (!predicate(a)) continue;
+
+            if (best is null || IsBetter(a, best))
+                best = a;
+        }
+
+        return best;
+    }
+
+    private static DateTime Utc(DateTime d) => d.ToUniversalTime();
+
+    private static DateTime Rank(PublishedAssignmentIndex a) =>
+        Utc(a.PublishedDate) > Utc(a.PresentationLastModified) ? Utc(a.PublishedDate) : Utc(a.PresentationLastModified);
+
+    private static bool IsBetter(PublishedAssignmentIndex candidate, PublishedAssignmentIndex current)
+    {
+        var c = Rank(candidate).CompareTo(Rank(current));
+        if (c != 0) return c > 0;
+        c = Utc(candidate.PresentationLastModified).CompareTo(Utc(current.PresentationLastModified));
+        if (c != 0) return c > 0;
+        return string.CompareOrdinal(candidate.AssignmentId, current.AssignmentId) < 0;
+    }
 }

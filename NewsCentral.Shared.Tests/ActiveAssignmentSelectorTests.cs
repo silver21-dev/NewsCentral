@@ -126,4 +126,81 @@ public sealed class ActiveAssignmentSelectorTests
         Assert.Null(ActiveAssignmentSelector.PickNewestActive(
             new[] { k03 }, Now, x => x.DisplayTypes.IsNewsOfWeek));
     }
+
+    // ── PickNewestToTeam: poster ranking by newest-to-team ──
+
+    private static PublishedAssignmentIndex Pub(
+        string aid, DateTime modifiedUtc, DateTime? publishedUtc, bool active = true) => new()
+    {
+        AssignmentId             = aid,
+        PresentationId           = "p-" + aid,
+        PresentationLastModified = modifiedUtc,
+        PublishedDate            = publishedUtc ?? default,
+        ScheduleStart            = active ? Now.AddDays(-1) : Now.AddDays(5),
+        ScheduleEnd              = active ? Now.AddDays(1)  : Now.AddDays(6),
+        DaysOfWeek               = "1,2,3,4,5,6,7",
+        DisplayTypes             = new DisplayTypeInfo { IsNewsOfWeek = true },
+    };
+
+    private static string? Pick(params PublishedAssignmentIndex[] items) =>
+        ActiveAssignmentSelector.PickNewestToTeam(items, Now, a => a.DisplayTypes.IsNewsOfWeek)?.AssignmentId;
+
+    private static DateTime U(int day, int hour = 0) => new(2026, 6, day, hour, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public void ToTeam_OlderPresentationWithNewerPublishDate_BeatsNewerModified()
+    {
+        var older = Pub("older", U(1), U(14));
+        var newer = Pub("newer", U(10), U(10));
+        Assert.Equal("older", Pick(newer, older));
+    }
+
+    [Fact]
+    public void ToTeam_NewerModified_BeatsOlderPublishDate()
+    {
+        var edited = Pub("edited", U(14), U(2));   // published before it was edited
+        var other  = Pub("other",  U(1),  U(10));
+        Assert.Equal("edited", Pick(other, edited));
+    }
+
+    [Fact]
+    public void ToTeam_MissingPublishDate_FallsBackToLastModified()
+    {
+        var legacy = Pub("legacy", U(12), null);
+        var other  = Pub("other",  U(1),  U(10));
+        Assert.Equal("legacy", Pick(other, legacy));
+    }
+
+    [Fact]
+    public void ToTeam_EqualRank_TieBreaksOnModifiedThenAssignmentId_IndependentOfOrder()
+    {
+        var a = Pub("b", U(5), U(10));
+        var b = Pub("a", U(5), U(10));
+        Assert.Equal("a", Pick(a, b));
+        Assert.Equal("a", Pick(b, a));
+
+        var older = Pub("a", U(1), U(10));   // same rank (10th), older modification
+        var newer = Pub("z", U(10), U(10));  // same rank, newer modification wins first
+        Assert.Equal("z", Pick(older, newer));
+        Assert.Equal("z", Pick(newer, older));
+    }
+
+    [Fact]
+    public void ToTeam_MixedUtcOffsets_CompareAsInstants()
+    {
+        // 2026-06-10 23:00 at +05:00 == 18:00Z, which is earlier than 2026-06-10 20:00Z.
+        var plus5 = new DateTimeOffset(2026, 6, 10, 23, 0, 0, TimeSpan.FromHours(5)).LocalDateTime;
+        var a = Pub("a", U(1), plus5);
+        var b = Pub("b", U(1), U(10, 20));
+        Assert.Equal("b", Pick(a, b));
+    }
+
+    [Fact]
+    public void ToTeam_InactiveItems_NeverWin()
+    {
+        var inactive = Pub("inactive", U(14), U(14), active: false);
+        var active   = Pub("active", U(1), U(2));
+        Assert.Equal("active", Pick(inactive, active));
+        Assert.Null(Pick(inactive));
+    }
 }
