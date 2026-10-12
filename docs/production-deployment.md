@@ -403,6 +403,8 @@ HKLM\Software\{Company}\NewsCentral\NewsViewer\
 │       Theme                   REG_SZ   "Dark" | "Light"
 │       ShowDeliveredImages      REG_DWORD  0/1 (default 0; Wallpaper / Lock screen buttons on the poster form)
 │       NotifyNewContent         REG_DWORD  0/1 (default 1; "News arrived!" notification on new content)
+│       FrameColor                REG_SZ     #RRGGBB (default empty = theme; poster side panel, title bar and border)
+│       FrameTextColor            REG_SZ     #RRGGBB (default empty = automatic black/white by contrast)
 │
 ├── Signing\
 │       RequireSignedIndex      REG_SZ   "false"

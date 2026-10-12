@@ -206,6 +206,61 @@ resolved **once** in `Program.cs` into `Theme.Current` before any Form is constr
 same resolve-once-then-pass pattern as display duration. Registry-only; there is **no**
 appsettings key.
 
+### Poster frame colours — Ui\FrameColor, Ui\FrameTextColor
+
+Admins can brand the poster window fleet-wide (not per presentation) with two registry values under
+`HKLM\Software\{Company}\NewsCentral\NewsViewer\Ui`, both REG_SZ in the form `#RRGGBB` (hex digits in either
+case), default empty:
+
+| Value | Meaning |
+|---|---|
+| `FrameColor` | Colour of the poster window's **side panel, title bar (the caption strip under the image) and outer border**. Empty = the theme. |
+| `FrameTextColor` | Text colour on those surfaces. Empty = black or white by contrast when `FrameColor` is set, otherwise the theme. Ignored while no `FrameColor` is set. |
+
+**Affected:** the side panel and everything painted on it that is text or a card (wordmark, the "Click to see
+more information" button, the countdown card with its label, number and progress bar, the Wallpaper and Lock
+screen buttons), the title bar and its poster text, the thick outer border and its thin edge lines.
+**Not affected:** the Close (accent) button, the Online/Offline pill, the image area, the notification
+("News arrived!") form — it keeps the theme — and the Virtual Desktop background colour.
+
+**Derivation** (`FramePaletteBuilder`, pure, in `NewsCentral.Shared`; the same rules apply on every poster
+path: scheduled, `--manual`, the Expanded notification, on a Virtual Desktop and on its remote-session
+fallback; RTL layout is unaffected):
+
+- **Surfaces** — side panel, title bar and outer border = `FrameColor`.
+- **Primary text** — `FrameTextColor` if valid, otherwise white or black, whichever has the higher WCAG
+  contrast ratio against `FrameColor` (e.g. `#F0E6D2` → black, `#1E3A5F` → white).
+- **Cards and secondary buttons** (info card, countdown card, Wallpaper, Lock screen) — `FrameColor` shifted
+  toward the better-contrast extreme by a fixed small amount: **lighter on dark frames, darker on light
+  frames** (10%; hover 18%, press 5%). The direction follows the frame, not an explicit text colour. With the
+  automatic text colour the shift is trimmed where needed so text on a card keeps at least 4.5:1 contrast
+  (an explicit `FrameTextColor` is the admin's choice and is not adjusted).
+- **Secondary text** ("seconds", disabled button text) — primary text blended 35% toward the card colour.
+- **Countdown progress bar** — track = card blended 30% toward the text colour; fill = the text colour; the
+  paused state = text blended 60% toward the card.
+- **Hairlines and edge** — the separator line, card borders and the thin outer edge lines are `FrameColor`
+  shifted 22% / 30% toward the same extreme.
+
+**Fallbacks** — nothing throws, and a problem never blocks the poster:
+
+- No `FrameColor` (or whitespace): the poster looks exactly as before; the palette **is** the theme.
+- Invalid `FrameColor` (anything but `#RRGGBB`: `#12345`, `123456`, `#GGGGGG`, a name): the **whole frame**
+  falls back to the theme, and the launch's `launch.log` line gets `note=FrameColorInvalid`.
+- Invalid `FrameTextColor` with a valid `FrameColor`: the automatic black/white colour is used and the line
+  gets `note=FrameTextColorInvalid`. Both notes can appear together (joined with `,`, after
+  `VirtualDesktopFallback` if present).
+
+**Setting it** (`Set-RegistryOverrides.ps1`, NewsViewer only; values are validated as `#RRGGBB`, an empty
+string removes the value):
+
+```powershell
+.\scripts\Set-RegistryOverrides.ps1 -Company "<Company>" -ComponentName NewsViewer -FrameColor '#1E3A5F'
+.\scripts\Set-RegistryOverrides.ps1 -Company "<Company>" -ComponentName NewsViewer -FrameColor '#1E3A5F' -FrameTextColor '#FFD700'
+.\scripts\Set-RegistryOverrides.ps1 -Company "<Company>" -ComponentName NewsViewer -FrameColor '' -FrameTextColor ''   # back to the theme
+```
+
+In production deliver the same two REG_SZ values by GPO. The setting is read once at launch.
+
 ### Strings — Resources/UiStrings.resx
 
 All user-facing viewer strings live in `NewsViewer/Resources/UiStrings.resx` (default EN),
