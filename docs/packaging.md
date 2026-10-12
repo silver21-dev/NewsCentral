@@ -105,7 +105,10 @@ The installer must register this EventLog source (creation requires the elevated
 the service running as LocalSystem can write to it but must not be relied on to create it).
 Log name: Application. The shipped `appsettings.json` names this same source and log in its
 `Logging:EventLog` section (`SourceName`/`LogName`) — the two must stay in step; do not edit either
-side alone.
+side alone. The same source and log are what NewsViewer's **`NewsViewer Content Arrived`** scheduled task
+subscribes to for the `ContentChanged` event (EventID 2001, written once per sync cycle that accepted new
+content): register the source **before NewsService first runs**, and see "NewsViewer launch surface" below
+for the match rule.
 
 Start the service at the end of installation.
 
@@ -309,10 +312,12 @@ complete **before** the new version's install actions begin. In MSI terms: sched
 
 The failure this prevents is silent, and now has two instances:
 
-- **The scheduled task.** If the old product is removed after the new files and task are laid down,
-  the old uninstall's "delete scheduled task" action runs after the new install created that task —
-  deleting the task the new version just installed. NewsViewer would then have only the Run value
-  and no unlock trigger, with no error to indicate why.
+- **The scheduled tasks.** If the old product is removed after the new files and tasks are laid down,
+  the old uninstall's "delete scheduled task" action runs after the new install created them —
+  deleting a task the new version just installed (an old uninstall removes the legacy
+  `\{Company}\NewsCentral\NewsViewer` task, and a newer one removes both `NewsViewer Launch` and
+  `NewsViewer Content Arrived`). NewsViewer would then have only the Run value — no unlock/connect launch
+  and no content-arrival launch — with no error to indicate why.
 - **The six `PersonalizationCSP` display-surface values.** If the old uninstall's display-surface
   cleanup (see "NewsService — display-surface cleanup" above) runs *after* the new NewsService has
   already applied content, it clears the lock screen and wallpaper the new version just wrote — the
@@ -324,10 +329,15 @@ The failure this prevents is silent, and now has two instances:
 (For an Intune-only delivery the same principle holds — fully remove before install — even though the
 `RemoveExistingProducts` term is MSI-specific.)
 
-## Field diagnostics (limitation in this release)
+## Field diagnostics
 
-NewsViewer emits no runtime diagnostic logging in this release. When a user reports "I don't see any
-news," the available troubleshooting is:
+NewsViewer has no logging framework and writes no EventLog source. It does keep one small per-user text
+file, **`%LOCALAPPDATA%\NewsCentral\launch.log`** — one line per launch with the decision and its reason
+(`reason=RemoteSession`, `NoContent`, `NoQualifyingMonitor`, `NotVisible`, `NoShell`, `Idle`,
+`Busy`, `NotifyDisabled`, `MarkerInitialized`, `AlreadySeen`, `AlreadyRunning`, `Gate`, `Manual`, …) plus the
+notification outcome lines; format and reasons in `docs/newsviewer-spec.md` ("Launch decision", "Launch
+log"). It is the first thing to read when a user reports "I don't see any news" — the `reason=` says why
+nothing was shown. (A machine with `Active = false` exits silently and logs nothing.) Further steps:
 
 - verify the machine's GPO registry configuration under
   `HKLM\Software\{Company}\NewsCentral\NewsViewer\` (teams configured, signing public keys present,
@@ -337,9 +347,10 @@ news," the available troubleshooting is:
   which is NewsService's responsibility (device/group provisioning, `Entra:Enabled`, Graph consent —
   see `docs/entra-dynamic-teams.md`), not something to chase in NewsViewer;
 - clear the per-user gate by deleting `%LOCALAPPDATA%\NewsCentral\viewerstate.json` (forces a
-  re-display on next launch).
+  re-display on next launch; it also holds the per-user "last notified content" marker, so the next
+  launch re-initializes it silently).
 
-EventLog logging for NewsViewer is a planned follow-up. When added, the installer will gain one
+EventLog logging for NewsViewer remains a planned follow-up. When added, the installer will gain one
 action: registering a `NewsViewer` EventLog source. The package structure should leave room for that.
 
 ## Troubleshooting — silent Company mismatch

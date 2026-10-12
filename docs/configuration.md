@@ -326,7 +326,7 @@ NewsViewer resolves configuration across three layers (registry always wins):
 
 | Layer | File / source | Status |
 |---|---|---|
-| Base | `appsettings.json` | **Shipped, neutral, committed** — a tracked artifact (never gitignored). Every key explicit; loaded with `optional: false` (a missing file is a hard startup failure). This is the base layer the MSI installs. |
+| Base | `appsettings.json` | **Shipped, neutral, committed** — a tracked artifact (never gitignored). Carries the shipped neutral values only: a key it does not list takes its **code default** (listed with each key below); the registry is the fleet mechanism, and this file is not edited to add settings. Loaded with `optional: false` (a missing file is a hard startup failure). This is the base layer the MSI installs. |
 | Dev overlay | `appsettings.Development.json` | **Optional, gitignored, dev-only** — loaded with `optional: true`; its mere presence activates it (no environment variable). **Never published** (`CopyToPublishDirectory=Never`), so nothing in it can reach the fleet. Documented shape: `appsettings.Development.json.example`. |
 | Override | Registry (GPO) | **Always wins** — `HKLM\Software\{Company}\NewsCentral\NewsViewer`. |
 
@@ -357,6 +357,27 @@ NewsViewer resolves configuration across three layers (registry always wins):
   }
 }
 ```
+
+The shipped template above lists only part of the NewsViewer surface. The remaining keys take their **code
+default** when absent; as a documentation snippet (not part of any shipped file), the defaults of the keys it omits are:
+
+```json
+{
+  "Display": {
+    "LogicalDayStartHour": 0,
+    "ShowInRemoteSessions": true
+  },
+  "Ui": {
+    "ShowDeliveredImages": false,
+    "NotifyNewContent": true,
+    "FrameColor": "",
+    "FrameTextColor": ""
+  }
+}
+```
+
+(`Ui:Theme` is registry-only and has no appsettings key. Every one of these is set through the registry — see
+the tree above and `Set-RegistryOverrides.ps1` — and each key is described below with its default.)
 
 `Active` (NewsViewer) — per-machine master switch. `bool`, default `true` (registry `Active` DWORD `0`/`1` at the hive root; absent = `true`, so an unprovisioned machine is never silently disabled). Evaluated first in `Main()`, before every other startup guard. `false` exits at startup with no action taken: no poster is shown, no wallpaper style re-assert runs, `viewerstate.json` is not written, no telemetry session file is written, and no dialog is shown. The current wallpaper style is deliberately left as-is — deactivation is not a revert. (The wallpaper *image* is NewsService's concern and is unaffected by NewsViewer's `Active` switch in either direction.)
 
@@ -471,7 +492,7 @@ HKLM\Software\[Company]\NewsCentral\NewsService\Entra\
 
 **Operational notes.**
 - **Per-team cost.** Each dynamic team resolved into `resolved-teams.json` costs NewsService one `index.json` fetch (and any changed images) per sync cycle, and costs NewsViewer one index parse per presentation-selection pass. `MaxDynamicTeams` exists because this cost is linear in the number of dynamic teams a machine ends up subscribed to.
-- **Presentation selection is still single-winner.** Regardless of how many teams (static or dynamic) a machine is subscribed to, NewsViewer's poster selection picks exactly one active `News-of-the-Week` assignment — the newest by `PresentationLastModified` across **all** verified, schedule-active assignments from every subscribed team (see `docs/newsviewer-spec.md`). Subscribing a machine to N dynamic teams means N publishers are competing for that one poster slot; a device provisioned into many attribute schemes or group instances does not get N posters, it gets whichever one across all of them happens to be newest. This is an authoring/governance consideration for whoever provisions a large instance set, not a defect in the selection logic — worth knowing **before** provisioning a large `AttributeSchemes` / `GroupTeams:Instances` set, not after.
+- **Presentation selection is still single-winner.** Regardless of how many teams (static or dynamic) a machine is subscribed to, NewsViewer's poster selection picks exactly one active `News-of-the-Week` assignment — the one newest to the team (the later of `PresentationLastModified` and the assignment's `PublishedDate`) across **all** verified, schedule-active assignments from every subscribed team (see `docs/newsviewer-spec.md`). Subscribing a machine to N dynamic teams means N publishers are competing for that one poster slot; a device provisioned into many attribute schemes or group instances does not get N posters, it gets whichever one across all of them happens to be newest. This is an authoring/governance consideration for whoever provisions a large instance set, not a defect in the selection logic — worth knowing **before** provisioning a large `AttributeSchemes` / `GroupTeams:Instances` set, not after.
 - **Change-gated summary logging.** Each cycle logs one line summarizing the full written team set (`Source/SourceId=TeamFolderName (State)` per entry, ordered the same way as the truncation above) — at `Information` when that set differs from the previous cycle (including a transition to zero dynamic teams), at `Debug` otherwise. This is the primary operator-facing signal for "what did Entra resolve"; per-scheme/per-instance outcomes remain at `Debug`, and every `Warning`/`Error` (invalid/colliding instances, unresolvable names, the fail-closed global-exclusion suppression, device-level failures) is unconditional and unaffected by this gating.
 
 **Credential reuse:** the Microsoft Graph reads use the **same `AzureBlob` credential and app registration** as blob access (`AzureCredentialFactory.Create`), built lazily only when Entra is enabled. Because of this, **`AzureBlob:{AuthMode, TenantId, ClientId, …}` must be populated even when `Repository:StorageMode = Share`**.

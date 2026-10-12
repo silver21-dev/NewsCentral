@@ -191,7 +191,8 @@ NewsViewer one index parse per presentation-selection pass — the cost is linea
 teams a machine ends up subscribed to.
 
 **Presentation selection remains single-winner, regardless of instance count.** NewsViewer picks
-exactly one active News-of-the-Week assignment per launch — the newest by `PresentationLastModified`
+exactly one active News-of-the-Week assignment per launch — the one *newest to the team* (the later of
+`PresentationLastModified` and the assignment's `PublishedDate`)
 across **all** verified, schedule-active assignments from **every** subscribed team, static or
 dynamic (see `docs/newsviewer-spec.md`). Subscribing a machine to N dynamic teams does not give it N
 posters; it gives N publishers competing for the same one poster slot, and whichever is newest wins.

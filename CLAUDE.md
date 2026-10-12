@@ -12,8 +12,8 @@
 |---|---|---|
 | NewsCentral | Content authoring, approval, scheduling, publishing, user/team management | .NET 10 MAUI Blazor Hybrid desktop app |
 | NewsCentral.Shared | Shared domain models referenced by all components | .NET 10 class library |
-| NewsService | Cache agent — syncs content from repository to local machine, applies **both** display surfaces machine-wide via PersonalizationCSP — the lock screen and the desktop wallpaper image (three-state: writes when content changes, clears its own stale content, never touches a value it did not write; re-verified and published to a protected non-user-writable folder before apply; each independently disabled via `Delivery:LockScreenEnabled`/`Delivery:WallpaperEnabled` — RDS/VDI opt-out, not a revert), uploads telemetry | .NET 10 Windows Service |
-| NewsViewer | End-user presentation layer — displays scheduled content from local cache; re-asserts the per-user desktop wallpaper **style** only (HKCU, no `SystemParametersInfo`) — the wallpaper image itself is owned by NewsService | .NET 10 WinForms desktop app |
+| NewsService | Cache agent — syncs content from repository to local machine, applies **both** display surfaces machine-wide via PersonalizationCSP — the lock screen and the desktop wallpaper image (three-state: writes when content changes, clears its own stale content, never touches a value it did not write; re-verified and published to a protected non-user-writable folder before apply; each independently disabled via `Delivery:LockScreenEnabled`/`Delivery:WallpaperEnabled` — RDS/VDI opt-out, not a revert), uploads telemetry, and writes a ContentChanged EventLog event (2001) once per cycle that accepted new content | .NET 10 Windows Service |
+| NewsViewer | End-user presentation layer — displays scheduled content from local cache; re-asserts the per-user desktop wallpaper **style** only (HKCU, no `SystemParametersInfo`) — the wallpaper image itself is owned by NewsService; a pure ordered launch decision (per-user marker, `launch.log`) chooses the full poster, the small "News arrived!" notification, or nothing, and runs in remote sessions too | .NET 10 WinForms desktop app |
 | NewsTester | Content preview tool for authors and approvers | Future — independent desktop app |
 
 ---
@@ -26,7 +26,7 @@
 - HMAC-SHA256 anti-tamper for session telemetry — NewsViewer signs, NewsService verifies; `index.json` signing moved to per-team ECDSA (see below).
 - ECDSA P-256 per-team `index.json` signing — Phases A, B1 & C complete: signing core in `NewsCentral.Shared`, `IndexGenerationService` signs with team key, `SyncService` and `PresentationSelector` verify via `SigningKeyConfigurationReader`. Static-team key rotation uses `PublicKeyPrevious` (dual-key, `docs/anti-tamper.md`). B2 (Key Management page) complete; D (registry scripts) implemented in `scripts/Set-RegistryOverrides.ps1` at dev/pilot scope, GPO owns fleet configuration; see `docs/security.md`.
 - All domain models live in **NewsCentral.Shared** — no model duplication across projects.
-- NativeAOT migration path is preserved for NewsViewer: Win32 P/Invoke via `DllImport` with simple types — no COM, no unsafe code.
+- NativeAOT migration path is preserved for NewsViewer: P/Invoke via `LibraryImport`; `AllowUnsafeBlocks` is enabled only for the generated stubs; no hand-written unsafe code; no COM.
 - Fleet components ship **framework-dependent** — .NET 10 Desktop Runtime (x64) required on every target machine (declared prerequisite, not bundled). See `docs/packaging.md`.
 - **Entra dynamic-team resolution (NewsService-only, behind `Entra:Enabled`; default off)** — resolves dynamic teams from named **instances** of two source kinds (attribute schemes, group-membership instances + a fleet-wide global exclusion), unioning them with the static registry team list on both consuming tiers; each instance graces independently. See the **Entra Device Team Resolution** section below and `docs/entra-dynamic-teams.md`.
 
@@ -37,6 +37,8 @@
                                 ↑                                                    |
                                 └──────────── uploads\session-*.json ───────────────┘
 ```
+
+New content also triggers a launch: NewsService writes EventLog event 2001 (`ContentChanged`, once per cycle) → the "Content Arrived" scheduled task starts `NewsViewer.exe --trigger content`.
 
 ---
 
@@ -98,8 +100,9 @@ Everything else — attribute schemes, group teams, Graph permissions and batchi
 | NewsService → Cache | Local file write to `%programdata%\NewsCentral\` |
 | NewsViewer → Cache | Local file read from `%programdata%\NewsCentral\` |
 | NewsViewer → NewsService | Via `uploads\` folder (session telemetry JSON files) |
+| NewsService → NewsViewer | EventLog event 2001 (`ContentChanged`) → Task Scheduler "Content Arrived" task launches NewsViewer (`--trigger content`) |
 
-No direct inter-process communication. All coordination is via the shared cache folder structure.
+No direct inter-process communication. Coordination is via the shared cache folder structure; the one signal is NewsService's `ContentChanged` EventLog event, which a scheduled task turns into a NewsViewer launch.
 
 ---
 
@@ -146,7 +149,7 @@ These are not auto-loaded. Read the ones a task touches; a prompt's READ FIRST l
 | docs/future.md | deferred work, NewsTester |
 | docs/newscentral-spec.md | authoring app services, pages, roles |
 | docs/newsservice-spec.md | sync cycle, display surfaces, telemetry |
-| docs/newsviewer-spec.md | poster, daily gate, wallpaper style |
+| docs/newsviewer-spec.md | launch decision, notification, poster, daily gate, remote sessions, frame colours, wallpaper style |
 | docs/packaging.md | installer, uninstall, upgrade behavior |
 | docs/production-deployment.md | GPO rollout and pilot validation |
 | docs/security.md | signing phase history, auth per component |

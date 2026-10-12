@@ -241,7 +241,7 @@ A drift guard, one-directional (manifest is deliberately a superset — it carri
 
 - Any editing (v1 is read-only throughout, including install dir).
 - The dropped `%PROGRAMDATA%` external `appsettings.json` layer.
-- `Logging:*` beyond the two NewsService `LogLevel:Default` keys in §7.2 (NewsViewer and NewsCentral have no logging framework — rows there would display controls that do nothing).
+- `Logging:*` beyond the two NewsService `LogLevel:Default` keys in §7.2 (NewsViewer and NewsCentral have no logging framework — rows there would display controls that do nothing; NewsViewer's per-user `launch.log` is a plain file with no level setting).
 - Resolving the NewsViewer `appsettings.Development.json` overlay as a layer — when the file exists, the page shows a notice that an un-displayed overlay is in effect; its values are not rendered.
 - `Storage:DefaultStorageType` — phantom key (MauiProgram fallback only); excluded.
 - Refreshing stale test-count figures in other docs (separate cleanup).

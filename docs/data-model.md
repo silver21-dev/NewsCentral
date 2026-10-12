@@ -381,8 +381,9 @@ a re-display.
 
 ```json
 {
-  "LastShownDate": "2025-05-23",
-  "LastShownPresentationId": "abc-123"
+  "lastShownDate": "2025-05-23",
+  "lastShownPresentationId": "abc-123",
+  "lastContentKey": "abc-123|v1|sha256:2d286bb1..."
 }
 ```
 
@@ -395,6 +396,13 @@ a re-display.
   (`GetLastShownPresentationId` was removed in `04d6379`). This is **deliberate, not dead code**: it is
   retained for diagnostics and as the seed of the Priority-phase **shown-ID set** (a high-priority
   poster firing mid-day must be suppressed **per-presentation**, not per-day). **Do not remove it.**
+- **`lastContentKey`** is the per-user **content marker** of the new-content notification: the content key
+  (`presentationId|v<version>|<imageHash>`, `ContentKeys.For`) of the item this user last saw or was notified
+  about. It is written when a full poster is displayed, silently on the first launch after upgrade
+  (`MarkerInitialized`), and when a notification form is actually on screen — never on a decision alone. An
+  empty/absent value means "not initialized yet". `RecordShown` preserves it (read-modify-write), and the file
+  is written atomically (temp file + move). Deleting the file resets both the gate and the marker. See
+  `docs/newsviewer-spec.md` ("Launch decision", "New-content notification").
 
 ## Lock-screen apply state (NewsService)
 
@@ -436,17 +444,17 @@ Model: `NewsCentral.Models.SessionTelemetry` (in `NewsCentral.Shared`; implement
 
 ```json
 {
-  "SessionId": "guid",
-  "PresentationId": "abc-123",
-  "TeamId": "cz-its",
-  "SessionStartTime": "2025-05-23T08:15:00Z",
-  "SessionEndTime": "2025-05-23T08:15:34Z",
-  "CloseReason": "Timeout",
-  "Signature": "base64-hmac-sha256"
+  "sessionId": "guid",
+  "presentationId": "abc-123",
+  "teamId": "cz-its",
+  "sessionStartTime": "2025-05-23T08:15:00Z",
+  "sessionEndTime": "2025-05-23T08:15:34Z",
+  "closeReason": "Timeout",
+  "signature": "base64-hmac-sha256"
 }
 ```
 
-`CloseReason` values: `Timeout`, `UserClose`, `UrlLaunch`
+Property names are camelCase on disk (the general cache/telemetry option set below). `CloseReason` values: `Timeout`, `UserClose`, `UrlLaunch`
 
 **Optional fields (omitted from the JSON when null, so an ordinary poster record's signed form is unchanged):**
 
@@ -507,7 +515,8 @@ A notification record reuses `SessionStartTime` (shown), `SessionEndTime` (outco
 └── status.json                        sync state — written by NewsService
 
 %localappdata%\NewsCentral\             ← per-user; one copy per Windows user account
-└── viewerstate.json                   display tracking — written by NewsViewer
+├── viewerstate.json                   daily gate + last-notified content marker — written by NewsViewer
+└── launch.log                         one line per NewsViewer launch/outcome (decision, reason, content key) — written by NewsViewer, 64 KB cap
 ```
 
 `viewerstate.json` is intentionally per-user so that in multi-session environments (Citrix RDSH, Windows Server RDS) each user's shown-today state is independent. All other cache files remain machine-level.

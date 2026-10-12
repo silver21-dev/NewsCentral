@@ -32,7 +32,7 @@
 
 **Verification (NewsService):**
 - `SyncService` verifies each `index.json` via ECDSA (Phase C — see below). HMAC is no longer used for index verification.
-- `TelemetryUploader` verifies each `session-*.json` before forwarding. `Invalid` → file discarded and logged.
+- `TelemetryUploader` verifies each `session-*.json` before forwarding. `Invalid` → file discarded and logged. The optional notification fields (`recordType`, `source`, `contentKey`) are part of the signed form only when present; an older NewsService discards records that carry them, so NewsService and NewsViewer ship together (`docs/anti-tamper.md`, `docs/packaging.md`).
 
 **Verification (NewsViewer):** `PresentationSelector` verifies each team's `index.json` via ECDSA (Phase C — see below). HMAC is no longer used for index verification. After selecting the winning assignment, `PresentationSelector` also verifies the cached image file against `Content.ImageHash` (SHA-256). A missing hash is accepted with a warning; a mismatch returns `(best, null)` so the caller exits silently. Disabled by `BypassImageIntegrityCheck`.
 
@@ -122,7 +122,7 @@ Entra-resolved **dynamic teams** are not provisioned with a registry public key,
 **Phase 3b — consumption wired (implemented and tested): the Entra feature is now end-to-end.** Both verifiers compute their team set as `EffectiveTeams.Union(static, dynamic)` — static from `TeamConfigurationReader.GetTeams`, dynamic from `ResolvedTeamsReader.ReadDynamicTeamFolders(cacheRootPath)` — and verify each team via `SignatureGate.VerifyWithPrecedence(index, GetPublicKeys(team), isDynamicTeam)` → `ShouldReject` (existing `RequireSignedIndex` policy unchanged):
 
 - **NewsService `SyncService`** — `RefreshEntraTeamsAsync` runs first so `resolved-teams.json` reflects the current cycle; `ResolveEffectiveTeams` (unit-tested in `NewsService.Tests`) then unions static ∪ dynamic and the cycle syncs that set. A dynamic team with no published `index.json` falls through existing not-found handling (skip). The blob/share pull and cache-write mechanics are unchanged.
-- **NewsViewer `PresentationSelector`** — read-only consumer (never writes `resolved-teams.json`); unions registry + dynamic teams and applies the same precedence verification. Single-winner / newest-`PresentationLastModified` display logic is unchanged. NewsViewer uses reflection-based `System.Text.Json` (no source-gen context), so `ResolvedTeamsReader` is consistent with how `index.json` is already read; the NativeAOT path is preserved.
+- **NewsViewer `PresentationSelector`** — read-only consumer (never writes `resolved-teams.json`); unions registry + dynamic teams and applies the same precedence verification. Single-winner display logic is unchanged (the poster winner is the newest-to-team item: the later of `PresentationLastModified` and `PublishedDate`). NewsViewer uses reflection-based `System.Text.Json` (no source-gen context), so `ResolvedTeamsReader` is consistent with how `index.json` is already read; the NativeAOT path is preserved.
 
 End-to-end flow: **Entra device resolution → `resolved-teams.json` → effective-team union on both tiers → delivered-key precedence with registry-wins / anti-downgrade**. A team present in both the static list and the dynamic set is fine — `Union` de-dupes and registry-wins governs verification, so no special-casing is needed.
 

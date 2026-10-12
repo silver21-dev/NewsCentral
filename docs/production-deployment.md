@@ -489,16 +489,20 @@ Other silent-failure candidates, in order of likelihood:
   (`reason=RemoteSession` in `launch.log`), the client window is smaller than 1920×1080
   (`NoQualifyingMonitor`) or the session is a published app without a shell (`NoShell`).
 
-> **NewsViewer emits no runtime diagnostic logging in this release.** When a user reports "I don't see any
-> news", troubleshooting is limited to verifying the NewsViewer registry tree and clearing the per-user
-> gate by deleting `%LOCALAPPDATA%\NewsCentral\viewerstate.json`. EventLog logging for NewsViewer is a
-> planned follow-up (`docs/packaging.md`).
+> **NewsViewer has no logging framework, but it keeps a per-user `launch.log`.** When a user reports "I
+> don't see any news", read `%LOCALAPPDATA%\NewsCentral\launch.log` first: every launch (except on a machine
+> with `Active = false`) logs a `decision=` and the `reason=` it was taken for (`NoContent`,
+> `NoQualifyingMonitor`, `NotVisible`, `NoShell`, `Idle`, `Busy`, `RemoteSession`, `AlreadySeen`, …). Then
+> verify the NewsViewer registry tree and, if needed, clear the per-user gate and marker by deleting
+> `%LOCALAPPDATA%\NewsCentral\viewerstate.json`. EventLog logging for NewsViewer is a planned follow-up
+> (`docs/packaging.md`).
 
 ### 8.4 Verbose logging for troubleshooting
 
 NewsService logs its per-cycle detail (index unchanged, image up to date, retries of an incomplete sync,
 cache self-heal repeats) at **Debug**, which is off by default (`Logging:LogLevel:Default` = `Information`).
-NewsViewer has no logging to raise.
+NewsViewer has no log level to raise: its per-user `launch.log` is always written (size-capped) and is the
+place to look for launch decisions (see 8.3).
 
 **Dev box** — an environment variable; the `__` maps to `:`, and the category prefix `NewsService` covers
 every `NewsService.*` logger without turning on framework noise:

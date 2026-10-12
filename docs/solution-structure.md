@@ -43,7 +43,7 @@ NewsCentral.Shared\
 │       ├── PublishedAssignmentIndex.cs one entry per published assignment
 │       ├── ContentInfo.cs             image path, hash, size, last-modified, URL
 │       ├── DisplayTypeInfo.cs         IsNewsOfWeek, IsWallpaper, IsLogonScreen
-│       ├── ActiveAssignmentSelector.cs pure IsActive + PickNewestActive(predicate); shared by NewsViewer's poster selection and NewsService's lock-screen/wallpaper selection
+│       ├── ActiveAssignmentSelector.cs pure IsActive + PickNewestToTeam(predicate) (NewsViewer poster: later of PresentationLastModified and PublishedDate) + PickNewestActive(predicate) (NewsService lock screen / wallpaper: newest by PresentationLastModified)
 │       └── IndexStatistics.cs         summary counts
 └── Security\
     ├── ISignable.cs                   interface ISignable { string? Signature { get; set; } }
@@ -71,7 +71,21 @@ NewsCentral.Shared\
     ├── TeamFolderNameCanonicalizer.cs     shared canonicalization used by attribute schemes, group teams, and group-instance id derivation
     ├── ResolvedTeamsReader.cs             ReadDynamicTeamFolders(cacheRootPath) — reads resolved-teams.json
     ├── EffectiveTeams.cs                  Union(staticTeams, dynamicTeams) — de-duplicated, ordinal-ignore-case
+    ├── ServiceEventIds.cs                 ContentChanged = 2001 — the EventLog event ID NewsService writes and the NewsViewer task subscribes to
+    ├── ConfigManifests.cs                 per-component manifest of every registry/appsettings key (name, REG_ type, default, hint) — drives the Config Review page and the manifest-coverage test
     └── AppConfiguration.cs                typed accessor over IConfiguration for the NewsCentral authoring app (DataPath, distribution, Azure/HMAC; no admin creds — M5b removed the Initialization:* seed keys)
+```
+
+## NewsCentral.Shared — Launch and Ui Layout
+
+```
+NewsCentral.Shared\
+├── Launch\
+│   ├── LaunchDecision.cs          pure NewsViewer launch decision: LaunchInputs, ILaunchProbes (IsRemoteSession / IsSessionVisible / HasShell / IdleTime / IsBusy), LaunchDecider.Decide (the ordered rule table), UseVirtualDesktop + ShouldAssertWallpaperStyle, ContentKeys, RemoteDetection, FullScreenHeuristic, ProbeMath, LaunchLogTrimmer
+│   └── NotificationLogic.cs       NotificationCountdown (60 s, hover/lock pause, first outcome wins), NotificationPlacement (bottom-right/left, DIP scaling), LaunchLogLine (the launch.log line format)
+└── Ui\
+    └── FramePalette.cs            Rgb, ChromePalette, FramePaletteBuilder — poster frame/text colours (Ui:FrameColor / Ui:FrameTextColor) derived from the theme; pure, no System.Drawing
+    (the other files in Ui\ — thumbnail cache, selection and bulk-operation helpers — belong to the authoring app)
 ```
 
 ## NewsService — Service Layout
@@ -89,7 +103,8 @@ NewsService\
 │   ├── CacheManager.cs            all local cache I/O; SHA-256 sidecar hashes
 │   ├── ImagePublisher.cs          IImagePublisher — re-verifies + copies the winning image per surface into a protected, non-user-writable folder (prefix "lockscreen"/"wallpaper") before CSP is pointed at it
 │   ├── PersonalizationService.cs  IPersonalizationService — read/write/clear PersonalizationCSP for BOTH surfaces (lock screen + desktop wallpaper; SYSTEM context)
-│   ├── TelemetryUploader.cs       deserializes and HMAC-verifies session-*.json; forwards Valid/Unsigned, discards Invalid
+│   ├── TelemetryUploader.cs       deserializes and HMAC-verifies session-*.json; forwards Valid/Unsigned, discards Invalid (poster and notification records alike — it does not filter by recordType)
+│   ├── IContentChangedNotifier.cs IContentChangedNotifier + EventLogContentChangedNotifier — writes the ContentChanged EventLog event (Application / NewsService / 2001) that triggers NewsViewer's "Content Arrived" task
 │   ├── IDeviceIdentityProvider.cs   seam for DeviceIdentityProvider
 │   ├── DeviceIdentityProvider.cs    local Entra AD DeviceId read (registry / dsregcmd fallback)
 │   ├── IEntraDeviceClient.cs        seam for EntraDeviceClient
@@ -101,7 +116,7 @@ NewsService\
 │   ├── GroupOutcomeMapper.cs        pure EntraGroupSnapshot → EntraSourceOutcome, incl. global-exclusion fail-closed
 │   ├── GroupMembershipChunker.cs    pure checkMemberGroups 20-id chunking + id→name mapping
 │   ├── EntraTeamResolutionService.cs   orchestrates one Entra resolution cycle; writes resolved-teams.json
-│   └── SyncService.cs             orchestrates the poll cycle; ECDSA-verifies index.json via SignatureGate before caching; applies both display surfaces (lock screen, wallpaper) via a shared three-state dispatch core
+│   └── SyncService.cs             orchestrates the poll cycle; ECDSA-verifies index.json via SignatureGate before caching; applies both display surfaces (lock screen, wallpaper) via a shared three-state dispatch core; writes each team's index.json last (only after every image is cached), self-heals missing cached images on an unchanged index, and raises one ContentChanged notification per cycle
 ├── JsonDefaults.cs                shared JsonSerializerOptions (WriteIndented + CamelCase + CaseInsensitive + enum converter)
 ├── Worker.cs                      BackgroundService host; reads interval from configuration
 ├── Program.cs                     DI wiring; registers HmacService; adds registry override source; storage mode resolved from merged config
@@ -113,40 +128,66 @@ NewsService\
 ```
 NewsViewer\
 ├── Configuration\
-│   └── ViewerConfiguration.cs        typed POCOs bound from appsettings.json; includes BypassDailyGate, BypassImageIntegrityCheck, HmacOptions, and DeliverySection (wallpaper STYLE only — WallpaperStyle/WallpaperBackgroundColor; DefaultWallpaperPath moved to NewsService)
+│   └── ViewerConfiguration.cs        typed POCOs bound from appsettings.json + registry; BypassDailyGate, BypassImageIntegrityCheck, HmacOptions; DisplaySection (LogicalDayStartHour, ShowInRemoteSessions); UiSection (ShowDeliveredImages, NotifyNewContent, FrameColor, FrameTextColor); DeliverySection (wallpaper STYLE only — WallpaperStyle/WallpaperBackgroundColor; DefaultWallpaperPath moved to NewsService)
 ├── Models\
-│   └── ViewerState.cs                viewerstate.json structure
+│   └── ViewerState.cs                viewerstate.json structure (LastShownDate, LastShownPresentationId, lastContentKey marker)
 │   (SessionTelemetry lives in NewsCentral.Shared — cross-component DTO)
 ├── Services\
-│   ├── PresentationSelector.cs       reads index.json per team, ECDSA-verifies via SignatureGate; SelectActive (poster only — SelectActiveWallpaper removed, wallpaper selection now lives in NewsService) via shared ActiveAssignmentSelector; verifies image SHA-256
-│   ├── WallpaperService.cs           desktop wallpaper STYLE-only applier — HKCU only, no SystemParametersInfo, no COM (DllImport SetSysColors); the image itself is NewsService/CSP-owned
-│   ├── ViewerStateService.cs         reads/writes viewerstate.json for the date-only logical-day gate (AlreadyShownToday)
+│   ├── PresentationSelector.cs       reads index.json per team, ECDSA-verifies via SignatureGate; SelectActive (poster only) via ActiveAssignmentSelector.PickNewestToTeam; verifies image SHA-256
+│   ├── WallpaperService.cs           desktop wallpaper STYLE-only applier — HKCU only, no SystemParametersInfo, no COM (SetSysColors); the image itself is NewsService/CSP-owned; a no-op in remote sessions
+│   ├── ViewerStateService.cs         viewerstate.json: the date-only logical-day gate (AlreadyShownToday / RecordShown) and the per-user content marker (ReadContentMarker / WriteContentMarker); atomic writes
+│   ├── LaunchProbes.cs               Win32 environment probes behind ILaunchProbes (LibraryImport): remote session, session visible, shell present, idle time, busy (notification state + full-screen foreground)
+│   ├── LaunchLog.cs                  %LOCALAPPDATA%\NewsCentral\launch.log — one line per launch/outcome, 64 KB cap, never throws
+│   ├── ForegroundWindow.cs           SetForegroundWindow wrapper used to bring the expanded poster to the front
 │   ├── VirtualDesktopManager.cs      CreateDesktop/SwitchDesktop/SetThreadDesktop wrapper
-│   └── TelemetryWriter.cs            HMAC-signs and writes session-{guid}.json to uploads\ on close
+│   └── TelemetryWriter.cs            HMAC-signs and writes session-{guid}.json to uploads\ — poster sessions (WriteSession) and notification records (WriteNotification)
 ├── Forms\
-│   ├── ViewerForm.cs                 adaptive borderless WinForms window (image AR fitted in 1600×900, clamps 960×540); themed 220px side panel — wordmark, status pill, primary Close; Ui.Font helper (Segoe UI Variable, Segoe UI fallback)
-│   ├── FluentControls.cs             Theme (Light/Dark palettes; Theme.Current selected via Ui\Theme registry, default Dark) + RoundedPanel/RoundedButton (custom-painted; IsPrimary accent fill)
+│   ├── ViewerForm.cs                 adaptive borderless poster window (image AR fitted in 1600×900, clamps 960×540); themed 220px side panel; takes Theme.Poster (frame colours) and can start with the countdown stopped
+│   ├── NotificationForm.cs           the "News arrived!" mini form: non-activating, topmost, bottom-right (bottom-left RTL), 60 s with hover/lock pause, Expanded / Dismissed / TimedOut
+│   ├── FluentControls.cs             Theme (Light/Dark palettes; Theme.Current from Ui\Theme, default Dark; Theme.Poster = Current + frame colours) + RoundedPanel/RoundedButton
+│   ├── Ui.cs                         the single font source (Segoe UI Variable, Segoe UI fallback, CJK families)
 │   └── BackgroundForm.cs             fullscreen solid-colour background for virtual desktop
 ├── Resources\
 │   ├── UiStrings.resx                user-facing strings, default EN (satellites de, es, fr, pt, ar, zh-Hans, zh-Hant)
 │   └── UiStrings.cs                  static accessor — ResourceManager + CurrentUICulture
-├── NativeMethods.cs                  Win32 P/Invoke — desktop, thread, process APIs
+├── NativeMethods.cs                  Win32 P/Invoke — desktop, thread, process APIs (DllImport; new code uses LibraryImport)
 ├── JsonDefaults.cs                   shared JsonSerializerOptions (same standard as NewsService)
-├── Program.cs                        entry point; startup checks; remote-session guard; renders poster then re-asserts the wallpaper STYLE as the terminal step (after poster/VD teardown); one-shot, exits after
-└── appsettings.json
+├── Program.cs                        entry point: Active guard, mutex, theme + poster palette, selection, LaunchDecider.Decide, then FullPoster / MiniForm / Exit; poster path (Virtual Desktop or standard), terminal wallpaper STYLE re-assert (skipped in remote sessions); one-shot, exits after
+└── appsettings.json                  shipped template (tracked; never edit or stage it for feature work — code defaults and the registry cover absent keys, see docs/configuration.md)
 ```
 
 `ShowNewApplicationContext.cs` has been removed — NewsViewer is a one-shot process with **zero** `FileSystemWatcher` usage and no resident message pump.
+
+## Deployment assets and scripts
+
+```
+deploy\scheduled-tasks\
+├── NewsViewer-Launch.xml             task \{Company}\NewsCentral\NewsViewer Launch — unlock / RDP connect / console connect (UTF-16 LE with BOM; .gitattributes marks it binary)
+├── NewsViewer-ContentArrived.xml     task \{Company}\NewsCentral\NewsViewer Content Arrived — event 2001, --trigger content
+└── README.md                         what each task does and why
+scripts\
+├── Set-RegistryOverrides.ps1         dev/pilot registry provisioning (GPO owns the fleet)
+├── Register-NewsViewerTasks.ps1      reference installer for the two tasks + the NewsService event source; -Uninstall
+└── Remove-DisplaySurfaces.ps1        uninstall remediation for the PersonalizationCSP surfaces
+```
 
 ## NewsCentral.Shared.Tests — Layout
 
 ```
 NewsCentral.Shared.Tests\
-├── EcdsaRoundTripTests.cs                  9 facts: GenerateKeyPair → Sign → Verify (Valid / Invalid / Unsigned / Disabled / rotation fallback / tamper detection / PEM input / bad-key rejection)
-├── SigningKeyConfigurationReaderTests.cs   5 facts: GetPublicKeys contract (both keys, empty filter, null filter, no-config, team scoping)
-├── SignatureGateTests.cs                  14 facts: ShouldReject full matrix (VerifyResult × requireSignedIndex) + reason-string assertions
-├── ActiveAssignmentSelectorTests.cs       10 facts: IsActive window/day + PickNewestActive newest-by-PresentationLastModified; IsWallpaper vs IsNewsOfWeek predicate independence (K03 wallpaper-only skipped by display selection)
-└── … (Entra resolver/merger, delivered-key precedence, shared readers, EffectiveTeams — all passing)
+├── EcdsaRoundTripTests.cs                  GenerateKeyPair → Sign → Verify (Valid / Invalid / Unsigned / Disabled / rotation fallback / tamper detection / PEM input / bad-key rejection)
+├── SigningKeyConfigurationReaderTests.cs   GetPublicKeys contract (both keys, empty filter, null filter, no-config, team scoping)
+├── SignatureGateTests.cs                   ShouldReject full matrix (VerifyResult × requireSignedIndex) + reason-string assertions
+├── ActiveAssignmentSelectorTests.cs        IsActive window/day + PickNewestActive + PickNewestToTeam newest-to-team ranking; predicate independence (K03)
+├── LaunchDecisionTests.cs                  every launch-decision rule in order, laziness of the probes, ContentKey, idle wrap-around, launch-log trimming
+├── RemoteSessionDecisionTests.cs           RemoteSession / NoShell / NoQualifyingMonitor rules, remote detection, Virtual Desktop fallback, wallpaper-style gate, manifest entry
+├── FullScreenHeuristicTests.cs             full-screen-foreground busy geometry (zoomed, work-area, shell classes, failures)
+├── NotificationLogicTests.cs               NotificationCountdown state machine, placement/DPI maths, LaunchLogLine format (key as stored)
+├── SessionTelemetryTests.cs                optional notification fields: HMAC unchanged for poster records, round-trip, tamper detection
+├── FramePaletteTests.cs                    frame/text colour parsing, automatic contrast, shades, 4.5:1 sweep, fallbacks
+└── … (Entra resolver/merger, delivered-key precedence, shared readers, EffectiveTeams, authoring-app helpers — all passing)
+
+NewsService.Tests\ — also: SyncCompletenessTests (index-last, retry of an incomplete sync), CacheSelfHealTests, ContentChangedCycleTests (one event per cycle), ContentChangedNotifierTests.
 ```
 
 ## JSON Serialization Convention

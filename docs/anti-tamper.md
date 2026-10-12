@@ -13,7 +13,13 @@ publish time. NewsService and NewsViewer each verify that signature **independen
 consuming the index — a rejected index aborts the team's sync (NewsService) or skips the team
 (NewsViewer). The signed index also carries a **SHA-256** hash for each content image, which
 NewsViewer re-checks against the cached image file before display. Session telemetry
-(`session-*.json`) uses a **separate** HMAC-SHA256 mechanism and is unaffected by index signing.
+(`session-*.json`) uses a **separate** HMAC-SHA256 mechanism and is unaffected by index signing. The
+canonical (signed) form of a session record omits its optional notification fields (`recordType`,
+`source`, `contentKey`) when they are null, so ordinary poster records sign exactly as before; the fields,
+when present, **are** signed (stripping or adding one invalidates the record). An older NewsService
+verifying a notification record or a `source`-marked poster record deserializes without those fields,
+computes a different signature and discards the record as `Invalid` — ship NewsService and NewsViewer
+together (`docs/packaging.md`).
 An empty / unconfigured key makes verification a pass-through (`Disabled`) unless fail-closed
 enforcement is turned on — see §4.
 
@@ -174,7 +180,7 @@ verifier return `Invalid` — the publish-time self-verify guard (§4) is the tr
 drift.
 
 **Change detection vs. signature.** `IndexHash` (SHA-256 over the index's content fields) is what
-drives per-cycle change detection — an unchanged `IndexHash` short-circuits the sync with no I/O. The
+drives per-cycle change detection — an unchanged `IndexHash` short-circuits the sync: no download and no index rewrite (only a local check that the cached images are still present, which re-fetches any that are missing). The
 ECDSA **signature** governs trust, not change detection; the two are independent.
 
 **Cache ACLs.** The `%programdata%\NewsCentral\` cache — the `index.json` copies, the cached images,
