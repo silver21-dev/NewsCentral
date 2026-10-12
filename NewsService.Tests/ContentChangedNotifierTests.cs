@@ -59,7 +59,8 @@ public sealed class ContentChangedNotifierTests : IDisposable
         return JsonSerializer.Serialize(index, JsonDefaults.Options);
     }
 
-    private Task Sync(SyncService sut) => sut.SyncTeamAsync(Team, isDynamic: false, CancellationToken.None);
+    private Task Sync(SyncService sut) =>
+        sut.SyncAllTeamsAsync([Team], new HashSet<string>(), CancellationToken.None);
 
     [Fact]
     public async Task AcceptedChange_WithImage_NotifiesOnce_AfterCacheIsPopulated()
@@ -125,7 +126,7 @@ public sealed class ContentChangedNotifierTests : IDisposable
         repo.Text = IndexJson("h1");
         repo.ThrowOnBytes = true;
 
-        await Assert.ThrowsAsync<IOException>(() => Sync(sut));
+        await Sync(sut);
 
         Assert.Equal(0, notifier.Calls);
     }

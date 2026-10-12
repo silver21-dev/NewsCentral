@@ -65,6 +65,11 @@ public sealed class SyncService(
     // state should always be visible at least once.
     private bool _lastEffectiveTeamsEmpty;
 
+    // Per team: the IndexHash whose sync last failed to complete (an image could not be cached), so
+    // the Error is logged once per failing hash and repeats of the same hash drop to Debug. Cleared
+    // when that hash finally completes. Singleton + sequential cycles, so a plain Dictionary is safe.
+    private readonly Dictionary<string, string> _incompleteHash = new(StringComparer.OrdinalIgnoreCase);
+
     public async Task RunCycleAsync(string[] teams, CancellationToken ct)
     {
         bool online = false;
@@ -179,7 +184,7 @@ public sealed class SyncService(
 
     // ── Step 1 — team sync ───────────────────────────────────────────────────
 
-    private async Task<bool> SyncAllTeamsAsync(
+    internal async Task<bool> SyncAllTeamsAsync(
         IReadOnlyList<string> teams, HashSet<string> dynamicTeams, CancellationToken ct)
     {
         // An empty list is vacuously "no failures" but is not "synced successfully" — without this
@@ -190,7 +195,11 @@ public sealed class SyncService(
         foreach (var teamFolder in teams)
         {
             ct.ThrowIfCancellationRequested();
-            try { await SyncTeamAsync(teamFolder, dynamicTeams.Contains(teamFolder), ct); }
+            try
+            {
+                if (await SyncTeamAsync(teamFolder, dynamicTeams.Contains(teamFolder), ct))
+                    NotifyContentChanged();   // per team until the per-cycle coalescing commit
+            }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to sync team {Team}", teamFolder);
@@ -200,17 +209,23 @@ public sealed class SyncService(
         return allOk;
     }
 
-    internal async Task SyncTeamAsync(string teamFolder, bool isDynamic, CancellationToken ct)
+    /// <summary>
+    /// Syncs one team. Returns true only when an accepted index change was fully materialized in the
+    /// cache this cycle — every referenced image cached, then the index written last. False for an
+    /// unchanged, rejected or incomplete sync (an incomplete sync leaves the previously cached index in
+    /// effect and is retried next cycle, downloading only what is still missing).
+    /// </summary>
+    internal async Task<bool> SyncTeamAsync(string teamFolder, bool isDynamic, CancellationToken ct)
     {
         var remoteJson = await repository.ReadTextAsync($"{teamFolder}/index.json", ct);
         if (remoteJson is null)
         {
             logger.LogWarning("No index.json in repository for team {Team}", teamFolder);
-            return;
+            return false;
         }
 
         var remoteIndex = JsonSerializer.Deserialize<TeamIndexFile>(remoteJson, Json);
-        if (remoteIndex is null) return;
+        if (remoteIndex is null) return false;
 
         var keys          = SigningKeyConfigurationReader.GetPublicKeys(configuration, teamFolder);
         var result        = SignatureGate.VerifyWithPrecedence(remoteIndex, keys, isDynamic);
@@ -226,7 +241,7 @@ public sealed class SyncService(
         {
             // Security outcome — always Error, never demoted or gated on change.
             logger.LogError("Team {Team}: index rejected — {Reason}", teamFolder, reason);
-            return;
+            return false;
         }
 
         var cachedIndex  = await cache.ReadJsonAsync<TeamIndexFile>($"{teamFolder}/index.json");
@@ -234,7 +249,10 @@ public sealed class SyncService(
 
         // Acceptance logs at its natural level only when something changed — the index bytes or the
         // verification result — and at Debug on the steady state, matching every other cycle path.
-        if (indexChanged || resultChanged)
+        // A retry of a hash that already failed to complete is not news: it stays at Debug.
+        bool retryOfIncomplete = _incompleteHash.TryGetValue(teamFolder, out var failedHash)
+                                 && failedHash == remoteIndex.IndexHash;
+        if ((indexChanged && !retryOfIncomplete) || resultChanged)
         {
             if (result == VerifyResult.Unsigned)
                 logger.LogWarning("Team {Team}: index accepted — {Reason}", teamFolder, reason);
@@ -249,30 +267,44 @@ public sealed class SyncService(
         if (!indexChanged)
         {
             logger.LogDebug("Team {Team}: index unchanged", teamFolder);
-            return;
+            return false;
         }
 
-        logger.LogInformation("Team {Team}: index changed — syncing {Count} assignment(s)",
+        logger.Log(retryOfIncomplete ? LogLevel.Debug : LogLevel.Information,
+            "Team {Team}: index changed — syncing {Count} assignment(s)",
             teamFolder, remoteIndex.PublishedAssignments.Count);
 
-        var allImagesCached = true;
+        var missing = new List<string>();
         foreach (var assignment in remoteIndex.PublishedAssignments)
         {
             ct.ThrowIfCancellationRequested();
-            if (!await SyncImageAsync(teamFolder, assignment, ct)) allImagesCached = false;
+            if (!await SyncImageAsync(teamFolder, assignment, ct))
+                missing.Add(assignment.Content.ImagePath);
         }
 
-        // Write the new index only after all images are safely cached.
-        await cache.WriteTextAsync($"{teamFolder}/index.json", remoteJson);
-        logger.LogInformation("Team {Team}: sync complete", teamFolder);
+        // The index is written LAST and only when every referenced image is cached. On an incomplete
+        // sync the previously cached index stays in effect (NewsViewer keeps showing the previous
+        // content), the hash still differs next cycle so the sync is retried, and images already
+        // downloaded are kept — only the missing ones are fetched again.
+        if (missing.Count > 0)
+        {
+            if (!retryOfIncomplete)
+                logger.LogError("Team {Team}: sync incomplete — index not updated, will retry; missing image(s): {Images}",
+                    teamFolder, string.Join(", ", missing));
+            else
+                logger.LogDebug("Team {Team}: sync still incomplete — missing image(s): {Images}",
+                    teamFolder, string.Join(", ", missing));
+            _incompleteHash[teamFolder] = remoteIndex.IndexHash;
+            return false;
+        }
 
-        // Exactly once per accepted change, only after the index and every image are in the cache so an
-        // event-triggered NewsViewer finds the new files. A partial sync (an image missing from the
-        // repository) is not announced. Thrown download/write errors never reach here.
-        if (allImagesCached) NotifyContentChanged();
+        await cache.WriteTextAtomicAsync($"{teamFolder}/index.json", remoteJson);
+        _incompleteHash.Remove(teamFolder);
+        logger.LogInformation("Team {Team}: sync complete", teamFolder);
+        return true;
     }
 
-    /// <summary>True when the image is cached and current (or the assignment has none); false when it was not found in the repository.</summary>
+    /// <summary>True when the image is cached and current (or the assignment has none); false when it could not be downloaded or cached.</summary>
     private async Task<bool> SyncImageAsync(
         string teamFolder, PublishedAssignmentIndex assignment, CancellationToken ct)
     {
@@ -287,16 +319,26 @@ public sealed class SyncService(
             return true;
         }
 
-        var bytes = await repository.ReadBytesAsync(relativePath, ct);
-        if (bytes is null)
+        try
         {
-            logger.LogWarning("Image not found in repository: {Path}", relativePath);
+            var bytes = await repository.ReadBytesAsync(relativePath, ct);
+            if (bytes is null)
+            {
+                // Reported once per failing IndexHash by SyncTeamAsync, not per cycle.
+                logger.LogDebug("Image not found in repository: {Path}", relativePath);
+                return false;
+            }
+
+            await cache.WriteBytesAsync(relativePath, bytes);
+            logger.LogDebug("Image synced: {Path} ({Bytes} bytes)", relativePath, bytes.Length);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Image download/cache failed: {Path}", relativePath);
             return false;
         }
-
-        await cache.WriteBytesAsync(relativePath, bytes);
-        logger.LogDebug("Image synced: {Path} ({Bytes} bytes)", relativePath, bytes.Length);
-        return true;
     }
 
     private void NotifyContentChanged()

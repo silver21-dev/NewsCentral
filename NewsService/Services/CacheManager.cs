@@ -49,6 +49,27 @@ public sealed class CacheManager
         await File.WriteAllTextAsync(path, content);
     }
 
+    /// <summary>
+    /// Writes via a temp file in the same directory then an overwriting move, so a reader (or a crash)
+    /// never sees a half-written file. The temp file is removed if the write fails.
+    /// </summary>
+    public async Task WriteTextAtomicAsync(string relativePath, string content)
+    {
+        var path = Resolve(relativePath);
+        EnsureParent(path);
+        var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temp, content);
+            File.Move(temp, path, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(temp); } catch { /* best effort */ }
+            throw;
+        }
+    }
+
     public async Task<T?> ReadJsonAsync<T>(string relativePath) where T : class
     {
         var json = await ReadTextAsync(relativePath);
