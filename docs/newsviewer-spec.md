@@ -17,17 +17,19 @@ NewsViewer is a **one-shot process**: launch → evaluate the daily gate → ren
 - Registry `teams\` value names must match the generated folder name exactly — the sanitized team name with no `team-` prefix (e.g. `cz-its`, not `CZ_ITS`)
 - **An empty static `teams\` list does not stop NewsViewer.** `Main()` reads the static list via `TeamConfigurationReader.GetTeams` but does not gate on its length — the effective team set used for presentation selection is static ∪ dynamic (`resolved-teams.json`, resolved inside `PresentationSelector`; see Presentation Selection below), so a machine configured purely with Entra-resolved teams still needs to reach that union. An early-return guard here once defeated that on a dynamic-only machine; mirrors the equivalent fix in `NewsService/Worker.cs` (`docs/newsservice-spec.md`).
 
-### Launch surface — two complementary triggers
+### Launch surface — three triggers
 
-The two triggers are **complementary, not redundant**:
+The triggers are **complementary, not redundant**:
 
-- **HKLM `…\Run`** fires once at **session start** (logon). It does **not** fire on workstation unlock.
-- **Task Scheduler / Workstation Unlock** fires on every **unlock** thereafter. It does **not** fire at logon.
+- **HKLM `…\Run`** fires once at **session start** (logon), no arguments. It does **not** fire on workstation unlock.
+- **Scheduled task "NewsViewer Launch"** fires on workstation **unlock**, RDP connect and console connect, no arguments.
+- **Scheduled task "NewsViewer Content Arrived"** fires on the NewsService `ContentChanged` event (below) with the argument **`--trigger content`**. Unknown `--trigger` values are ignored (treated as absent).
 
-On always-on machines that are locked rather than logged off, **Unlock is the only trigger** for every logical day after the first. There is deliberately **no repeating/timer trigger** in this release — re-evaluation is event-driven (logon or unlock), and the daily gate below decides whether each launch actually shows anything.
+Both tasks run as `BUILTIN\Users` in each interactive session (parallel instances), so the single-instance mutex is session-local (`Local\NewsCentral.NewsViewer`). On always-on machines that are locked rather than logged off, unlock/connect is how every logical day after the first is reached. There is deliberately **no repeating/timer trigger** — re-evaluation is event-driven, and the launch decision below decides whether each launch actually shows anything.
 
+**Why the idle check applies only to content launches:** an event-triggered launch can fire while the user is away from an unlocked workstation, where a window would only be seen later; an unlock/logon/connect launch means the user has just arrived — and a Windows Hello unlock may not register as keyboard/mouse input, so an idle test there would wrongly suppress the morning poster.
 
-### Launch triggers — content-changed event (planned)
+### Launch triggers — content-changed event
 
 NewsService writes a dedicated EventLog entry whenever it has accepted a changed team index and the content is fully in the local cache (`ServiceEventIds.ContentChanged` in `NewsCentral.Shared`; written directly via `EventLog`, independent of `ILogger` levels, always on):
 
@@ -37,7 +39,39 @@ NewsService writes a dedicated EventLog entry whenever it has accepted a changed
 | **Source** | `NewsService` (`Logging:EventLog:SourceName`) |
 | **EventID** | `2001` (`ContentChanged`), Information |
 
-The event-triggered NewsViewer scheduled task that consumes it arrives in **M4**; NewsViewer itself does not use it yet. NewsService does not filter by content type — NewsViewer will decide relevance. It is emitted **once per sync cycle**, after all teams have finished, when at least one team produced an accepted and complete change (the index is written last, only once every referenced image is cached). It is never emitted for an unchanged, rejected or incomplete sync; an incomplete sync leaves the previous index in effect and is retried next cycle.
+NewsService does not filter by content type — NewsViewer decides relevance. The event is emitted **once per sync cycle**, after all teams have finished, when at least one team produced an accepted and complete change (the index is written last, only once every referenced image is cached). It is never emitted for an unchanged, rejected or incomplete sync; an incomplete sync leaves the previous index in effect and is retried next cycle.
+
+### Launch decision
+
+`LaunchDecider.Decide` (pure, in `NewsCentral.Shared`; the Win32 probes are injected and evaluated lazily) runs these rules **in order**; the first match wins:
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | `Active` = false | exit silently (not logged) |
+| 2 | single-instance mutex not acquired | `Exit(AlreadyRunning)` |
+| 3 | `--manual` | `FullPoster` — bypasses the gate and every check below (still needs a usable item, else `Exit(NoContent)`) |
+| 4 | no selected poster item (or unusable image / no qualifying monitor) | `Exit(NoContent)` |
+| 5 | session not visible: not `WTSActive`, not unlocked, or the input desktop is not `Default` (any failure counts as not visible) | `Exit(NotVisible)` |
+| 6 | `--trigger content` and idle > 2 minutes (`LaunchDecider.IdleThreshold`; `GetLastInputInfo`, wrap-safe) | `Exit(Idle)` |
+| 7 | busy: `SHQueryUserNotificationState` is NOT_PRESENT, BUSY, RUNNING_D3D_FULL_SCREEN, PRESENTATION_MODE or APP (`QUIET_TIME` and `ACCEPTS_NOTIFICATIONS` are not busy; a failed call is not busy) | `Exit(Busy)` |
+| 8 | daily gate not hit, or `BypassDailyGate` | `FullPoster` (gate consumed as before) |
+| 9 | `Ui:NotifyNewContent` = false | `Exit(NotifyDisabled)` |
+| 10 | marker empty (first run after upgrade) | marker := current key, `Exit(MarkerInitialized)` — no notification for a poster the user already saw |
+| 11 | marker = current key | `Exit(AlreadySeen)` |
+| 12 | otherwise | `MiniForm(key, title)` |
+
+Rules 5–7 also guard the full poster: it is never shown behind a locked screen, on the secure desktop, to an away user on content arrival, or over a presentation. The gate is not consumed in those cases, so a later trigger retries. Every exit still performs the wallpaper style re-assert, as before.
+
+**Marker.** `ContentKey` = presentation id + version + image hash (`ContentKeys.For`), so it changes when an item is republished or its image is replaced. The per-user marker ("last content this user saw or was notified about") is stored as `lastContentKey` in `%LOCALAPPDATA%\NewsCentral\viewerstate.json` next to the gate state (atomic temp-file write; the gate update preserves it). It is written when the full poster is displayed (including `--manual`) and for `MarkerInitialized`. **Until the mini form lands (M3), rule 12 only records `MiniForm (pending M3)` in the launch log and does not write the marker.**
+
+**Launch log.** `%LOCALAPPDATA%\NewsCentral\launch.log` — one line per launch: ISO timestamp, `trigger=content|none`, `decision=`, `reason=`, `key=`, and `title=` (MiniForm only). Capped at 64 KB (the newest half is kept); I/O never throws; no user names or paths.
+
+**Debug builds only:** `--reset-launch-state` clears this user's gate state, marker and launch log, then exits.
+
+### Known limitations
+
+If new content arrives while the user is away from an unlocked workstation, the arrival notification is skipped. It is picked up at the next workstation unlock, session connect, or new content arrival, whichever comes first. A user who never locks their workstation may therefore not be notified of an item until the next one arrives; the notification then shows the newest item.
+
 ## The daily gate
 
 The gate is **date-only** and evaluated once per launch. `ViewerStateService.AlreadyShownToday()` takes **no presentation id** — it disturbs the user at most once per **logical day**, regardless of which presentation is active.

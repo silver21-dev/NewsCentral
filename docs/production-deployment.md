@@ -536,6 +536,9 @@ script), which takes precedence over the general section for that provider — s
 Windows Event Log unless that value is lowered too. There is no file sink. The `ContentChanged` event
 (2001) is written directly and is unaffected by any of these levels.
 
+> ⚠️ Lowering `-EventLogLevel` to Debug floods the Application log on every client. Use it only
+> temporarily on individual machines and revert afterwards.
+
 ---
 
 ## Upgrading an existing installation
