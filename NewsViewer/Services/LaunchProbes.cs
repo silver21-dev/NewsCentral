@@ -32,7 +32,44 @@ internal sealed partial class LaunchProbes : ILaunchProbes
 
     public bool IsBusy()
     {
-        try { return SHQueryUserNotificationState(out int state) == 0 && ProbeMath.IsBusyState(state); }
+        bool qunsBusy;
+        try { qunsBusy = SHQueryUserNotificationState(out int state) == 0 && ProbeMath.IsBusyState(state); }
+        catch { qunsBusy = false; }
+        return qunsBusy || IsFullScreenForeground();
+    }
+
+    // Foreground window covers its whole monitor (rcMonitor) and is not maximized. Any failure = not busy.
+    private static bool IsFullScreenForeground()
+    {
+        try
+        {
+            var hwnd = GetForegroundWindow();
+            if (hwnd == IntPtr.Zero) return false;
+
+            GetWindowThreadProcessId(hwnd, out uint pid);
+            bool own = pid == (uint)Environment.ProcessId;
+
+            string? cls = null;
+            var buf = Marshal.AllocHGlobal(512);
+            try
+            {
+                int len = GetClassNameW(hwnd, buf, 256);
+                if (len > 0) cls = Marshal.PtrToStringUni(buf, len);
+            }
+            finally { Marshal.FreeHGlobal(buf); }
+
+            ScreenRect? window = null, monitor = null;
+            if (GetWindowRect(hwnd, out var r)) window = new ScreenRect(r.Left, r.Top, r.Right, r.Bottom);
+
+            var hMon = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+            if (hMon != IntPtr.Zero)
+            {
+                var mi = new MonitorInfo { CbSize = (uint)Marshal.SizeOf<MonitorInfo>() };
+                if (GetMonitorInfoW(hMon, ref mi)) monitor = new ScreenRect(mi.Monitor.Left, mi.Monitor.Top, mi.Monitor.Right, mi.Monitor.Bottom);
+            }
+
+            return FullScreenHeuristic.IsBusy(true, own, cls, window, monitor, IsZoomed(hwnd));
+        }
         catch { return false; }
     }
 
@@ -101,6 +138,38 @@ internal sealed partial class LaunchProbes : ILaunchProbes
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool GetLastInputInfo(ref LastInputInfo plii);
+
+    private const uint MonitorDefaultToNearest = 2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Rect { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo { public uint CbSize; public Rect Monitor; public Rect Work; public uint Flags; }
+
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr GetForegroundWindow();
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    private static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    private static partial int GetClassNameW(IntPtr hWnd, IntPtr lpClassName, int nMaxCount);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetWindowRect(IntPtr hWnd, out Rect lpRect);
+
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetMonitorInfoW(IntPtr hMonitor, ref MonitorInfo lpmi);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsZoomed(IntPtr hWnd);
 
     [LibraryImport("shell32.dll")]
     private static partial int SHQueryUserNotificationState(out int pquns);

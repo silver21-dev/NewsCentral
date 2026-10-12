@@ -160,3 +160,36 @@ public static class LaunchLogTrimmer
         return string.Join('\n', kept);
     }
 }
+
+/// <summary>Plain rectangle (screen coordinates, Win32 RECT semantics) for the full-screen heuristic.</summary>
+public readonly record struct ScreenRect(int Left, int Top, int Right, int Bottom);
+
+/// <summary>
+/// Pure rule behind the full-screen-foreground busy check, which covers what
+/// SHQueryUserNotificationState misses (browser F11 / full-screen video). Win32 gathering lives in
+/// NewsViewer's LaunchProbes; every gathering failure is passed in as a null rectangle → not busy.
+/// </summary>
+public static class FullScreenHeuristic
+{
+    private static readonly string[] ShellClasses = { "Progman", "WorkerW", "Shell_TrayWnd" };
+
+    /// <param name="hasForegroundWindow">GetForegroundWindow returned a window.</param>
+    /// <param name="isOwnProcess">The foreground window belongs to this process.</param>
+    /// <param name="className">Window class name (null when unreadable).</param>
+    /// <param name="window">GetWindowRect, null on failure.</param>
+    /// <param name="monitor">The full monitor rectangle (rcMonitor, not the work area), null on failure.</param>
+    /// <param name="isZoomed">The window is maximized (IsZoomed).</param>
+    public static bool IsBusy(bool hasForegroundWindow, bool isOwnProcess, string? className,
+        ScreenRect? window, ScreenRect? monitor, bool isZoomed)
+    {
+        if (!hasForegroundWindow || isOwnProcess) return false;
+        if (className is not null && Array.Exists(ShellClasses, c => string.Equals(c, className, StringComparison.Ordinal)))
+            return false;
+        if (window is not { } w || monitor is not { } m) return false;
+
+        // A maximized window can cover the whole monitor when the taskbar auto-hides; that is not full screen.
+        if (isZoomed) return false;
+
+        return w.Left <= m.Left && w.Top <= m.Top && w.Right >= m.Right && w.Bottom >= m.Bottom;
+    }
+}
