@@ -26,11 +26,27 @@ public sealed class ViewerStateService
 
     public void RecordShown(string presentationId)
     {
-        Write(new ViewerState
-        {
-            LastShownDate = LogicalDayCalculator.LogicalDay(DateTime.Now, _logicalDayStartHour),
-            LastShownPresentationId = presentationId
-        });
+        // Read-modify-write so the content marker survives the gate update.
+        var state = Read();
+        state.LastShownDate = LogicalDayCalculator.LogicalDay(DateTime.Now, _logicalDayStartHour);
+        state.LastShownPresentationId = presentationId;
+        Write(state);
+    }
+
+    /// <summary>The "last content this user saw or was notified about" key; null when never recorded.</summary>
+    public string? ReadContentMarker() => Read().LastContentKey;
+
+    public void WriteContentMarker(string contentKey)
+    {
+        var state = Read();
+        state.LastContentKey = contentKey;
+        Write(state);
+    }
+
+    /// <summary>Debug-only reset support: clears the gate and the marker.</summary>
+    public void Clear()
+    {
+        try { File.Delete(_statePath); } catch { }
     }
 
     private ViewerState Read()
@@ -44,9 +60,19 @@ public sealed class ViewerStateService
         catch { return new(); }
     }
 
+    // Atomic: temp file in the same folder, then an overwriting move, so a crash never leaves a
+    // half-written state file (which Read would silently treat as "never shown").
     private void Write(ViewerState state)
     {
-        try { File.WriteAllText(_statePath, JsonSerializer.Serialize(state, JsonDefaults.Options)); }
-        catch { }
+        var temp = _statePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temp, JsonSerializer.Serialize(state, JsonDefaults.Options));
+            File.Move(temp, _statePath, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(temp); } catch { }
+        }
     }
 }

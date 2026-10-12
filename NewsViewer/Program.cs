@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using NewsCentral.Configuration;
 using NewsCentral.Models;
 using NewsCentral.Security;
+using NewsCentral.Launch;
 using NewsViewer.Configuration;
 using NewsViewer.Forms;
 using NewsViewer.Services;
@@ -14,6 +15,20 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+#if DEBUG
+        // --reset-launch-state (Debug builds only): clears this user's daily-gate state, content marker
+        // and launch log, then exits. For manual testing of the launch decision; runs before everything
+        // else so it works regardless of configuration and of another running instance.
+        if (args.Any(a => string.Equals(a, "--reset-launch-state", StringComparison.OrdinalIgnoreCase)))
+        {
+            var stateDir = UserStatePath();
+            new ViewerStateService(stateDir, 0).Clear();
+            new LaunchLog(stateDir).Delete();
+            System.Diagnostics.Debug.WriteLine("[Launch] launch state reset (--reset-launch-state)");
+            return;
+        }
+#endif
+
         // Single-instance guard, session-scoped. HKLM Run (logon) and the Workstation Unlock task can
         // double-launch on a fast lock/unlock cycle; two concurrent runs race on the HKCU wallpaper
         // write and on viewerstate.json (whose Write swallows exceptions), so a lost write silently
@@ -21,7 +36,7 @@ static class Program
         // session its own poster. createdNew — not WaitOne — avoids AbandonedMutexException if a prior
         // instance crashed holding it.
         using var mutex = new Mutex(initiallyOwned: true, "Local\\NewsCentral.NewsViewer", out bool createdNew);
-        if (!createdNew) return;   // another instance is live in this session — exit silently
+        // createdNew is acted on below, after the Active guard, so the launch log can record it.
 
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -68,6 +83,24 @@ static class Program
         else if (cultureIdx >= 0)
             System.Diagnostics.Debug.WriteLine("[Culture] --culture given without a value; ignored");
 #endif
+
+        // Event-triggered launch (scheduled task "NewsViewer Content Arrived"): --trigger content. Unknown
+        // --trigger values are ignored (treated as absent).
+        int triggerIdx = Array.FindIndex(args, a => string.Equals(a, "--trigger", StringComparison.OrdinalIgnoreCase));
+        bool contentTrigger = triggerIdx >= 0 && triggerIdx + 1 < args.Length &&
+            string.Equals(args[triggerIdx + 1], "content", StringComparison.OrdinalIgnoreCase);
+        string triggerName = contentTrigger ? "content" : "none";
+
+        var userStatePath = UserStatePath();
+        var launchLog = new LaunchLog(userStatePath);
+
+        // Another instance is live in THIS session (the mutex is Local\, so each user session on a
+        // multi-session host runs its own) — exit silently apart from the launch-log line.
+        if (!createdNew)
+        {
+            launchLog.Append(triggerName, "Exit", "AlreadyRunning", null);
+            return;
+        }
 
         // UI theme — resolved ONCE here and consumed via Theme.Current (the same
         // resolve-once-then-pass pattern as duration resolution). Registry Ui\Theme
@@ -123,31 +156,59 @@ static class Program
         // Resolve the active display (poster) assignment — may be absent.
         var (assignment, imagePath) = selector.SelectActive(teams);
 
-        // Poster requires an active assignment AND a Full-HD-or-better monitor. When neither poster
-        // can be shown, the wallpaper style is still the terminal step before exit.
-        if (assignment is null || imagePath is null || !HasQualifyingMonitor())
-        {
-            ApplyWallpaperStyle();
-            return;
-        }
+        // A poster requires an active assignment, a verified image AND a Full-HD-or-better monitor.
+        bool contentAvailable = assignment is not null && imagePath is not null && HasQualifyingMonitor();
 
-        var userStatePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "NewsCentral");
         Directory.CreateDirectory(userStatePath);
 
         var hmac        = new HmacService(config.Hmac);        // telemetry only — unchanged
         var viewerState = new ViewerStateService(userStatePath, config.Display.LogicalDayStartHour);
         var telemetry   = new TelemetryWriter(config.CacheRootPath, hmac);
-        bool bypass     = config.BypassDailyGate;
-        bool alreadyShown = !bypass && !manual && viewerState.AlreadyShownToday();
 
-        // Show once per day then exit. The wallpaper style still re-asserts on an already-shown day.
-        if (alreadyShown)
+        // ── Launch decision (pure, ordered — see LaunchDecider / docs/newsviewer-spec.md) ──────────
+        // Active and the mutex were handled above; they are re-passed so the decision is self-contained.
+        var contentKey = assignment is null ? null : ContentKeys.For(assignment);
+        var title      = assignment is null ? null
+            : !string.IsNullOrWhiteSpace(assignment.PosterText) ? assignment.PosterText : assignment.PresentationName;
+
+        var decision = LaunchDecider.Decide(new LaunchInputs
         {
+            Active           = config.Active,
+            MutexAcquired    = createdNew,
+            Manual           = manual,
+            ContentTrigger   = contentTrigger,
+            ContentAvailable = contentAvailable,
+            ContentKey       = contentKey,
+            Title            = title,
+            GateHit          = viewerState.AlreadyShownToday(),
+            BypassDailyGate  = config.BypassDailyGate,
+            NotifyNewContent = config.Ui.NotifyNewContent,
+            Marker           = viewerState.ReadContentMarker()
+        }, new LaunchProbes());
+
+        if (decision.WriteMarker && decision.ContentKey is not null)
+            viewerState.WriteContentMarker(decision.ContentKey);
+
+        if (decision.Action == LaunchAction.Exit)
+        {
+            launchLog.Append(triggerName, "Exit", decision.Reason, decision.ContentKey);
+            // The wallpaper style is still the terminal step before exit.
             ApplyWallpaperStyle();
             return;
         }
+
+        if (decision.Action == LaunchAction.MiniForm)
+        {
+            // M3 shows the "News arrived!" form here. Until then the decision is only recorded, and the
+            // marker is deliberately NOT written so the notification is still pending when M3 lands.
+            launchLog.Append(triggerName, "MiniForm (pending M3)", decision.Reason, decision.ContentKey, decision.Title);
+            ApplyWallpaperStyle();
+            return;
+        }
+
+        launchLog.Append(triggerName, "FullPoster", decision.Reason, decision.ContentKey);
+        assignment = assignment!;   // FullPoster implies a usable item
+        imagePath  = imagePath!;
 
         var isOnline = ReadOnlineStatus(config.CacheRootPath);
 
@@ -208,6 +269,11 @@ static class Program
         // which is exactly the window this guard exists to close.
         GC.KeepAlive(mutex);
     }
+
+    // Per-user state folder: viewerstate.json (gate + content marker) and launch.log.
+    private static string UserStatePath() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "NewsCentral");
 
     private static IConfiguration BuildConfiguration()
     {

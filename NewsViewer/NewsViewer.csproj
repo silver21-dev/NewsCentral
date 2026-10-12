@@ -7,6 +7,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>NewsViewer</RootNamespace>
+    <!-- Required only by the LibraryImport source generator (it emits the marshalling stubs); no hand-written unsafe code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>NewsViewer</AssemblyName>
   </PropertyGroup>
 
