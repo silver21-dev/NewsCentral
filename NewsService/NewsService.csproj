@@ -30,6 +30,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The NewsViewer task definitions are linked, not copied: deploy/scheduled-tasks stays the only
+         place they exist. ViewerTaskProvisioner registers them (docs/newsservice-spec.md). -->
+    <EmbeddedResource Include="..\deploy\scheduled-tasks\*.xml"
+                      LogicalName="NewsService.TaskDefinitions.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Optional developer overlay: copied to output for F5, but NEVER published.
          Update (not Include) — Microsoft.NET.Sdk.Worker's default content glob already covers
          appsettings.*.json AND WOULD PUBLISH IT; this metadata override is what keeps a

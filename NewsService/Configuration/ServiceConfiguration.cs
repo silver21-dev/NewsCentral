@@ -13,6 +13,25 @@ public class ServiceConfiguration
     public EntraOptions Entra { get; set; } = new();
     public DeliverySection Delivery { get; set; } = new();
     public TelemetrySection Telemetry { get; set; } = new();
+    public ViewerTasksSection ViewerTasks { get; set; } = new();
+}
+
+public class ViewerTasksSection
+{
+    /// <summary>
+    /// True (default) = NewsService registers, verifies and repairs the two NewsViewer scheduled
+    /// tasks on every start and retires the legacy launch surface (HKLM Run value, legacy tasks).
+    /// False = completely hands-off: no task is registered, repaired or deleted and the Run key is
+    /// not touched — packaging owns the launch surface.
+    /// </summary>
+    public bool Manage { get; set; } = true;
+
+    /// <summary>
+    /// Full path of NewsViewer.exe the tasks launch. Empty (default) = <c>..\NewsViewer\NewsViewer.exe</c>
+    /// relative to the NewsService install folder (the install layout in docs/packaging.md). A
+    /// non-empty value is used as given — for dev boxes pointing at a Debug build.
+    /// </summary>
+    public string NewsViewerPath { get; set; } = string.Empty;
 }
 
 public class TelemetrySection

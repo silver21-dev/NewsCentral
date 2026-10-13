@@ -68,6 +68,19 @@ builder.Services.AddSingleton<SyncService>();
 
 builder.Services.AddHostedService<Worker>();
 
+// ── NewsViewer launch surface: scheduled tasks registered, verified and repaired here ─────────
+builder.Services.AddSingleton<ITaskSchedulerClient, SchtasksClient>();
+builder.Services.AddSingleton<IRunKeyAccessor, RegistryRunKeyAccessor>();
+builder.Services.AddSingleton<IProcessIdentity, WindowsProcessIdentity>();
+builder.Services.AddSingleton<ViewerTaskProvisioner>(sp => new ViewerTaskProvisioner(
+    config,
+    sp.GetRequiredService<IConfiguration>(),
+    sp.GetRequiredService<ITaskSchedulerClient>(),
+    sp.GetRequiredService<IRunKeyAccessor>(),
+    sp.GetRequiredService<IProcessIdentity>(),
+    sp.GetRequiredService<ILogger<ViewerTaskProvisioner>>()));
+builder.Services.AddHostedService<ViewerTaskProvisioningService>();
+
 var host = builder.Build();
 
 // Startup sanity check — never fatal; a bad or user-writable publish path just means neither

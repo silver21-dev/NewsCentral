@@ -69,6 +69,9 @@ HKLM\Software\[Company]\NewsCentral\NewsService\
 │       PublishedImagePath     REG_SZ    (protected folder for applied display images, both surfaces; must not be user-writable; default C:\Windows\Web\NewsCentral)
 │       LockScreenEnabled      DWORD     (0 = the lock-screen surface is not read/written/cleared at all — NOT a revert; default 1)
 │       WallpaperEnabled       DWORD     (0 = the wallpaper surface is not read/written/cleared at all — NOT a revert; mirrors LockScreenEnabled; default 1)
+├── ViewerTasks\
+│       Manage          DWORD   (0 = NewsService leaves the NewsViewer scheduled tasks and the HKLM Run key completely alone; default 1)
+│       NewsViewerPath  REG_SZ  (full path of the NewsViewer.exe the tasks launch; empty/absent = ..\NewsViewer\NewsViewer.exe next to the NewsService install)
 ├── Telemetry\
 │       UploadEnabled   DWORD   (0 = do not forward session telemetry to the repository; the fixed 30-day local retention sweep still runs; default 1)
 ├── Logging\
@@ -284,6 +287,10 @@ NewsService resolves configuration across the **same three layers as NewsViewer*
   "Telemetry": {
     "UploadEnabled": true
   },
+  "ViewerTasks": {
+    "Manage": true,
+    "NewsViewerPath": ""
+  },
   "Logging": {
     "LogLevel": {
       "Default": "Information",
@@ -319,6 +326,8 @@ NewsService resolves configuration across the **same three layers as NewsViewer*
 > **Prerequisite — Windows Spotlight.** Windows Spotlight must be disabled via GPO or Intune (`HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent` → `DisableWindowsSpotlightFeatures = 1`, `DisableSpotlightCollectionOnDesktop = 1`) or it will intermittently override the CSP-applied lock screen. NewsCentral does not write these keys — they are a GPO/Intune deployment prerequisite, not something either component configures.
 
 `Telemetry:UploadEnabled` (bool, default `true`) — when `false`, NewsService does not forward `session-*.json` telemetry to the repository (a read-only deployment: consume content, write nothing back). NewsViewer is unaffected and always writes session files; NewsService alone decides what becomes of them, so re-enabling upload immediately flushes whatever is still inside the retention window. Independently of this setting, local session files older than a **fixed 30-day window** (`TelemetryDefaults.RetentionDays`, by file `LastWriteTime`) are deleted every cycle — deliberately a constant, not a config key: the rationale is data hygiene (the records describe what a specific user saw and when), not disk space, and a configurable `0` would be ambiguous between delete-everything and keep-forever. Registry override: `Telemetry\UploadEnabled` DWORD `0`/`1`. See `docs/newsservice-spec.md` → Step 4.
+
+`ViewerTasks` — the NewsViewer launch surface that NewsService maintains (see `docs/newsservice-spec.md` → NewsViewer task provisioning, `docs/packaging.md`). `Manage` (bool, default `true`; registry `ViewerTasks\Manage` **DWORD** `0`/`1` — a genuine bool, so DWORD is safe) — on every service start NewsService registers, verifies and repairs the two machine-wide NewsViewer scheduled tasks and retires the legacy launch surface (HKLM Run value, legacy tasks). `false` = completely hands-off: no task is registered, repaired or deleted and the Run key is not touched (packaging owns the launch surface). `NewsViewerPath` (string, default empty; registry `ViewerTasks\NewsViewerPath` **REG_SZ**) — full path of the `NewsViewer.exe` the tasks launch; empty = `..\NewsViewer\NewsViewer.exe` relative to the NewsService install folder, normalised with `Path.GetFullPath`; a non-empty value is used as given (dev boxes: the Debug build). The Configuration Review page also uses it to locate NewsViewer's install folder. The event log name and source the Content Arrived task subscribes to are the existing `Logging:EventLog:LogName` / `SourceName`. NewsService-only; bound once at host start like every other key.
 
 ## appsettings.json — NewsViewer
 

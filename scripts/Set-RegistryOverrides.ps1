@@ -72,6 +72,9 @@
     │       WallpaperEnabled       DWORD    (0 = wallpaper surface not read/written/cleared at all; NOT a revert — mirrors LockScreenEnabled)
     ├── Telemetry\
     │       UploadEnabled          DWORD
+    ├── ViewerTasks\
+    │       Manage                 DWORD    (0 = NewsService leaves the NewsViewer scheduled tasks and the HKLM Run key alone; default 1)
+    │       NewsViewerPath         REG_SZ   (full path of NewsViewer.exe the tasks launch; empty/absent = ..\NewsViewer\NewsViewer.exe next to the service)
     ├── Logging\
     │       LogLevel\Default               REG_SZ
     │       EventLog\LogLevel\Default      REG_SZ
@@ -298,6 +301,18 @@
     telemetry to the repository (the local 30-day retention sweep still runs).
     Default true. NewsService only.
 
+.PARAMETER ViewerTasksManage
+    ViewerTasks:Manage (DWORD 0/1). Default $true: NewsService registers, verifies and repairs the two
+    NewsViewer scheduled tasks on every start and removes the legacy HKLM Run value. $false = completely
+    hands-off: NewsService neither registers, repairs nor deletes any task and does not touch the Run
+    key (packaging owns the launch surface). Bind as $false (not omitted) to write the value. NewsService only.
+
+.PARAMETER ViewerTasksNewsViewerPath
+    ViewerTasks:NewsViewerPath — full path of the NewsViewer.exe the scheduled tasks launch. Empty or
+    absent = ..\NewsViewer\NewsViewer.exe relative to the NewsService install folder (the install
+    layout in docs/packaging.md). Set it on a dev box to point at a Debug build. The Configuration Review
+    page also uses it to find NewsViewer's install folder. NewsService only.
+
 .PARAMETER LogLevel
     Logging:LogLevel:Default — Trace, Debug, Information, Warning, Error, Critical, or None.
     NewsService only.
@@ -386,6 +401,20 @@
         -ComponentName NewsService `
         -LockScreenEnabled $false `
         -WallpaperEnabled $false
+
+.EXAMPLE
+    # NewsService on a dev box — the NewsViewer tasks launch the Debug build
+    .\Set-RegistryOverrides.ps1 `
+        -Company "Contoso" `
+        -ComponentName NewsService `
+        -ViewerTasksNewsViewerPath "C:\src\NewsCentral\NewsViewer\bin\Debug\net10.0-windows\NewsViewer.exe"
+
+.EXAMPLE
+    # NewsService hands-off: packaging owns the NewsViewer scheduled tasks
+    .\Set-RegistryOverrides.ps1 `
+        -Company "Contoso" `
+        -ComponentName NewsService `
+        -ViewerTasksManage $false
 
 .EXAMPLE
     # NewsCentral — two policy-defined environments, operator-added environments still allowed
@@ -510,6 +539,10 @@ param(
 
     [Nullable[bool]] $Active,
 
+    # ── ViewerTasks (NewsService only) ────────────────────────────────────────────
+    [Nullable[bool]] $ViewerTasksManage,
+    [string] $ViewerTasksNewsViewerPath,
+
     # ── Telemetry / Logging (NewsService only) ────────────────────────────────────
     [switch] $TelemetryUploadEnabled,
 
@@ -539,6 +572,7 @@ $newParameterNames = @(
     "DefaultLockScreenPath", "PublishedImagePath", "LockScreenEnabled", "WallpaperEnabled",
     "DefaultWallpaperPath", "WallpaperStyle", "WallpaperBackgroundColor",
     "LogicalDayStartHour", "Theme", "TelemetryUploadEnabled", "LogLevel", "EventLogLevel",
+    "ViewerTasksManage", "ViewerTasksNewsViewerPath",
     "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions", "FrameColor", "FrameTextColor"
 )
 
@@ -556,6 +590,7 @@ $componentAllowedParams = @{
         "DefaultLockScreenPath", "DefaultWallpaperPath", "PublishedImagePath",
         "LockScreenEnabled", "WallpaperEnabled",
         "TelemetryUploadEnabled", "LogLevel", "EventLogLevel",
+        "ViewerTasksManage", "ViewerTasksNewsViewerPath",
         "PollIntervalSeconds", "StorageMode", "SharePath"
     )
     NewsViewer = @(
@@ -957,6 +992,15 @@ foreach ($frameParam in @(
 if ($PSBoundParameters.ContainsKey("NotifyNewContent")) {
     $dword = if ($NotifyNewContent) { 1 } else { 0 }
     Set-RegValue -Path "$base\Ui" -Name "NotifyNewContent" -Value $dword -Type DWord
+}
+
+# ── ViewerTasks\ ─────────────────────────────────────────────────────────────
+if ($PSBoundParameters.ContainsKey("ViewerTasksManage")) {
+    $dword = if ($ViewerTasksManage) { 1 } else { 0 }
+    Set-RegValue -Path "$base\ViewerTasks" -Name "Manage" -Value $dword -Type DWord
+}
+if ($PSBoundParameters.ContainsKey("ViewerTasksNewsViewerPath")) {
+    Set-RegValue -Path "$base\ViewerTasks" -Name "NewsViewerPath" -Value $ViewerTasksNewsViewerPath -Type String
 }
 
 # ── Telemetry\ ───────────────────────────────────────────────────────────────
