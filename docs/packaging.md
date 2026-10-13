@@ -157,25 +157,31 @@ packaging that copies only top-level files will silently drop all translations (
 back to English). Neutral cultures cover regional variants via the standard .NET fallback chain
 (`de` serves `de-DE`/`de-AT`/`de-CH`, etc.; `zh-Hans`/`zh-Hant` are neutral script cultures).
 
-NewsViewer runs per-user, in the interactive session, non-elevated. Its launch surface is the HKLM Run
-value plus two scheduled tasks (below).
+NewsViewer runs per-user, in the interactive session, non-elevated. Its launch surface is two machine-wide
+scheduled tasks (below), **registered and maintained by NewsService**. There is **no HKLM Run entry**.
 
 ### NewsViewer launch surface
 
-1. **HKLM Run value** — fires once at each interactive logon, in the logging-on user's session, no
-   arguments. Unchanged:
+**NewsService owns the tasks.** On every start (after a short delay, off the sync path) it registers both
+tasks from the embedded `deploy/scheduled-tasks` XMLs, verifies them and repairs any that is missing or
+outdated; if a pass fails (for example NewsViewer is not installed yet) it retries every 5 minutes until
+one pass succeeds. Each task's Description ends with `[nc-hash:<sha256>]` over its final XML (install
+path, company, event log/source, template), so a moved install or a changed template is detected and the
+task re-registered with `/F`. Only after **both** tasks are confirmed in place does NewsService retire the
+old launch surface: the legacy Workstation Unlock task, the old dev-box tasks and the HKLM Run value
+`NewsViewer` (only when its data contains `NewsViewer.exe`) — so a machine is never left with neither a
+Run entry nor a logon trigger. It uses `schtasks.exe` only (no Task Scheduler COM). Opt-out:
+`ViewerTasks\Manage` = 0 makes NewsService completely hands-off (packaging then owns the tasks and the
+Run key); `ViewerTasks\NewsViewerPath` overrides the exe path (default
+`..\NewsViewer\NewsViewer.exe` relative to the NewsService install folder — matches the install layout
+above). See `docs/configuration.md`, `docs/newsservice-spec.md`.
 
-   ```
-   Key:   HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
-   Name:  NewsViewer
-   Value: "%ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe"
-   ```
+1. **Scheduled task `\{Company}\NewsCentral\NewsViewer Launch`** — session presence. Triggers: **logon**
+   of any user (15 s delay so the shell is up), workstation **unlock**, **RemoteConnect** (RDP connect /
+   reconnect) and **ConsoleConnect** (fast user switching back to a local session). No arguments.
+   **Replaces the HKLM Run entry and the legacy Workstation Unlock task.**
 
-2. **Scheduled task `\{Company}\NewsCentral\NewsViewer Launch`** — session presence. Triggers: workstation
-   **unlock**, **RemoteConnect** (RDP connect / reconnect) and **ConsoleConnect** (fast user switching
-   back to a local session). No arguments. **Replaces the legacy Workstation Unlock task.**
-
-3. **Scheduled task `\{Company}\NewsCentral\NewsViewer Content Arrived`** — new content. Event trigger on
+2. **Scheduled task `\{Company}\NewsCentral\NewsViewer Content Arrived`** — new content. Event trigger on
    Application log / provider `NewsService` / **EventID 2001** (ContentChanged, once per sync cycle,
    written by NewsService after the cache is materialized). Argument **`--trigger content`**, which turns
    on the idle check (an away user is not interrupted).
@@ -190,28 +196,42 @@ reasons are spelled out in `deploy/scheduled-tasks/README.md`. There is delibera
 trigger: timely delivery is the service's responsibility, the viewer re-evaluates at logon, unlock/connect
 and content arrival.
 
-4. **Start menu shortcut (optional, on demand)** - a shortcut whose target is
+3. **Start menu shortcut (optional, on demand)** - a shortcut whose target is
    `"%ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe" --manual`. The `--manual` switch
    shows today's poster on demand, bypassing the daily gate without stamping it. It is not an
    automatic trigger; `Active = false` still makes it exit silently.
 
 **What the installer must do**
 
-- Register **both** tasks from `deploy/scheduled-tasks/NewsViewer-Launch.xml` and
-  `NewsViewer-ContentArrived.xml`, with the `{Company}` install path substituted into `Command` and
-  `WorkingDirectory` (`schtasks /Create /XML <file> /TN "<task>" /F`; the files are UTF-16 LE with BOM —
-  `schtasks` is sensitive to file encoding, so keep that encoding for any rewritten copy).
+- **Not** register the scheduled tasks and **not** write an HKLM Run value: NewsService registers and
+  maintains both tasks itself (see above). Only with `ViewerTasks\Manage` = 0 does packaging register them
+  from `deploy/scheduled-tasks/NewsViewer-Launch.xml` and `NewsViewer-ContentArrived.xml`, with the
+  `{Company}` install path substituted into `Command` and `WorkingDirectory`
+  (`schtasks /Create /XML <file> /TN "<task>" /F`; the files are UTF-16 LE with BOM — `schtasks` is
+  sensitive to file encoding, so keep that encoding for any rewritten copy).
 - Register the **NewsService event source** (`NewsService`, log `Application`) — see "NewsService —
   installation". On a fresh machine this must happen before NewsService first runs, so the first 2001
   event is attributed to a registered source and the Content Arrived task can fire.
 - **Remove the legacy Workstation Unlock task** (`\{Company}\NewsCentral\NewsViewer`), tolerantly (a
-  missing task is not a failure), or an unlock starts NewsViewer twice.
-- **Keep** the HKLM Run entry.
+  missing task is not a failure), or an unlock starts NewsViewer twice. (NewsService also removes it once
+  both tasks are in place; doing it at install time just avoids the window before its first pass.)
+- **On upgrade, stop writing the HKLM Run value.** An upgraded package that recreates it would be
+  undone by NewsService on every start, and a Run value alongside the logon trigger starts NewsViewer
+  twice at logon (the single-instance mutex absorbs it, but it is wasted work).
+- **On uninstall, remove both tasks** (`scripts/Register-NewsViewerTasks.ps1 -Company <Company> -Uninstall`
+  is the equivalent). NewsService cannot clean up after its own uninstall, and while it is installed with
+  `ViewerTasks\Manage` = 1 it registers the tasks again on every start.
+
+The 70 % / pilot path without an installer remains `scripts/Register-NewsViewerTasks.ps1`: it registers
+the same tasks and removes the Run value; NewsService then takes the tasks over on its next start (they
+carry no `nc-hash`, so they are re-registered once).
 
 **Log/Source must match.** The Content Arrived subscription names the event log and source literally.
 They MUST equal NewsService's `Logging:EventLog:LogName` / `SourceName` (shipped: `Application` /
-`NewsService`). Changing either of those values requires regenerating the task (re-run the reference
-script with `-EventLogName` / `-EventSourceName`), or the task silently never fires.
+`NewsService`). NewsService builds the subscription from those same two settings, so under
+`ViewerTasks\Manage` = 1 a changed value is picked up at the next service start (the hash changes, the
+task is re-registered). Where the tasks are registered by hand or by the reference script, changing either
+value requires re-running it with `-EventLogName` / `-EventSourceName`, or the task silently never fires.
 
 **Ship NewsService and NewsViewer together.** NewsViewer's notification records and `source`-marked
 poster records add optional fields to the HMAC-signed session telemetry record. An older NewsService
@@ -221,7 +241,9 @@ the same rollout (NewsService first where the order is controllable).
 
 **Reference implementation:** `scripts/Register-NewsViewerTasks.ps1` (`-Company`/`-InstallDir`, or
 `-ExePath` for a dev box; `-EventLogName`, `-EventSourceName`, `-LegacyTaskName`; `-Uninstall`;
-idempotent). It is not the production installer — an MSI/Intune package performs the equivalent actions.
+idempotent; also removes the HKLM Run value). It is the dev/pilot tool and the reference for what
+NewsService does by itself; with NewsService running (`ViewerTasks\Manage` = 1) a package does not need to
+register the tasks at all.
 
 **Task definition files:** the most robust way to create a task is to import a task-definition XML
 (`schtasks /create /xml ...`). `schtasks` has historically been sensitive to file encoding — UTF-16 LE
@@ -240,10 +262,12 @@ Both components — remove:
   published-image folder — see **"NewsService — display-surface cleanup"** below. This is **not**
   optional: skipped, it leaves the machine with a permanently enforced lock screen and wallpaper
   that no remaining software can ever clear.
-- NewsViewer: delete the `HKLM\...\Run\NewsViewer` value and **both** scheduled tasks,
-  `\{Company}\NewsCentral\NewsViewer Launch` and `\{Company}\NewsCentral\NewsViewer Content Arrived`
-  (and, on a machine that still has it, the legacy `\{Company}\NewsCentral\NewsViewer` task). The
-  reference script removes the two new tasks with `-Company <Company> -Uninstall`.
+- NewsViewer: delete **both** scheduled tasks, `\{Company}\NewsCentral\NewsViewer Launch` and
+  `\{Company}\NewsCentral\NewsViewer Content Arrived` (and, on a machine that still has it, the legacy
+  `\{Company}\NewsCentral\NewsViewer` task). The reference script removes the two new tasks with
+  `-Company <Company> -Uninstall`. Do this even though NewsService registered them: NewsService cannot
+  clean up after its own uninstall. (A machine that still carries a pre-takeover `HKLM\...\Run\NewsViewer`
+  value should lose it too.)
 - The machine content cache under `%ProgramData%\NewsCentral\` (and its per-team subfolders).
 
 Deliberately left in place (do NOT remove):
@@ -316,8 +340,9 @@ The failure this prevents is silent, and now has two instances:
   the old uninstall's "delete scheduled task" action runs after the new install created them —
   deleting a task the new version just installed (an old uninstall removes the legacy
   `\{Company}\NewsCentral\NewsViewer` task, and a newer one removes both `NewsViewer Launch` and
-  `NewsViewer Content Arrived`). NewsViewer would then have only the Run value — no unlock/connect launch
-  and no content-arrival launch — with no error to indicate why.
+  `NewsViewer Content Arrived`). NewsViewer would then have no launch at all — no logon, unlock/connect
+  or content-arrival launch — until NewsService next starts and re-registers the tasks (it self-heals
+  at every start, but not within a running session), with no error to indicate why.
 - **The six `PersonalizationCSP` display-surface values.** If the old uninstall's display-surface
   cleanup (see "NewsService — display-surface cleanup" above) runs *after* the new NewsService has
   already applied content, it clears the lock screen and wallpaper the new version just wrote — the
@@ -367,12 +392,13 @@ has no configuration, verify that the built-in `Company` value and the GPO hive 
 **NewsService:** files → register service (LocalSystem, delayed-auto) → set recovery actions →
 register EventLog source → start service.
 
-**NewsViewer:** files → HKLM Run value → register both scheduled tasks (`NewsViewer Launch`,
-`NewsViewer Content Arrived`; Users SID, least privilege, Parallel) → register the NewsService event
-source if missing → remove the legacy Workstation Unlock task.
+**NewsViewer:** files → register the NewsService event source if missing → (optionally) remove the legacy
+Workstation Unlock task. No Run value; NewsService registers both scheduled tasks (`NewsViewer Launch`,
+`NewsViewer Content Arrived`; Users SID, least privilege, Parallel) on its first start. With
+`ViewerTasks\Manage` = 0 packaging registers them instead.
 
 **Uninstall:** remove files, service, the six PersonalizationCSP display-surface values
-(ownership-checked first) and the published-image folder, Run value, task, ProgramData cache; leave
+(ownership-checked first) and the published-image folder, both NewsViewer tasks, ProgramData cache; leave
 GPO config, per-user state (including the HKCU wallpaper style values), and EventLog source.
 
 **Hand-off verification:** inspect the ACTUAL publish output for BOTH components — do not infer it

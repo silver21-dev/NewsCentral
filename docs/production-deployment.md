@@ -560,14 +560,23 @@ The "News arrived!" notification (NewsViewer) and the launch surface behind it
 1. **Install NewsService and NewsViewer together** (NewsService first where the order is controllable). The
    notification records add optional fields to the HMAC-signed session telemetry; an older NewsService
    discards those records as invalid.
-2. **Register the two scheduled tasks** from `deploy/scheduled-tasks/` — `NewsViewer Launch` (unlock,
-   RDP connect, console connect) and `NewsViewer Content Arrived` (NewsService event 2001,
-   `--trigger content`) — with the install path substituted, and **remove the legacy Workstation Unlock
-   task** (`\{Company}\NewsCentral\NewsViewer`). Keep the HKLM Run entry. Reference:
-   `scripts/Register-NewsViewerTasks.ps1`.
+2. **Nothing to register by hand: NewsService owns the scheduled tasks.** On its first start it registers
+   `NewsViewer Launch` (logon + 15 s, unlock, RDP connect, console connect) and `NewsViewer Content
+   Arrived` (NewsService event 2001, `--trigger content`) from the embedded `deploy/scheduled-tasks/`
+   XMLs, with the install path substituted (default `..\NewsViewer\NewsViewer.exe` beside the NewsService
+   folder), verifies them at every start and repairs any that is missing or outdated. Once both are in
+   place it removes the **legacy Workstation Unlock task** (`\{Company}\NewsCentral\NewsViewer`) and the
+   **HKLM Run value** `NewsViewer` — there is no Run entry any more; logon is a trigger of the Launch
+   task. Make sure the package no longer writes the Run value. If a site wants packaging to own the
+   tasks instead, deliver `ViewerTasks\Manage` = `0` by GPO (NewsService is then fully hands-off) and
+   register them with `scripts/Register-NewsViewerTasks.ps1` or the installer. Watch the first start in
+   the Application log (source `NewsService`): "registered" lines mean it worked; an Error naming a
+   path means NewsViewer is not where `ViewerTasks\NewsViewerPath` / the default says (retried every
+   5 minutes).
 3. **Register the NewsService event source** (`NewsService`, log `Application`) before NewsService first
-   runs. The Content Arrived task subscribes to exactly that log/source; if
-   `Logging:EventLog:LogName`/`SourceName` are ever changed, regenerate the task.
+   runs. The Content Arrived task subscribes to exactly that log/source; NewsService builds the
+   subscription from `Logging:EventLog:LogName`/`SourceName`, so a changed value is re-registered at the
+   next service start (restart the service after the GPO change).
 4. **`Ui:NotifyNewContent`** (NewsViewer, DWORD, default on = `1`) controls the notification. To turn it
    off fleet-wide, deliver `HKLM\Software\{Company}\NewsCentral\NewsViewer\Ui\NotifyNewContent` = `0` by
    GPO; on a dev/pilot machine:
@@ -603,19 +612,34 @@ The "News arrived!" notification (NewsViewer) and the launch surface behind it
   presentation than before. If the daily gate was already hit that day, that user gets one
   "News arrived!" for it. Expected, once.
 
-**Dev-box task setup.** Instead of hand-editing the XML, point the tasks at a build with `-ExePath`
+**Dev-box task setup.** Point NewsService at the build instead of hand-editing the XML: set
+`ViewerTasks\NewsViewerPath` to the Debug exe, then run NewsService **elevated** (it needs admin rights
+to write machine-wide tasks; run non-elevated it only logs a Warning and retries every 5 minutes)
 (elevated PowerShell at the repo root):
 
 ```
-$exe = Get-ChildItem .\NewsViewer\bin\Debug -Recurse -Filter NewsViewer.exe | Select-Object -First 1 -ExpandProperty FullName
+dotnet build
+$exe = (Resolve-Path .\NewsViewer\bin\Debug\net10.0-windows\NewsViewer.exe).Path
+.\scripts\Set-RegistryOverrides.ps1 -Company "<Company>" -ComponentName NewsService -ViewerTasksNewsViewerPath $exe
+dotnet run --project NewsService
+```
+
+NewsService registers both tasks with that path, removes the legacy unlock task
+(`\<Company>\NewsCentral\NewsViewer`), the leftover dev-box tasks at the old `\NewsCentral\` path and the
+HKLM Run value, and logs each step. Restarting it is harmless (an unchanged task is only logged at Debug).
+
+Without NewsService (a bare pilot box) the script does the same job once:
+
+```
 .\scripts\Register-NewsViewerTasks.ps1 -Company "<Company>" -ExePath $exe
 ```
 
 `-Company` is required in every mode (it names the `\<Company>\NewsCentral\` task folder). The script
-registers both tasks with that path, makes sure the event source exists, removes the legacy unlock task
-(`\<Company>\NewsCentral\NewsViewer`) and any leftover dev-box tasks at the old `\NewsCentral\` path, and
-prints each task's triggers, arguments and command. Re-running is harmless; `-Company "<Company>"
--Uninstall` removes the two tasks.
+registers both tasks with that path, makes sure the event source exists, removes the legacy unlock task and
+the leftover dev-box tasks and the Run value, and prints each task's triggers (including the logon trigger),
+arguments and command. Re-running is harmless; `-Company "<Company>" -Uninstall` removes the two tasks.
+Tasks the script registered carry no `nc-hash`, so a NewsService with `ViewerTasks\Manage` = 1 re-registers
+them once on its next start.
 
 ### 8.6 Field validation checklist (notification and launch surface)
 
@@ -637,6 +661,8 @@ Not yet validated in the field. Run on the listed environment and record the res
 | 12 | **`UseVirtualDesktop` poster over RDP** | The poster opens on the **standard** desktop (no desktop switch, no black background form); the launch-log line carries `note=VirtualDesktopFallback`; expanding the notification behaves the same. |
 | 13 | **RDP / Citrix / Horizon client window below 1920×1080** | Expect `reason=NoQualifyingMonitor` (no poster, no notification). Decide later whether to relax the threshold for remote sessions. |
 | 14 | **`Display:ShowInRemoteSessions` = 0** | In a remote session a launch logs `reason=RemoteSession` and shows nothing; `--manual` still shows the poster. Setting it back to `1` restores posters. |
+| 15 | **Logon trigger** (task-owned, no Run value) | About 15 s after sign-in NewsViewer starts (`launch.log` has a line for the logon). Note whether a second line with `reason=AlreadyRunning` follows (ConsoleConnect also firing at logon is harmless). The HKLM Run `NewsViewer` value is gone. |
+| 16 | **NewsService repairs the tasks** | Delete `NewsViewer Launch` (elevated), restart NewsService: it is logged "registered" and recreated. A non-elevated delete attempt is refused ("Access is denied"). |
 
 ---
 

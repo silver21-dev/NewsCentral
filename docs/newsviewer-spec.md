@@ -7,8 +7,7 @@ NewsViewer is a **one-shot process**: launch → run the launch decision (`Launc
 
 ## Launch Conditions
 
-- Registered in `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` for system startup
-- Registered in Task Scheduler by two tasks (unlock / RDP connect / console connect, and the NewsService content-changed event; see Launch surface below, `deploy/scheduled-tasks/README.md`, `scripts/Register-NewsViewerTasks.ps1`)
+- Launched by two Task Scheduler tasks, registered and maintained by NewsService (`ViewerTasks`): one on logon (15 s delay), unlock, RDP connect and console connect, one on the NewsService content-changed event. There is no HKLM Run entry (see Launch surface below, `deploy/scheduled-tasks/README.md`, `docs/newsservice-spec.md`, `scripts/Register-NewsViewerTasks.ps1` for dev/pilot boxes)
 - Optionally launchable from the Windows Start menu (shortcut target `NewsViewer.exe --manual`; see Manual launch below)
 - `appsettings.json` must be declared in `NewsViewer.csproj` as `<Content Include="appsettings.json">` with `CopyToOutputDirectory = PreserveNewest` so it is deployed alongside the executable
 - **Configuration layers** (registry always wins): `appsettings.json` (shipped, neutral, **committed** — a tracked artifact, never gitignored — loaded `optional: false`, so a missing file is a hard startup failure) → `appsettings.Development.json` (optional, gitignored dev overlay, loaded `optional: true`, **never published** via `CopyToPublishDirectory=Never`; documented shape in `appsettings.Development.json.example`) → registry (GPO). `appsettings.json` is the base layer the MSI installs and GPO sits on top of. See `docs/configuration.md` → appsettings.json — NewsViewer.
@@ -17,12 +16,11 @@ NewsViewer is a **one-shot process**: launch → run the launch decision (`Launc
 - Registry `teams\` value names must match the generated folder name exactly — the sanitized team name with no `team-` prefix (e.g. `cz-its`, not `CZ_ITS`)
 - **An empty static `teams\` list does not stop NewsViewer.** `Main()` reads the static list via `TeamConfigurationReader.GetTeams` but does not gate on its length — the effective team set used for presentation selection is static ∪ dynamic (`resolved-teams.json`, resolved inside `PresentationSelector`; see Presentation Selection below), so a machine configured purely with Entra-resolved teams still needs to reach that union. An early-return guard here once defeated that on a dynamic-only machine; mirrors the equivalent fix in `NewsService/Worker.cs` (`docs/newsservice-spec.md`).
 
-### Launch surface — three triggers
+### Launch surface — logon, unlock, connect, content
 
-The triggers are **complementary, not redundant**:
+The triggers are **complementary, not redundant**, and all of them are scheduled tasks maintained by NewsService:
 
-- **HKLM `…\Run`** fires once at **session start** (logon), no arguments. It does **not** fire on workstation unlock.
-- **Scheduled task "NewsViewer Launch"** fires on workstation **unlock**, RDP connect and console connect, no arguments.
+- **Scheduled task "NewsViewer Launch"** fires at **logon** (any user, `LogonTrigger` with a 15 s delay so the shell is up), on workstation **unlock**, RDP connect and console connect, no arguments. The logon trigger replaces the former HKLM `Run` value (removed by NewsService once both tasks are in place); a logon that is also reported as a console connect just starts a second instance that exits as `AlreadyRunning` — the mutex absorbs overlapping triggers.
 - **Scheduled task "NewsViewer Content Arrived"** fires on the NewsService `ContentChanged` event (below) with the argument **`--trigger content`**. Unknown `--trigger` values are ignored (treated as absent).
 
 Both tasks run as `BUILTIN\Users` in each interactive session (parallel instances), so the single-instance mutex is session-local (`Local\NewsCentral.NewsViewer`). On always-on machines that are locked rather than logged off, unlock/connect is how every logical day after the first is reached. There is deliberately **no repeating/timer trigger** — re-evaluation is event-driven, and the launch decision below decides whether each launch actually shows anything.

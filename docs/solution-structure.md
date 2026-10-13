@@ -116,6 +116,11 @@ NewsService\
 │   ├── GroupOutcomeMapper.cs        pure EntraGroupSnapshot → EntraSourceOutcome, incl. global-exclusion fail-closed
 │   ├── GroupMembershipChunker.cs    pure checkMemberGroups 20-id chunking + id→name mapping
 │   ├── EntraTeamResolutionService.cs   orchestrates one Entra resolution cycle; writes resolved-teams.json
+│   ├── ViewerTaskProvisioningService.cs   BackgroundService — runs ViewerTaskProvisioner shortly after start, retries every 5 min until one pass succeeds
+│   ├── ViewerTaskProvisioner.cs     one pass: register/verify/repair both NewsViewer tasks (nc-hash), then retire the legacy tasks + HKLM Run value
+│   ├── TaskDefinitionBuilder.cs     pure: embedded deploy/scheduled-tasks XML + inputs → final task XML + SHA-256 stamp; hash extraction
+│   ├── TaskSchedulerClient.cs       ITaskSchedulerClient over schtasks.exe (no COM) + IProcessIdentity
+│   ├── RunKeyAccessor.cs            IRunKeyAccessor — the one legacy HKLM Run value (64-bit view)
 │   └── SyncService.cs             orchestrates the poll cycle; ECDSA-verifies index.json via SignatureGate before caching; applies both display surfaces (lock screen, wallpaper) via a shared three-state dispatch core; writes each team's index.json last (only after every image is cached), self-heals missing cached images on an unchanged index, and raises one ContentChanged notification per cycle
 ├── JsonDefaults.cs                shared JsonSerializerOptions (WriteIndented + CamelCase + CaseInsensitive + enum converter)
 ├── Worker.cs                      BackgroundService host; reads interval from configuration
@@ -162,12 +167,12 @@ NewsViewer\
 
 ```
 deploy\scheduled-tasks\
-├── NewsViewer-Launch.xml             task \{Company}\NewsCentral\NewsViewer Launch — unlock / RDP connect / console connect (UTF-16 LE with BOM; .gitattributes marks it binary)
+├── NewsViewer-Launch.xml             task \{Company}\NewsCentral\NewsViewer Launch — logon (15 s) / unlock / RDP connect / console connect (UTF-16 LE with BOM; .gitattributes marks it binary); embedded into NewsService, which registers it
 ├── NewsViewer-ContentArrived.xml     task \{Company}\NewsCentral\NewsViewer Content Arrived — event 2001, --trigger content
 └── README.md                         what each task does and why
 scripts\
 ├── Set-RegistryOverrides.ps1         dev/pilot registry provisioning (GPO owns the fleet)
-├── Register-NewsViewerTasks.ps1      reference installer for the two tasks + the NewsService event source; -Uninstall
+├── Register-NewsViewerTasks.ps1      dev/pilot equivalent of NewsService's task provisioning (+ the event source, Run value removal); -Uninstall
 └── Remove-DisplaySurfaces.ps1        uninstall remediation for the PersonalizationCSP surfaces
 ```
 
@@ -187,7 +192,7 @@ NewsCentral.Shared.Tests\
 ├── FramePaletteTests.cs                    frame/text colour parsing, automatic contrast, shades, 4.5:1 sweep, fallbacks
 └── … (Entra resolver/merger, delivered-key precedence, shared readers, EffectiveTeams, authoring-app helpers — all passing)
 
-NewsService.Tests\ — also: SyncCompletenessTests (index-last, retry of an incomplete sync), CacheSelfHealTests, ContentChangedCycleTests (one event per cycle), ContentChangedNotifierTests.
+NewsService.Tests\ — also: SyncCompletenessTests (index-last, retry of an incomplete sync), CacheSelfHealTests, ContentChangedCycleTests (one event per cycle), ContentChangedNotifierTests, TaskDefinitionBuilderTests (real embedded XMLs), ViewerTaskProvisionerTests (fake scheduler + Run key).
 ```
 
 ## JSON Serialization Convention
