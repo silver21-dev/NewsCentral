@@ -2,12 +2,16 @@
 # ============================================================================
 #  SCOPE - REFERENCE INSTALLER FOR THE NEWSVIEWER LAUNCH SURFACE
 #
-#  Registers the two NewsViewer scheduled tasks from deploy/scheduled-tasks,
-#  registers the NewsService event source, and removes the legacy Workstation
-#  Unlock task. It is the reference implementation of what the installer must
-#  do (docs/packaging.md -> "NewsViewer launch surface") and the dev/pilot
-#  shortcut for a machine without an installer. It does NOT touch the HKLM Run
-#  entry (logon launch, unchanged) and writes no configuration.
+#  Registers the two NewsViewer scheduled tasks from deploy/scheduled-tasks
+#  (logon is a trigger of the Launch task), registers the NewsService event
+#  source, removes the legacy Workstation Unlock task and removes the HKLM Run
+#  value NewsViewer (the Run entry is gone, not kept). It is the reference
+#  implementation of what NewsService does on its own start (ViewerTasks, see
+#  docs/newsservice-spec.md) and the dev/pilot shortcut for a machine without
+#  NewsService management. On a machine where NewsService runs with
+#  ViewerTasks\Manage = 1, NewsService takes the tasks over on its next start
+#  (they carry no nc-hash stamp, so they are re-registered once). The script
+#  writes no configuration.
 #
 #  AUTHORITATIVE REFERENCES:
 #    deploy/scheduled-tasks/README.md   what each task does and why
@@ -20,14 +24,17 @@
 
 .DESCRIPTION
     Tasks (definitions: deploy/scheduled-tasks/*.xml, UTF-16 LE with BOM):
-      \<Company>\NewsCentral\NewsViewer Launch           unlock / RDP connect / console connect, no arguments
+      \<Company>\NewsCentral\NewsViewer Launch           logon (15 s delay) / unlock / RDP connect / console connect, no arguments
       \<Company>\NewsCentral\NewsViewer Content Arrived  NewsService event 2001, argument "--trigger content"
 
     For each task the script loads the XML, substitutes the Command and WorkingDirectory for the real
     install path, rewrites the Content Arrived event subscription to the configured log/source, writes a
     temporary UTF-16 copy, registers it with "schtasks /Create /XML ... /F" and deletes the temporary file.
     It then registers the NewsService event source when it is missing and removes the legacy Workstation
-    Unlock task and any leftover dev-box tasks at the old \NewsCentral\ path. Running it twice gives the same
+    Unlock task and any leftover dev-box tasks at the old \NewsCentral\ path, and finally removes the HKLM Run
+    value "NewsViewer" (only when its data contains NewsViewer.exe; any other value of that name is kept;
+    read through the 64-bit registry view): logon launches through the Launch task's logon trigger now.
+    Running it twice gives the same
     result (/F replaces the tasks; an existing event source and already-removed old tasks are reported, not
     errors).
 
@@ -61,7 +68,10 @@
     Folder holding the task XML files. Default: deploy\scheduled-tasks next to this script's repository root.
 
 .PARAMETER Uninstall
-    Removes both new tasks. Does not touch the event source, the legacy task or the HKLM Run entry.
+    Removes both new tasks. Does not touch the event source, the legacy task or the HKLM Run value.
+    Uninstalling NewsViewer MUST remove the tasks (this switch, or the installer's equivalent): NewsService
+    cannot clean up after its own uninstall, and with ViewerTasks\Manage = 1 it would register them again
+    on its next start for as long as it is installed.
 
 .EXAMPLE
     .\scripts\Register-NewsViewerTasks.ps1 -Company Contoso
@@ -148,7 +158,8 @@ if ($Uninstall) {
         else { Write-Host "  not found $name" }
     }
     Write-Host ""
-    Write-Host "The event source, the legacy task and the HKLM Run entry were not touched." -ForegroundColor DarkGray
+    Write-Host "The event source, the legacy task and the HKLM Run value were not touched." -ForegroundColor DarkGray
+    Write-Host "Uninstalling NewsViewer must remove these tasks; NewsService (ViewerTasks\Manage = 1) re-registers them on its next start." -ForegroundColor DarkGray
     return
 }
 
@@ -262,6 +273,32 @@ foreach ($old in @($legacy) + $OldDevTasks) {
     else { Write-Host "  not found $label$old (nothing to remove)" }
 }
 
+# ── Legacy HKLM Run value ────────────────────────────────────────────────────
+# Same rule as NewsService (ViewerTaskProvisioner): value name exactly "NewsViewer", removed only when its data
+# contains NewsViewer.exe, read through the 64-bit registry view; nothing else under Run is touched. The tasks
+# are in place at this point (a failed registration threw above), so the machine keeps a logon launch.
+Write-Host ""
+Write-Step "Legacy HKLM Run value"
+$hklm = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
+try {
+    $run = $hklm.OpenSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\Run', $true)
+    $runData = if ($run) { $run.GetValue('NewsViewer') } else { $null }
+    if ($null -eq $runData) {
+        Write-Host "  not found HKLM Run value NewsViewer (nothing to remove)"
+    }
+    elseif (("$runData") -like '*NewsViewer.exe*') {
+        $run.DeleteValue('NewsViewer')
+        Write-Host "  removed   HKLM Run value NewsViewer ($runData)"
+    }
+    else {
+        Write-Host "  kept      HKLM Run value NewsViewer does not point at NewsViewer.exe ($runData)"
+    }
+}
+finally {
+    if ($run) { $run.Dispose() }
+    $hklm.Dispose()
+}
+
 # ── Verification ─────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Step "Verification"
@@ -276,6 +313,7 @@ foreach ($name in @($LaunchTask, $ContentTask)) {
     foreach ($trigger in $task.Triggers) {
         $kind = $trigger.CimClass.CimClassName -replace '^MSFT_Task', '' -replace 'Trigger$', ''
         $detail = if ($trigger.PSObject.Properties["StateChange"]) { "StateChange=$($stateNames[[int]$trigger.StateChange])" }
+                  elseif ($kind -eq 'Logon') { "Delay=$(if ($trigger.Delay) { $trigger.Delay } else { '(none)' })  UserId=$(if ($trigger.UserId) { $trigger.UserId } else { '(any user)' })" }
                   elseif ($trigger.PSObject.Properties["Subscription"]) { "Subscription=$($trigger.Subscription)" }
                   else { "" }
         Write-Host "    trigger   $kind  $detail"
