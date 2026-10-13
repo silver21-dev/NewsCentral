@@ -90,6 +90,27 @@ public static class EffectiveConfigResolver
         catch { return null; }
     }
 
+    /// <summary>
+    /// NewsViewer's install directory (spec §4.1), pure: the folder of NewsService's
+    /// <c>ViewerTasks:NewsViewerPath</c> when set, otherwise the install layout's sibling
+    /// <c>..\NewsViewer</c> next to the NewsService install directory — accepted only if it exists.
+    /// Null when neither resolves.
+    /// </summary>
+    public static string? ResolveNewsViewerDir(
+        string? configuredExePath, string? newsServiceDir, Func<string, bool> directoryExists)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredExePath))
+            return ParseExeDirectory(configuredExePath);
+
+        if (string.IsNullOrWhiteSpace(newsServiceDir)) return null;
+        try
+        {
+            var sibling = Path.GetFullPath(Path.Combine(newsServiceDir, "..", "NewsViewer"));
+            return directoryExists(sibling) ? sibling : null;
+        }
+        catch { return null; }
+    }
+
     /// <summary>Discovers a component's install directory (spec §4.1). Null on any failure.</summary>
     public static string? DiscoverInstallDir(string component)
     {
@@ -109,12 +130,18 @@ public static class EffectiveConfigResolver
                     }
 
                 case "NewsViewer":
+                    // No HKLM Run value any more: NewsViewer's folder is what NewsService launches via the
+                    // scheduled tasks — ViewerTasks:NewsViewerPath, else the sibling-folder install layout.
                     if (!OperatingSystem.IsWindows()) return null;
-                    using (var k = Registry.LocalMachine.OpenSubKey(
-                        @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"))
+                    string? configuredExe = null;
+                    var company = SolutionConstants.Company;
+                    if (!string.IsNullOrEmpty(company))
                     {
-                        return k?.GetValue("NewsViewer") is string cmd ? ParseExeDirectory(cmd) : null;
+                        using var k = Registry.LocalMachine.OpenSubKey(
+                            $@"Software\{company}\{SolutionConstants.SolutionName}\NewsService\ViewerTasks");
+                        configuredExe = k?.GetValue("NewsViewerPath") as string;
                     }
+                    return ResolveNewsViewerDir(configuredExe, DiscoverInstallDir("NewsService"), Directory.Exists);
 
                 default:
                     return null;
@@ -128,7 +155,7 @@ public static class EffectiveConfigResolver
     {
         "NewsCentral" => "AppContext.BaseDirectory",
         "NewsService" => @"HKLM\SYSTEM\CurrentControlSet\Services\NewsService\ImagePath",
-        "NewsViewer"  => @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run → NewsViewer",
+        "NewsViewer"  => @"NewsService ViewerTasks\NewsViewerPath, else ..\NewsViewer beside the NewsService install",
         _ => "unknown"
     };
 

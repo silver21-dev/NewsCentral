@@ -49,7 +49,7 @@ Above each config table, a small metadata block describing *where the module liv
 
 The **found/not-found** badge on the hive is load-bearing: a `Company` mismatch makes `OpenSubKey` return null, and this badge surfaces that as a diagnostic signal rather than a silently empty registry column (§10).
 
-**Install-directory override (session-only).** Auto-discovery (§4.1) is the default, but on a dev box the components are rarely installed where the service registration / `Run` key point, so discovery yields `(not discovered)` and the NewsService/NewsViewer sections come up empty. Each section therefore exposes **one** editable field — the install directory — as an override:
+**Install-directory override (session-only).** Auto-discovery (§4.1) is the default, but on a dev box the components are rarely installed where the service registration / `ViewerTasks:NewsViewerPath` point, so discovery yields `(not discovered)` and the NewsService/NewsViewer sections come up empty. Each section therefore exposes **one** editable field — the install directory — as an override:
 
 - The field is an **override**, not a replacement: blank = auto-discovery exactly as today; non-empty = the resolver uses the typed directory and **skips discovery**.
 - The `appsettings.json` path is **derived** from it as `{override}\appsettings.json` — there is no second editable field.
@@ -65,11 +65,11 @@ The NewsCentral section already self-discovers via `AppContext.BaseDirectory`; t
 |---|---|---|
 | NewsCentral | `AppContext.BaseDirectory` | Self — the page runs in this process |
 | NewsService | `HKLM\SYSTEM\CurrentControlSet\Services\NewsService\ImagePath` | Command line — parse (§4.2) |
-| NewsViewer | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` → `NewsViewer` value | Command line — parse (§4.2) |
+| NewsViewer | NewsService hive `ViewerTasks\NewsViewerPath` (exe path — parse per §4.2), else the sibling folder `..\NewsViewer` next to the discovered NewsService install directory (accepted only if it exists) | There is no HKLM Run value any more — NewsService owns the launch tasks |
 
 ### 4.2 Command-Line → Directory Parsing
 
-`ImagePath` and `Run` values are command lines, not bare paths. Parse:
+`ImagePath` is a command line and `ViewerTasks\NewsViewerPath` an exe path, not bare directories. Parse:
 
 1. If the value starts with `"`, the exe path is the substring between the first and second `"`.
 2. Otherwise, take the substring up to and including the last case-insensitive `.exe` occurrence (handles unquoted paths; args follow).
@@ -163,6 +163,8 @@ Hive: `…\NewsCentral\NewsService\`. `RegType`: S=REG_SZ, D=DWORD. `Ovr`: OV/PA
 | `Delivery:PublishedImagePath` | `C:\Windows\Web\NewsCentral` | `Delivery\PublishedImagePath` | S | OV | text | | protected folder for applied display images (both lock screen and wallpaper); must not be user-writable |
 | `Delivery:LockScreenEnabled` | `true` | `Delivery\LockScreenEnabled` | D | OV | toggle | | `true \| false` (registry: DWORD 0/1); false = the lock-screen surface is not read, written, or cleared at all — NOT a revert, existing content stays frozen; opt-out for RDS/VDI/RemoteApp hosts |
 | `Delivery:WallpaperEnabled` | `true` | `Delivery\WallpaperEnabled` | D | OV | toggle | | `true \| false` (registry: DWORD 0/1); mirrors `Delivery:LockScreenEnabled` exactly — false = the wallpaper surface is not read, written, or cleared at all; NOT a revert; opt-out for RDS/VDI/RemoteApp hosts |
+| `ViewerTasks:Manage` | `true` | `ViewerTasks\Manage` | D | OV | toggle | | `true \| false` (registry: DWORD 0/1 — genuine bool, DWORD is safe); true = NewsService registers, verifies and repairs the two NewsViewer scheduled tasks on every start and removes the legacy launch surface; false = completely hands-off (packaging owns the tasks; the Run key is not touched) |
+| `ViewerTasks:NewsViewerPath` | `` | `ViewerTasks\NewsViewerPath` | S | OV | path | | full path of NewsViewer.exe the tasks launch (registry: REG_SZ); empty = `..\NewsViewer\NewsViewer.exe` next to the NewsService install folder; warning: an empty REG_SZ is a PRESENT value that overrides the appsettings path with empty |
 | `Telemetry:UploadEnabled` | `true` | `Telemetry\UploadEnabled` | D | OV | toggle | | `true \| false` (registry: DWORD 0/1 — genuine bool, DWORD is safe); false = session telemetry is not forwarded to the repository; the fixed 30-day local retention sweep still runs |
 | `Logging:LogLevel:Default` | `Information` | `Logging\LogLevel\Default` | S | OV | dropdown | | `Trace \| Debug \| Information \| Warning \| Error \| Critical \| None` (registry: REG_SZ); standard .NET logging key, honoured by the generic host |
 | `Logging:EventLog:LogLevel:Default` | `Information` | `Logging\EventLog\LogLevel\Default` | S | OV | dropdown | | `Trace \| Debug \| Information \| Warning \| Error \| Critical \| None` (registry: REG_SZ); standard .NET logging key, honoured by the generic host |

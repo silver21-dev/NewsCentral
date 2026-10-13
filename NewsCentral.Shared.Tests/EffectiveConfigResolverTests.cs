@@ -39,6 +39,37 @@ public sealed class EffectiveConfigResolverTests
         Assert.Null(EffectiveConfigResolver.ParseExeDirectory("   "));
     }
 
+    // ── ResolveNewsViewerDir (spec §4.1) — no HKLM Run value any more ────────
+
+    [Fact]
+    public void ResolveNewsViewerDir_ConfiguredExePath_WinsOverTheSiblingFolder()
+    {
+        var dir = EffectiveConfigResolver.ResolveNewsViewerDir(
+            @"C:\dev\NewsViewer\bin\Debug\NewsViewer.exe", @"C:\Install\NewsService", _ => true);
+        Assert.Equal(@"C:\dev\NewsViewer\bin\Debug", dir);
+    }
+
+    [Fact]
+    public void ResolveNewsViewerDir_NoConfiguredPath_UsesTheExistingSiblingFolder()
+    {
+        var dir = EffectiveConfigResolver.ResolveNewsViewerDir(
+            "", @"C:\Install\NewsService", p => p == @"C:\Install\NewsViewer");
+        Assert.Equal(@"C:\Install\NewsViewer", dir);
+    }
+
+    [Fact]
+    public void ResolveNewsViewerDir_SiblingFolderMissing_OrNoNewsServiceDir_IsNotDiscovered()
+    {
+        Assert.Null(EffectiveConfigResolver.ResolveNewsViewerDir(null, @"C:\Install\NewsService", _ => false));
+        Assert.Null(EffectiveConfigResolver.ResolveNewsViewerDir(null, null, _ => true));
+    }
+
+    [Fact]
+    public void ResolveNewsViewerDir_UnparseableConfiguredPath_IsNotDiscovered()
+    {
+        Assert.Null(EffectiveConfigResolver.ResolveNewsViewerDir("not a path", @"C:\Install\NewsService", _ => true));
+    }
+
     // ── Project (spec §8 step 5) — pure, two in-memory layers ─────────────────
 
     private static ConfigKeyDescriptor Desc(string key, bool secret = false) => new()
