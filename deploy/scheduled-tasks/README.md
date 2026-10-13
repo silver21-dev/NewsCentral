@@ -1,14 +1,20 @@
 # NewsViewer scheduled tasks
 
-Two Task Scheduler definitions that launch NewsViewer in the logged-on user's session. They complement
-the **HKLM Run** entry (logon launch, no arguments), which is unchanged. Behavior of the launches
-themselves (decision rules, notification) is in `docs/newsviewer-spec.md`; installer requirements are in
-`docs/packaging.md` ("NewsViewer launch surface"). The reference implementation that registers them is
-`scripts/Register-NewsViewerTasks.ps1`.
+Two Task Scheduler definitions that launch NewsViewer in the logged-on user's session. They are the
+**whole** launch surface: there is no HKLM Run entry (logon is a trigger of the Launch task).
+
+**NewsService owns the tasks.** It embeds these two files (linked at build time, never copied), applies the
+substitutions below, and on every start registers, verifies and repairs both tasks (`ViewerTasks:Manage`,
+default on; `false` = hands-off). A task carries `[nc-hash:<sha256>]` at the end of its Description; a
+missing or different hash means "outdated" and the task is re-registered. These files are the only task
+definitions - nothing is generated in code. `scripts/Register-NewsViewerTasks.ps1` is the dev/pilot
+equivalent for a machine without NewsService management. Behavior of the launches themselves (decision
+rules, notification) is in `docs/newsviewer-spec.md`; installer requirements are in `docs/packaging.md`
+("NewsViewer launch surface").
 
 | File | Task | Trigger | Arguments |
 |---|---|---|---|
-| `NewsViewer-Launch.xml` | `\{Company}\NewsCentral\NewsViewer Launch` | session state change: **unlock**, **RemoteConnect** (RDP connect / reconnect), **ConsoleConnect** (fast user switching back to a local session) | none |
+| `NewsViewer-Launch.xml` | `\{Company}\NewsCentral\NewsViewer Launch` | **logon** of any user (15 s delay so the shell is up); session state change: **unlock**, **RemoteConnect** (RDP connect / reconnect), **ConsoleConnect** (fast user switching back to a local session) | none |
 | `NewsViewer-ContentArrived.xml` | `\{Company}\NewsCentral\NewsViewer Content Arrived` | event: log `Application`, provider `NewsService`, **EventID 2001** (ContentChanged, once per sync cycle) | `--trigger content` |
 
 `NewsViewer Launch` replaces the legacy Workstation Unlock task (`\{Company}\NewsCentral\NewsViewer`),
@@ -16,7 +22,7 @@ which must be removed so an unlock does not start NewsViewer twice.
 
 ## `--trigger content` and the idle check
 
-The unlock/connect task starts NewsViewer because the user is present by definition. The content task
+The logon/unlock/connect task starts NewsViewer because the user is present by definition. The content task
 fires whenever NewsService accepts new content, whether or not anybody is at the keyboard, so it passes
 `--trigger content`, which switches on the **idle check**: if the last user input was more than two
 minutes ago, NewsViewer exits without showing anything and the content is picked up by the next unlock,
@@ -46,7 +52,7 @@ WorkingDirectory:  C:\Program Files\{Company}\NewsCentral\NewsViewer
 
 The task name actually registered is the one passed to `schtasks /Create /TN`; keep it equal to the URI.
 
-The installer (or `Register-NewsViewerTasks.ps1`) substitutes the real company name, or the actual
+NewsService (or `Register-NewsViewerTasks.ps1`) substitutes the real company name, or the actual
 folder for a non-standard location such as a dev box. The event subscription in
 `NewsViewer-ContentArrived.xml` carries the NewsService log name and source (`Application` /
 `NewsService`); they **must match** NewsService's `Logging:EventLog:LogName` / `SourceName`, or the task
