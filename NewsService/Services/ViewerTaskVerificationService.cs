@@ -56,26 +56,12 @@ internal sealed class ViewerTaskVerificationService(
     private async Task VerifyLoopAsync(CancellationToken ct)
     {
         await Task.Delay(InitialDelay, ct);
-        string? reported = null;
+        var reporter = new VerifyReporter(logger);
         while (true)
         {
-            var drift = await verifier.VerifyAsync(ct);
-            if (drift is not null)
-            {
-                var state = string.Join("\n", drift);
-                if (state != reported)
-                {
-                    if (drift.Count == 0)
-                        logger.LogInformation("NewsViewer scheduled tasks verified: both are in place");
-                    else
-                        logger.LogWarning(
-                            "NewsViewer launch surface has drifted; NewsService does not repair it. " +
-                            "Re-run the registration script shipped in the package: {Drift}",
-                            string.Join("; ", drift));
-                    reported = state;
-                }
-            }
-            await Task.Delay(drift is null ? FailureRetryInterval : VerifyInterval, ct);
+            var report = await verifier.VerifyAsync(ct);
+            if (report is not null) reporter.Report(report);
+            await Task.Delay(report is null ? FailureRetryInterval : VerifyInterval, ct);
         }
     }
 }

@@ -39,6 +39,7 @@ connect or content event. Without the argument the idle check is skipped.
 | `MultipleInstancesPolicy` | `Parallel` | One instance per logged-on session (RDS hosts, fast user switching). Duplicates *within* a session are handled by NewsViewer's own single-instance mutex, which is session-local (`Local\NewsCentral.NewsViewer`). `IgnoreNew` would let one user's running poster block every other session. |
 | `ExecutionTimeLimit` | `PT0S` (none) | An expanded poster with a stopped countdown, or a poster with auto-close disabled, may legitimately stay open for hours; the default 72 h limit would kill it. |
 | `StartWhenAvailable` | `false` | A missed trigger is not replayed later: the next unlock / connect / content event covers it, and a replay at an arbitrary moment would pop a poster in the user's face. |
+| Logon trigger `Delay` | `PT15S` | At logon the trigger fires while the shell is still starting; the delay lets the desktop come up before NewsViewer shows a window and re-asserts the per-user wallpaper style, both of which need it. 15 s is a margin chosen by judgement, not a measured value - raise it for slow profiles (roaming profiles, VDI) if a first launch lands on a half-loaded desktop. Only the logon trigger has a delay: unlock and connect events happen when the shell already exists. |
 | Battery / network / idle conditions | all off | The task must run on laptops on battery and with no network. |
 
 ## Placeholders
@@ -54,6 +55,14 @@ WorkingDirectory:  C:\Program Files\{Company}\NewsCentral\NewsViewer
 ```
 
 The task name actually registered is the one passed to `schtasks /Create /TN`; keep it equal to the URI.
+
+The generated registration script writes the canonical path as the unexpanded token
+`%ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe` (and the same token in `WorkingDirectory`), so
+the machine that registers the task expands it, not the machine that built the script. Task Scheduler expands
+environment variables in `Command` and `WorkingDirectory` when it runs the task and keeps the token in the
+stored XML (verified on Windows 11: a task with `%SystemRoot%` in `Command` and `%ProgramFiles%` in
+`WorkingDirectory` ran with the working directory `C:\Program Files`). A path given with `--newsviewer-path` is
+written literally.
 
 The registration script (generated, or `Register-NewsViewerTasks.ps1`) substitutes the real company name, or the actual
 folder for a non-standard location such as a dev box. The event subscription in

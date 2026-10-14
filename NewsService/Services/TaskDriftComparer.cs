@@ -28,9 +28,9 @@ internal static class TaskDriftComparer
         }
 
         var drift = new List<string>();
-        Check(drift, taskName, "command", expected, actual, "//t:Exec/t:Command", unquote: true);
-        Check(drift, taskName, "working directory", expected, actual, "//t:Exec/t:WorkingDirectory", unquote: false);
-        Check(drift, taskName, "event subscription", expected, actual, "//t:EventTrigger/t:Subscription", unquote: false);
+        Check(drift, taskName, "command", expected, actual, "//t:Exec/t:Command", unquote: true, expand: true);
+        Check(drift, taskName, "working directory", expected, actual, "//t:Exec/t:WorkingDirectory", unquote: false, expand: true);
+        Check(drift, taskName, "event subscription", expected, actual, "//t:EventTrigger/t:Subscription", unquote: false, expand: false);
 
         var expectedTriggers = Triggers(expected);
         var actualTriggers = Triggers(actual);
@@ -40,18 +40,20 @@ internal static class TaskDriftComparer
     }
 
     private static void Check(List<string> drift, string taskName, string what,
-        XmlDocument expected, XmlDocument actual, string xpath, bool unquote)
+        XmlDocument expected, XmlDocument actual, string xpath, bool unquote, bool expand)
     {
-        var want = Text(expected, xpath, unquote);
-        var have = Text(actual, xpath, unquote);
+        var want = Text(expected, xpath, unquote, expand);
+        var have = Text(actual, xpath, unquote, expand);
         if (!string.Equals(want, have, StringComparison.OrdinalIgnoreCase))
             drift.Add($"task '{taskName}': wrong {what} - expected '{want ?? "(none)"}', found '{have ?? "(none)"}'");
     }
 
-    private static string? Text(XmlDocument doc, string xpath, bool unquote)
+    private static string? Text(XmlDocument doc, string xpath, bool unquote, bool expand)
     {
         var text = doc.SelectSingleNode(xpath, Ns(doc))?.InnerText.Trim();
-        return unquote ? text?.Trim('"') : text;
+        if (unquote) text = text?.Trim((char)34);
+        // A stored command may carry %ProgramFiles% while the expected one is expanded (or the reverse).
+        return expand && text is not null ? Environment.ExpandEnvironmentVariables(text) : text;
     }
 
     // One entry per trigger: the element name, plus the state-change kind for session triggers.

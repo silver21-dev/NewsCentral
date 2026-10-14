@@ -23,11 +23,6 @@ internal static class EmitTaskScriptCommand
     public static bool IsRequested(string[] args) =>
         args.Any(a => string.Equals(a, Switch, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>%ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe (the install layout in docs/packaging.md).</summary>
-    internal static string DefaultViewerPath() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-        SolutionConstants.Company, "NewsCentral", "NewsViewer", "NewsViewer.exe");
-
     private static bool LooksLikeBuildOutput(string path) =>
         path.Contains(@"\bin\Debug\", StringComparison.OrdinalIgnoreCase)
         || path.Contains(@"\bin\Release\", StringComparison.OrdinalIgnoreCase)
@@ -74,7 +69,7 @@ internal static class EmitTaskScriptCommand
             var viewerSource = !string.IsNullOrWhiteSpace(viewerPath)
                 ? "--newsviewer-path"
                 : @"default %ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe";
-            var exePath = !string.IsNullOrWhiteSpace(viewerPath) ? viewerPath : DefaultViewerPath();
+            var exePath = !string.IsNullOrWhiteSpace(viewerPath) ? viewerPath : TaskDefinitionInputsResolver.CanonicalViewerPath();
             var config = new ServiceConfiguration { ViewerTasks = { NewsViewerPath = exePath } };
             if (LooksLikeBuildOutput(exePath))
                 stderr.WriteLine($"Warning: NewsViewer path '{exePath}' looks like a build output; it is baked into a script shipped to target machines.");

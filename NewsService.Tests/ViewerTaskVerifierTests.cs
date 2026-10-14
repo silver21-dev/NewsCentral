@@ -63,7 +63,7 @@ public sealed class ViewerTaskVerifierTests
         var rig = new Rig();
         rig.RegisterBoth();
 
-        Assert.Empty((await rig.Sut().VerifyAsync(default))!);
+        Assert.Empty((await rig.Sut().VerifyAsync(default))!.Drift);
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public sealed class ViewerTaskVerifierTests
             rig.Scheduler.Tasks[name] = WithoutStamp(rig.Scheduler.Tasks[name]);
         Assert.All(rig.Scheduler.Tasks.Values, x => Assert.Null(TaskDefinitionBuilder.ExtractHash(x)));
 
-        Assert.Empty((await rig.Sut().VerifyAsync(default))!);
+        Assert.Empty((await rig.Sut().VerifyAsync(default))!.Drift);
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public sealed class ViewerTaskVerifierTests
         foreach (var name in rig.Scheduler.Tasks.Keys.ToList())
             rig.Scheduler.Tasks[name] = WithoutStamp(rig.Scheduler.Tasks[name]);
 
-        var drift = (await rig.Sut().VerifyAsync(default))!;
+        var drift = (await rig.Sut().VerifyAsync(default))!.Drift;
 
         Assert.Contains(drift, d => d.Contains("wrong command") && d.Contains(@"D:\Elsewhere\NewsViewer.exe"));
         Assert.DoesNotContain(drift, d => d.Contains("nc-hash mismatch"));
@@ -102,7 +102,7 @@ public sealed class ViewerTaskVerifierTests
         var stamp = TaskDefinitionBuilder.ExtractHash(xml)!;
         rig.Scheduler.Tasks[Launch] = xml.Replace(stamp, new string('0', 64));
 
-        var drift = (await rig.Sut().VerifyAsync(default))!;
+        var drift = (await rig.Sut().VerifyAsync(default))!.Drift;
 
         var single = Assert.Single(drift);
         Assert.Contains("nc-hash mismatch", single);
@@ -116,7 +116,7 @@ public sealed class ViewerTaskVerifierTests
         rig.RegisterBoth();
         rig.Scheduler.Tasks.Remove(Content);
 
-        var drift = (await rig.Sut().VerifyAsync(default))!;
+        var drift = (await rig.Sut().VerifyAsync(default))!.Drift;
 
         Assert.Contains(drift, d => d.Contains(Content) && d.Contains("missing"));
         Assert.Contains(drift, d => d.Contains("executable not found") && d.Contains(Exe));
@@ -242,5 +242,126 @@ public sealed class EventSourceGuardTests
         EventSourceGuard.EnsureSource(Config(), log, api);
 
         Assert.Contains(log.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("Could not create"));
+    }
+}
+
+public sealed class VerifyPathReportingTests
+{
+    private static readonly string Company = SolutionConstants.Company;
+    private const string Exe = @"C:\Install\NewsViewer\NewsViewer.exe";
+
+    private sealed class FakeScheduler : ITaskQueryClient
+    {
+        public Dictionary<string, string> Tasks { get; } = new();
+        public Task<TaskQueryResult> QueryAsync(string taskName, CancellationToken ct) =>
+            Task.FromResult(Tasks.TryGetValue(taskName, out var xml) ? new TaskQueryResult(true, xml) : new TaskQueryResult(false, null));
+    }
+
+    private static string Stamped(ViewerTaskKind kind, string exe = Exe) =>
+        TaskDefinitionBuilder.Build(kind, TaskDefinitionBuilder.LoadTemplate(kind),
+            new TaskDefinitionInputs(Company, exe, "Application", "NewsService")).Xml;
+
+    private static string WithoutStamp(string xml) => Regex.Replace(xml, @"\s*\[nc-hash:[0-9a-f]{64}\]", "");
+
+    private static ViewerTaskVerifier Verifier(FakeScheduler scheduler) => new(
+        new ServiceConfiguration { ViewerTasks = { NewsViewerPath = Exe } },
+        new ConfigurationBuilder().Build(), scheduler, new ViewerTaskVerifierTests.CapturingLogger<ViewerTaskVerifier>(),
+        baseDirectory: @"C:\Install\NewsService", fileExists: _ => true);
+
+    private static async Task<VerifyReport> Verify(bool launchStamped, bool contentStamped)
+    {
+        var s = new FakeScheduler();
+        var launch = Stamped(ViewerTaskKind.Launch);
+        var content = Stamped(ViewerTaskKind.ContentArrived);
+        s.Tasks[TaskDefinitionBuilder.TaskName(ViewerTaskKind.Launch, Company)] = launchStamped ? launch : WithoutStamp(launch);
+        s.Tasks[TaskDefinitionBuilder.TaskName(ViewerTaskKind.ContentArrived, Company)] = contentStamped ? content : WithoutStamp(content);
+        return (await Verifier(s).VerifyAsync(default))!;
+    }
+
+    [Fact]
+    public async Task BothStamped_NamesTheStampPath_ForEachTask()
+    {
+        var report = await Verify(true, true);
+        Assert.Empty(report.Drift);
+        Assert.Equal(["Launch: matched by nc-hash stamp", "Content Arrived: matched by nc-hash stamp"], report.Paths);
+    }
+
+    [Fact]
+    public async Task OneStampedOneNot_NamesEachPath_AndIsNotDrift()
+    {
+        var report = await Verify(true, false);
+        Assert.Empty(report.Drift);
+        Assert.Equal(["Launch: matched by nc-hash stamp", "Content Arrived: matched by field comparison (no nc-hash stamp)"], report.Paths);
+    }
+
+    [Fact]
+    public async Task NeitherStamped_NamesTheFieldComparisonPath_ForBoth()
+    {
+        var report = await Verify(false, false);
+        Assert.Empty(report.Drift);
+        Assert.Equal(["Launch: matched by field comparison (no nc-hash stamp)", "Content Arrived: matched by field comparison (no nc-hash stamp)"], report.Paths);
+    }
+
+    [Fact]
+    public async Task Reporter_LogsThePathsInTheMessage_AtInformation()
+    {
+        var log = new ViewerTaskVerifierTests.CapturingLogger<VerifyPathReportingTests>();
+        new VerifyReporter(log).Report(await Verify(true, false));
+
+        var entry = Assert.Single(log.Entries);
+        Assert.Equal(LogLevel.Information, entry.Level);   // an unstamped task is legitimate, not a warning
+        Assert.Contains("Launch: matched by nc-hash stamp", entry.Message);
+        Assert.Contains("Content Arrived: matched by field comparison", entry.Message);
+    }
+
+    [Fact]
+    public async Task StampedToUnstamped_LogsOnce_ThenStaysQuiet()
+    {
+        var log = new ViewerTaskVerifierTests.CapturingLogger<VerifyPathReportingTests>();
+        var reporter = new VerifyReporter(log);
+
+        reporter.Report(await Verify(true, true));
+        reporter.Report(await Verify(true, true));          // unchanged: quiet
+        Assert.Single(log.Entries);
+
+        reporter.Report(await Verify(false, true));         // transition: reported once
+        Assert.Equal(2, log.Entries.Count);
+        Assert.Contains("Launch: matched by field comparison", log.Entries[1].Message);
+
+        reporter.Report(await Verify(false, true));         // unchanged again: quiet
+        reporter.Report(await Verify(false, true));
+        Assert.Equal(2, log.Entries.Count);
+        Assert.All(log.Entries, e => Assert.Equal(LogLevel.Information, e.Level));
+    }
+
+    [Fact]
+    public void FieldComparison_AcceptsATokenisedStoredCommand_AgainstAnExpandedExpectedPath_AndViceVersa()
+    {
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var expanded = programFiles + @"\" + Company + @"\NewsCentral\NewsViewer\NewsViewer.exe";
+        var tokenised = @"%ProgramFiles%\" + Company + @"\NewsCentral\NewsViewer\NewsViewer.exe";
+
+        foreach (var kind in new[] { ViewerTaskKind.Launch, ViewerTaskKind.ContentArrived })
+        {
+            Assert.Empty(TaskDriftComparer.Compare("t", Stamped(kind, expanded), WithoutStamp(Stamped(kind, tokenised))));
+            Assert.Empty(TaskDriftComparer.Compare("t", Stamped(kind, tokenised), WithoutStamp(Stamped(kind, expanded))));
+        }
+
+        // A genuinely different path is still drift.
+        Assert.NotEmpty(TaskDriftComparer.Compare("t", Stamped(ViewerTaskKind.Launch, expanded),
+            WithoutStamp(Stamped(ViewerTaskKind.Launch, @"%ProgramFiles%\Other\NewsViewer.exe"))));
+    }
+
+    [Fact]
+    public void DefaultSiblingPath_UnderProgramFiles_IsTokenised_ForTheExpectedStamp_ButAConfiguredPathIsLiteral()
+    {
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var baseDir = programFiles + @"\" + Company + @"\NewsCentral\NewsService";
+        var path = TaskDefinitionInputsResolver.ResolveExePath(new ServiceConfiguration(), baseDir);
+        Assert.Equal(@"%ProgramFiles%\" + Company + @"\NewsCentral\NewsViewer\NewsViewer.exe", path);
+
+        var configured = programFiles + @"\X\NewsViewer.exe";
+        Assert.Equal(configured, TaskDefinitionInputsResolver.ResolveExePath(
+            new ServiceConfiguration { ViewerTasks = { NewsViewerPath = configured } }, baseDir));
     }
 }

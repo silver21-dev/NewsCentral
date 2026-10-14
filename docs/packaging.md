@@ -259,9 +259,29 @@ NewsService.exe --emit-task-script <package-staging>\Register-NewsViewerTasks.ge
   names, both task names, the legacy task names, and both task XMLs embedded as base64 of the exact file
   bytes (the UTF-16 LE BOM that `schtasks` needs survives). The packaging team needs no separate briefing on
   any of them, and a `Company` mismatch (which fails silently) cannot happen. It contains no secret.
-- Run it elevated from the package: `-WhatIf` previews both tasks, the event source and the legacy
-  removal; no switch registers them; `-Uninstall` removes both tasks. It is idempotent. Do not hand-edit it:
-  rebuild it.
+- Run it elevated from the package: `-WhatIf` previews both tasks, the event source, the legacy removal and
+  the Run-value removal (and skips verification, with a notice); no switch registers them; `-Uninstall`
+  removes both tasks and the Run value. It is idempotent. Do not hand-edit it: rebuild it.
+- **It verifies what it registered, and fails the install if that is wrong.** After registering it prints the
+  same Verification readout as `scripts/Register-NewsViewerTasks.ps1` (per task: every trigger with its
+  details, command, arguments, working directory, principal, run level; then the event source state) and
+  compares the registered definition with what it just wrote: command, working directory, trigger set, event
+  subscription and `nc-hash` stamp. A missing task, any mismatch or a missing event source makes the script
+  **exit 1** with `VERIFICATION FAILED`, so an installer custom action sees a failure instead of installing
+  onto a machine that will never show anything. This is a deliberate difference from the reference script,
+  which prints the readout but exits 0; the generated script's banner says so. The readout lands in the
+  installer log as evidence the launch surface was established.
+- **The canonical path ships as an unexpanded token.** With no `--newsviewer-path` the script registers
+  `%ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe` (and the same token in the working
+  directory) so the target machine, not the build machine, expands it. Task Scheduler expands environment
+  variables in `Command` and `WorkingDirectory` and keeps the token in the stored XML
+  (`deploy/scheduled-tasks/README.md`). A path given with `--newsviewer-path` is written literally. The `nc-hash`
+  stamp covers the string as written, and NewsService computes its expected stamp the same way (the default
+  sibling path under Program Files is tokenised; a configured `ViewerTasks\NewsViewerPath` is literal), so tasks
+  registered by an earlier generated script, which carried the expanded path, show as drifted until the
+  installer re-registers them during the upgrade. That is expected and corrects itself. Field comparison
+  expands environment variables on both sides, so a tokenised stored command still matches an expanded
+  expected path for tasks without a stamp.
 - Its header records the generating NewsService version, the generation timestamp and the build machine.
 
 `scripts/Register-NewsViewerTasks.ps1` remains the dev-box and pilot path (no build step needed): it

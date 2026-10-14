@@ -112,10 +112,16 @@ internal static class TaskScriptGenerator
 #
 #  Registers the two NewsViewer scheduled tasks, creates the NewsService event
 #  source when missing, removes the legacy Workstation Unlock task and the
-#  legacy HKLM Run value "NewsViewer". With
-#  -Uninstall it removes both tasks (NewsService never modifies Task Scheduler,
-#  so the installer owns their creation and removal). It writes no
-#  configuration and contains no secret.
+#  legacy HKLM Run value "NewsViewer", then prints a Verification readout.
+#  With -Uninstall it removes both tasks and the Run value (NewsService never
+#  modifies Task Scheduler, so the installer owns their creation and removal).
+#  It writes no configuration and contains no secret.
+#
+#  DIFFERENCE FROM THE REFERENCE: scripts/Register-NewsViewerTasks.ps1 prints
+#  the same Verification readout but exits 0 even when a task is MISSING. This
+#  script runs unattended inside an installer, so it EXITS 1 when verification
+#  fails (a task is missing or does not match what was just registered, or the
+#  event source is missing). Verification is skipped under -WhatIf.
 #
 #  Reference implementation: scripts/Register-NewsViewerTasks.ps1
 #  Details: docs/packaging.md (launch surface)
@@ -149,6 +155,7 @@ $WorkingDir      = @@WORKDIR@@
 $EventLogName    = @@LOGNAME@@
 $EventSourceName = @@SOURCE@@
 $ContentEventId  = @@EVENTID@@
+$script:Expected  = @{}   # what Verification must find, filled by Register-Task
 $LegacyTasks     = @(
     @@LEGACYTASKS@@
 )
@@ -182,17 +189,32 @@ function Test-TaskExists {
     return ((Invoke-Schtasks @('/Query', '/TN', $Name)) -eq 0)
 }
 
-# Deletes a task if it exists. $true = removed, $false = nothing to remove. Any other failure throws.
+function Test-EventSourceExists { param([string]$Name) return [System.Diagnostics.EventLog]::SourceExists($Name) }
+function Get-EventSourceLogName { param([string]$Name) return [System.Diagnostics.EventLog]::LogNameFromSourceName($Name, '.') }
+function New-EventSourceNow { param([string]$Name, [string]$Log) [System.Diagnostics.EventLog]::CreateEventSource($Name, $Log) }
+
+# Deletes a task if it exists. Returns 'removed', 'absent' (nothing to remove) or 'whatif' (present, but -WhatIf).
+# Any other failure throws.
 function Remove-TaskIfPresent {
     param([string]$Name)
-    if (-not (Test-TaskExists $Name)) { return $false }
-    if (-not $PSCmdlet.ShouldProcess($Name, 'Remove scheduled task')) { return $false }
+    if (-not (Test-TaskExists $Name)) { return 'absent' }
+    if (-not $PSCmdlet.ShouldProcess($Name, 'Remove scheduled task')) { return 'whatif' }
     if ((Invoke-Schtasks @('/Delete', '/TN', $Name, '/F')) -ne 0) {
         $output = $script:SchtasksOutput.Trim()
-        if (-not (Test-TaskExists $Name)) { return $false }
+        if (-not (Test-TaskExists $Name)) { return 'absent' }
         throw "schtasks /Delete failed for '$Name': $output"
     }
-    return $true
+    return 'removed'
+}
+
+# Same wording as scripts/Register-NewsViewerTasks.ps1; -WhatIf gets its own line.
+function Write-RemoveResult {
+    param([string]$Result, [string]$Name, [string]$Label = '')
+    switch ($Result) {
+        'removed' { Write-Host "  removed   $Label$Name" }
+        'whatif'  { Write-Host "  would remove $Label$Name (-WhatIf: nothing was changed)" }
+        default   { Write-Host "  not found $Label$Name (nothing to remove)" }
+    }
 }
 
 # Legacy HKLM Run value: value name exactly "NewsViewer", removed only when its data contains NewsViewer.exe,
@@ -229,21 +251,24 @@ function Remove-LegacyRunValue {
     }
 }
 
-# ---- Uninstall ---------------------------------------------------------------
-if ($Uninstall) {
-    Write-Step 'Removing NewsViewer scheduled tasks'
-    foreach ($name in @($LaunchTask, $ContentTask)) {
-        if (Remove-TaskIfPresent $name) { Write-Host "  removed   $name" }
-        else { Write-Host "  nothing removed (absent, or -WhatIf): $name" }
+# One entry per trigger: the element name, plus the state-change kind for session triggers (sorted).
+function Get-TriggerSignature {
+    param($Doc, $Ns)
+    $list = @()
+    $triggers = $Doc.SelectSingleNode('//t:Triggers', $Ns)
+    if ($triggers) {
+        foreach ($node in $triggers.ChildNodes) {
+            if ($node.NodeType -ne 'Element') { continue }
+            $state = $node.SelectSingleNode('t:StateChange', $Ns)
+            $list += $(if ($state) { $node.LocalName + ':' + $state.InnerText.Trim() } else { $node.LocalName })
+        }
     }
-    # A machine upgraded from an older package may still carry the Run value.
-    Remove-LegacyRunValue
-    return
+    return @($list | Sort-Object)
 }
 
 # Decodes the embedded definition to a temp file, substitutes the install path (and, for Content Arrived,
 # the event subscription), writes a UTF-16 LE (BOM) copy - the encoding schtasks accepts reliably -
-# registers it and deletes both temp files.
+# registers it and deletes both temp files. Records what Verification must find afterwards.
 function Register-Task {
     param([string]$XmlBase64, [string]$TaskName, [switch]$RewriteSubscription)
 
@@ -267,6 +292,7 @@ function Register-Task {
         $command.InnerText = '"' + $ExePath + '"'
         $workDir.InnerText = $WorkingDir
 
+        $subscription = $null
         if ($RewriteSubscription) {
             $subscription = $doc.SelectSingleNode('//t:EventTrigger/t:Subscription', $ns)
             if (-not $subscription) { throw "The embedded definition for '$TaskName' has no event subscription." }
@@ -279,7 +305,8 @@ function Register-Task {
         # Stamp: SHA-256 of the final definition (without the stamp), appended to the Description as
         # " [nc-hash:<hex>]". NewsService (ViewerTasks:Mode = VerifyOnly) compares it to detect drift in
         # settings a field comparison cannot see (principal, time limit, ...). It builds the same text:
-        # an unindented XmlWriter over a StringWriter, hashed as UTF-8.
+        # an unindented XmlWriter over a StringWriter, hashed as UTF-8. Computed over the path exactly as
+        # written (a %ProgramFiles% token stays a token).
         $sw = New-Object System.IO.StringWriter
         $stampSettings = New-Object System.Xml.XmlWriterSettings
         $stampSettings.Indent = $false
@@ -292,6 +319,15 @@ function Register-Task {
         if (-not $description) { throw "The embedded definition for '$TaskName' has no description." }
         $description.InnerText = $description.InnerText + ' [nc-hash:' + $hash + ']'
         Write-Verbose "nc-hash $TaskName $hash"
+
+        $script:Expected[$TaskName] = @{
+            Command      = $command.InnerText
+            WorkingDir   = $workDir.InnerText
+            Subscription = $(if ($subscription) { $subscription.InnerText } else { $null })
+            Triggers     = @(Get-TriggerSignature $doc $ns)
+            Hash         = $hash
+            Xml          = $doc.OuterXml
+        }
 
         $settings = New-Object System.Xml.XmlWriterSettings
         $settings.Encoding = New-Object System.Text.UnicodeEncoding($false, $true)   # UTF-16 LE, BOM
@@ -312,8 +348,104 @@ function Register-Task {
     }
 }
 
+# Compares the registered definition with what Register-Task just wrote. Returns the problems found
+# (empty = it matches). Environment variables are expanded on both sides before comparing paths.
+function Compare-RegisteredTask {
+    param([string]$Name)
+    $expected = $script:Expected[$Name]
+    if (-not $expected) { return @("no expectation was recorded for this task") }
+    $path = (Split-Path $Name -Parent) + '\'
+    $leaf = Split-Path $Name -Leaf
+    try { $xmlText = Export-ScheduledTask -TaskName $leaf -TaskPath $path -ErrorAction Stop }
+    catch { return @("cannot read the registered definition: $($_.Exception.Message)") }
+
+    $doc = New-Object System.Xml.XmlDocument
+    $doc.PreserveWhitespace = $true
+    $doc.LoadXml([string]$xmlText)
+    $ns = New-Object System.Xml.XmlNamespaceManager($doc.NameTable)
+    $ns.AddNamespace('t', 'http://schemas.microsoft.com/windows/2004/02/mit/task')
+    $expand = { param($s) [System.Environment]::ExpandEnvironmentVariables(([string]$s).Trim().Trim('"')) }
+    $text = { param($xpath) $n = $doc.SelectSingleNode($xpath, $ns); if ($n) { $n.InnerText.Trim() } else { '' } }
+
+    $problems = @()
+    $command = & $text '//t:Exec/t:Command'
+    if ((& $expand $command) -ne (& $expand $expected.Command)) {
+        $problems += "wrong command - expected '$($expected.Command)', found '$command'"
+    }
+    $workDir = & $text '//t:Exec/t:WorkingDirectory'
+    if ((& $expand $workDir) -ne (& $expand $expected.WorkingDir)) {
+        $problems += "wrong working directory - expected '$($expected.WorkingDir)', found '$workDir'"
+    }
+    if ($null -ne $expected.Subscription) {
+        $subscription = & $text '//t:EventTrigger/t:Subscription'
+        if ($subscription -ne $expected.Subscription.Trim()) {
+            $problems += "wrong event subscription - expected '$($expected.Subscription)', found '$subscription'"
+        }
+    }
+    $found = @(Get-TriggerSignature $doc $ns)
+    if (($found -join ',') -ne (@($expected.Triggers) -join ',')) {
+        $problems += "wrong trigger set - expected [$(@($expected.Triggers) -join ', ')], found [$($found -join ', ')]"
+    }
+    $stamp = [regex]::Match((& $text '//t:RegistrationInfo/t:Description'), '\[nc-hash:([0-9a-fA-F]{64})\]')
+    if (-not $stamp.Success -or $stamp.Groups[1].Value -ne $expected.Hash) {
+        $problems += 'the nc-hash stamp is missing or differs from the one written'
+    }
+    return $problems
+}
+
+# Prints the readout (same shape and wording as scripts/Register-NewsViewerTasks.ps1) and returns the
+# number of problems: a missing task, a task that does not match what was just registered, a missing
+# event source.
+function Test-LaunchSurface {
+    $failures = 0
+    # TASK_SESSION_STATE_CHANGE_TYPE values, as Get-ScheduledTask reports them.
+    $stateNames = @{ 1 = 'ConsoleConnect'; 2 = 'ConsoleDisconnect'; 3 = 'RemoteConnect'; 4 = 'RemoteDisconnect'; 7 = 'SessionLock'; 8 = 'SessionUnlock' }
+    foreach ($name in @($LaunchTask, $ContentTask)) {
+        $path = (Split-Path $name -Parent) + '\'
+        $leaf = Split-Path $name -Leaf
+        $task = Get-ScheduledTask -TaskPath $path -TaskName $leaf -ErrorAction SilentlyContinue
+        Write-Host "  $name" -ForegroundColor Yellow
+        if (-not $task) { Write-Host '    MISSING' -ForegroundColor Red; $failures++; continue }
+        foreach ($trigger in $task.Triggers) {
+            $kind = $trigger.CimClass.CimClassName -replace '^MSFT_Task', '' -replace 'Trigger$', ''
+            $detail = if ($trigger.PSObject.Properties['StateChange']) { "StateChange=$($stateNames[[int]$trigger.StateChange])" }
+                      elseif ($kind -eq 'Logon') { "Delay=$(if ($trigger.Delay) { $trigger.Delay } else { '(none)' })  UserId=$(if ($trigger.UserId) { $trigger.UserId } else { '(any user)' })" }
+                      elseif ($trigger.PSObject.Properties['Subscription']) { "Subscription=$($trigger.Subscription)" }
+                      else { '' }
+            Write-Host "    trigger   $kind  $detail"
+        }
+        foreach ($action in $task.Actions) {
+            Write-Host "    command   $($action.Execute)"
+            Write-Host "    arguments $(if ($action.Arguments) { $action.Arguments } else { '(none)' })"
+            Write-Host "    workdir   $($action.WorkingDirectory)"
+        }
+        Write-Host "    principal $($task.Principal.GroupId)  run level $($task.Principal.RunLevel)"
+        foreach ($problem in @(Compare-RegisteredTask $name)) {
+            Write-Host "    MISMATCH  $problem" -ForegroundColor Red
+            $failures++
+        }
+    }
+    $sourceExists = (Test-EventSourceExists $EventSourceName)
+    Write-Host "  event source '$EventSourceName': $(if ($sourceExists) { 'present' } else { 'MISSING' })" `
+        -ForegroundColor $(if ($sourceExists) { 'Green' } else { 'Red' })
+    if (-not $sourceExists) { $failures++ }
+    return $failures
+}
+
+# ---- Main --------------------------------------------------------------------
+# ---- Uninstall ---------------------------------------------------------------
+if ($Uninstall) {
+    Write-Step 'Removing NewsViewer scheduled tasks'
+    foreach ($name in @($LaunchTask, $ContentTask)) {
+        Write-RemoveResult (Remove-TaskIfPresent $name) $name
+    }
+    # A machine upgraded from an older package may still carry the Run value.
+    Remove-LegacyRunValue
+    return
+}
+
 # ---- Tasks -------------------------------------------------------------------
-if (-not (Test-Path -LiteralPath $ExePath -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath ([System.Environment]::ExpandEnvironmentVariables($ExePath)) -PathType Leaf)) {
     Write-Warning "$ExePath does not exist yet. The tasks are registered anyway; install NewsViewer there before they fire."
 }
 Write-Step "Registering NewsViewer scheduled tasks for '$Company' (exe: $ExePath)"
@@ -323,28 +455,43 @@ Register-Task -XmlBase64 $ContentXmlBase64 -TaskName $ContentTask -RewriteSubscr
 # ---- Event source ------------------------------------------------------------
 Write-Host ''
 Write-Step 'NewsService event source'
-if ([System.Diagnostics.EventLog]::SourceExists($EventSourceName)) {
-    $existingLog = [System.Diagnostics.EventLog]::LogNameFromSourceName($EventSourceName, '.')
+if ((Test-EventSourceExists $EventSourceName)) {
+    $existingLog = (Get-EventSourceLogName $EventSourceName)
     if ($existingLog -ne $EventLogName) {
         Write-Warning "Event source '$EventSourceName' already exists under log '$existingLog', not '$EventLogName'. The Content Arrived task subscribes to '$EventLogName'."
     }
     Write-Host "  exists    $EventSourceName (log: $existingLog)"
 }
 elseif ($PSCmdlet.ShouldProcess($EventSourceName, "Create event source in log '$EventLogName'")) {
-    [System.Diagnostics.EventLog]::CreateEventSource($EventSourceName, $EventLogName)
+    New-EventSourceNow $EventSourceName $EventLogName
     Write-Host "  created   $EventSourceName (log: $EventLogName)"
 }
 
 # ---- Legacy tasks ------------------------------------------------------------
 Write-Host ''
 Write-Step 'Legacy Workstation Unlock task and old dev-box tasks'
-foreach ($old in $LegacyTasks) {
-    if (Remove-TaskIfPresent $old) { Write-Host "  removed   $old" }
-    else { Write-Host "  nothing removed (absent, or -WhatIf): $old" }
+for ($i = 0; $i -lt $LegacyTasks.Count; $i++) {
+    Write-RemoveResult (Remove-TaskIfPresent $LegacyTasks[$i]) $LegacyTasks[$i] $(if ($i -eq 0) { 'legacy ' } else { 'old dev ' })
 }
 
 # ---- Legacy Run value (the tasks are in place: a failed registration threw above) ----
 Remove-LegacyRunValue
+
+# ---- Verification ------------------------------------------------------------
+Write-Host ''
+Write-Step 'Verification'
+if ($WhatIfPreference) {
+    Write-Host '  skipped (-WhatIf: nothing was registered, so there is nothing to verify)'
+}
+else {
+    $failures = Test-LaunchSurface
+    Write-Host ''
+    if ($failures -gt 0) {
+        Write-Host "VERIFICATION FAILED: $failures problem(s) above. The launch surface is NOT established." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Verification passed: both tasks are registered as intended.' -ForegroundColor Green
+}
 Write-Host ''
 """;
 }

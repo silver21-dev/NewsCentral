@@ -234,7 +234,7 @@ public sealed class TaskScriptGeneratorTests
             Assert.Contains("'BaseLog'", script);
             Assert.DoesNotContain("DevSource", script);
             Assert.DoesNotContain(@"Base\NewsViewer", script);   // not even appsettings.json supplies the exe path
-            Assert.Contains("'" + EmitTaskScriptCommand.DefaultViewerPath() + "'", script);
+            Assert.Contains("'" + TaskDefinitionInputsResolver.CanonicalViewerPath() + "'", script);
             Assert.Contains("appsettings.Development.json are not consulted", stdout.ToString());
         }
         finally { Directory.Delete(dir, recursive: true); }

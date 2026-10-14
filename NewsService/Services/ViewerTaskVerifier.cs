@@ -38,16 +38,18 @@ internal sealed class ViewerTaskVerifier(
     }
 
     /// <summary>
-    /// Describes how the launch surface differs from the expected definitions. Empty = in place.
+    /// Describes how the launch surface differs from the expected definitions (empty drift = in place) and
+    /// which check each task matched on.
     /// Null = could not verify (already logged).
     /// </summary>
-    public async Task<IReadOnlyList<string>?> VerifyAsync(CancellationToken ct)
+    public async Task<VerifyReport?> VerifyAsync(CancellationToken ct)
     {
         try
         {
             var inputs = TaskDefinitionInputsResolver.Resolve(config, configuration, _baseDirectory);
             var drift = new List<string>();
-            if (!_fileExists(inputs.ExePath))
+            var paths = new List<string>();
+            if (!_fileExists(TaskDefinitionInputsResolver.Expand(inputs.ExePath)))
                 drift.Add($"NewsViewer executable not found at '{inputs.ExePath}' (ViewerTasks:NewsViewerPath)");
 
             foreach (var kind in new[] { ViewerTaskKind.Launch, ViewerTaskKind.ContentArrived })
@@ -60,8 +62,9 @@ internal sealed class ViewerTaskVerifier(
                     continue;
                 }
 
+                var label = kind == ViewerTaskKind.Launch ? "Launch" : "Content Arrived";
                 var query = await scheduler.QueryAsync(expected.TaskName, ct);
-                if (!query.Exists) { drift.Add($"task '{expected.TaskName}' is missing"); continue; }
+                if (!query.Exists) { drift.Add($"task '{expected.TaskName}' is missing"); paths.Add($"{label}: missing"); continue; }
 
                 // The registration script stamps each task with the hash of its whole definition, so a
                 // stamp covers settings the field comparison cannot see (principal, time limit, ...).
@@ -70,15 +73,22 @@ internal sealed class ViewerTaskVerifier(
                 var stamp = TaskDefinitionBuilder.ExtractHash(query.Xml);
                 if (stamp is null)
                 {
-                    drift.AddRange(TaskDriftComparer.Compare(expected.TaskName, expected.Xml, query.Xml));
+                    var fieldDrift = TaskDriftComparer.Compare(expected.TaskName, expected.Xml, query.Xml);
+                    drift.AddRange(fieldDrift);
+                    paths.Add($"{label}: {(fieldDrift.Count == 0 ? "matched by field comparison" : "field comparison found drift")} (no nc-hash stamp)");
                     continue;
                 }
-                if (string.Equals(stamp, expected.Hash, StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.Equals(stamp, expected.Hash, StringComparison.OrdinalIgnoreCase))
+                {
+                    paths.Add($"{label}: matched by nc-hash stamp");
+                    continue;
+                }
 
                 drift.Add($"task '{expected.TaskName}': the registered definition differs from the expected one (nc-hash mismatch)");
                 drift.AddRange(TaskDriftComparer.Compare(expected.TaskName, expected.Xml, query.Xml));
+                paths.Add($"{label}: nc-hash mismatch");
             }
-            return drift;
+            return new VerifyReport(drift, paths);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -89,5 +99,34 @@ internal sealed class ViewerTaskVerifier(
             logger.LogError(ex, "NewsViewer task verification failed unexpectedly");
             return null;
         }
+    }
+}
+
+/// <summary>Drift found, plus per task the path the verdict was reached on (nc-hash stamp or field comparison).</summary>
+internal sealed record VerifyReport(IReadOnlyList<string> Drift, IReadOnlyList<string> Paths);
+
+/// <summary>
+/// Turns verification reports into log lines: log on change, stay quiet otherwise. The state compared
+/// includes the match path, so a task moving from stamped to unstamped is reported once. An unstamped
+/// task is legitimate (hand-made or older package), so it never becomes a warning by itself.
+/// </summary>
+internal sealed class VerifyReporter(ILogger logger)
+{
+    private string? _reported;
+
+    public void Report(VerifyReport report)
+    {
+        var state = string.Join("\n", report.Drift) + "\n--\n" + string.Join("\n", report.Paths);
+        if (state == _reported) return;
+        _reported = state;
+
+        var paths = string.Join("; ", report.Paths);
+        if (report.Drift.Count == 0)
+            logger.LogInformation("NewsViewer scheduled tasks verified: both are in place ({Paths})", paths);
+        else
+            logger.LogWarning(
+                "NewsViewer launch surface has drifted; NewsService does not repair it. " +
+                "Re-run the registration script shipped in the package: {Drift} ({Paths})",
+                string.Join("; ", report.Drift), paths);
     }
 }
