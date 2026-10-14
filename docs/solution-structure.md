@@ -214,3 +214,11 @@ private static readonly JsonSerializerOptions JsonOptions = new()
     Converters = { new JsonStringEnumConverter() }
 };
 ```
+
+## Toolchain
+
+`global.json` at the repo root pins the .NET SDK to `10.0.401` with `rollForward: latestFeature` and
+`allowPrerelease: false`: patch and feature-band updates within .NET 10 are picked up, a .NET 11 SDK or a
+preview is not. If your machine has a different SDK, install a 10.0.x SDK at or above 10.0.401 (a lower 10.0.x
+or a missing .NET 10 SDK fails the build with a "requested SDK version" error). To move the pin, edit
+`global.json` in its own commit after running both test suites on the new SDK.
