@@ -4,17 +4,21 @@ using NewsService.Configuration;
 namespace NewsService.Services;
 
 /// <summary>
-/// <c>NewsService.exe --emit-task-script [path] [--newsviewer-path exe]</c>: writes the registration
-/// script and exits, before any host exists - so it works where the service is not installed and the
-/// configuration is only appsettings.json (plus the registry overlay, when present).
-/// <c>--newsviewer-path</c> sets the NewsViewer.exe the tasks will launch on the TARGET machine
-/// (it overrides ViewerTasks:NewsViewerPath); without it a packaging machine would bake in its own
-/// build-output layout.
+/// <c>NewsService.exe --emit-task-script &lt;path&gt; [--newsviewer-path exe]</c>: the BUILD-time step that
+/// writes the registration script and exits, before any host exists - so it works where the service is
+/// not installed and the configuration is only appsettings.json (plus the registry overlay, when
+/// present). The script is a build artifact shipped in the package; no running service writes it.
+/// <c>--newsviewer-path</c> sets the NewsViewer.exe the tasks will launch on the TARGET machine (it
+/// overrides ViewerTasks:NewsViewerPath, including a registry value on the build machine); without it
+/// the build layout would be baked in.
 /// </summary>
 internal static class EmitTaskScriptCommand
 {
     public const string Switch = "--emit-task-script";
     private const string ViewerPathSwitch = "--newsviewer-path";
+
+    public const string Usage =
+        $"Usage: NewsService.exe {Switch} <path> [{ViewerPathSwitch} <NewsViewer.exe>]";
 
     public static bool IsRequested(string[] args) =>
         args.Any(a => string.Equals(a, Switch, StringComparison.OrdinalIgnoreCase));
@@ -36,9 +40,15 @@ internal static class EmitTaskScriptCommand
                     pathArg = args[i];
                 else
                 {
-                    stderr.WriteLine($"Unexpected argument '{args[i]}'. Usage: NewsService.exe {Switch} [<path>] [{ViewerPathSwitch} <NewsViewer.exe>]");
+                    stderr.WriteLine($"Unexpected argument '{args[i]}'. {Usage}");
                     return 2;
                 }
+            }
+
+            if (string.IsNullOrWhiteSpace(pathArg))
+            {
+                stderr.WriteLine(Usage);
+                return 2;
             }
 
             var builder = new ConfigurationBuilder()
@@ -51,18 +61,11 @@ internal static class EmitTaskScriptCommand
             var config = configuration.Get<ServiceConfiguration>() ?? new ServiceConfiguration();
             if (!string.IsNullOrWhiteSpace(viewerPath)) config.ViewerTasks.NewsViewerPath = viewerPath;
 
-            var target = !string.IsNullOrWhiteSpace(pathArg) ? pathArg : config.ViewerTasks.ScriptPath;
-            if (string.IsNullOrWhiteSpace(target))
-            {
-                stderr.WriteLine("No output path: pass one after " + Switch + " or set ViewerTasks:ScriptPath.");
-                return 1;
-            }
-            target = TaskScriptEmitter.ExpandPath(target);
-
+            var target = Environment.ExpandEnvironmentVariables(pathArg.Trim());
             var inputs = TaskDefinitionInputsResolver.Resolve(config, configuration, baseDirectory);
             var script = TaskScriptGenerator.Generate(inputs, TaskScriptEmitter.NewHeader(), TaskDefinitionBuilder.LoadTemplateBytes);
-            var outcome = TaskScriptEmitter.Emit(target, script);
-            stdout.WriteLine($"{(outcome == EmitOutcome.Written ? "Wrote" : "Unchanged")}: {target} (Company '{inputs.Company}', NewsViewer '{inputs.ExePath}')");
+            TaskScriptEmitter.Write(target, script);
+            stdout.WriteLine($"Wrote: {target} (Company '{inputs.Company}', NewsViewer '{inputs.ExePath}')");
             return 0;
         }
         catch (Exception ex)

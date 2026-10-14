@@ -12,7 +12,7 @@
 |---|---|---|
 | NewsCentral | Content authoring, approval, scheduling, publishing, user/team management | .NET 10 MAUI Blazor Hybrid desktop app |
 | NewsCentral.Shared | Shared domain models referenced by all components | .NET 10 class library |
-| NewsService | Cache agent — syncs content from repository to local machine, applies **both** display surfaces machine-wide via PersonalizationCSP — the lock screen and the desktop wallpaper image (three-state: writes when content changes, clears its own stale content, never touches a value it did not write; re-verified and published to a protected non-user-writable folder before apply; each independently disabled via `Delivery:LockScreenEnabled`/`Delivery:WallpaperEnabled` — RDS/VDI opt-out, not a revert), uploads telemetry, writes a ContentChanged EventLog event (2001) once per cycle that accepted new content, and **owns the NewsViewer scheduled tasks** — registers, verifies on every start and repairs both (embedded `deploy/scheduled-tasks` XMLs, `schtasks.exe`; `ViewerTasks:Manage=false` = hands-off), then retires the legacy HKLM Run value | .NET 10 Windows Service |
+| NewsService | Cache agent — syncs content from repository to local machine, applies **both** display surfaces machine-wide via PersonalizationCSP — the lock screen and the desktop wallpaper image (three-state: writes when content changes, clears its own stale content, never touches a value it did not write; re-verified and published to a protected non-user-writable folder before apply; each independently disabled via `Delivery:LockScreenEnabled`/`Delivery:WallpaperEnabled` — RDS/VDI opt-out, not a revert), uploads telemetry, writes a ContentChanged EventLog event (2001) once per cycle that accepted new content, and **verifies the NewsViewer scheduled tasks and never creates or repairs them** (read-only `schtasks.exe /Query` against the embedded `deploy/scheduled-tasks` XMLs; `ViewerTasks:Mode` = `VerifyOnly` or `Off`; the installer owns creation and removal; the registration script is a build artifact from `--emit-task-script`), creates the EventLog source explicitly at startup (`ViewerTasks:RegisterEventSource`) | .NET 10 Windows Service |
 | NewsViewer | End-user presentation layer — displays scheduled content from local cache; re-asserts the per-user desktop wallpaper **style** only (HKCU, no `SystemParametersInfo`) — the wallpaper image itself is owned by NewsService; a pure ordered launch decision (per-user marker, `launch.log`) chooses the full poster, the small "News arrived!" notification, or nothing, and runs in remote sessions too | .NET 10 WinForms desktop app |
 | NewsTester | Content preview tool for authors and approvers | Future — independent desktop app |
 
@@ -112,7 +112,7 @@ No direct inter-process communication. Coordination is via the shared cache fold
 |---|---|
 | NewsCentral | User-initiated start and shutdown; interactive Azure authentication |
 | NewsService | Automatic start as Windows Service; runs unattended; handles weeks-long uptime |
-| NewsViewer | Auto-start via two Task Scheduler tasks maintained by NewsService: logon/unlock/connect, and content-changed (no HKLM Run entry); optional Start menu entry |
+| NewsViewer | Auto-start via two Task Scheduler tasks registered by the installer (generated script) and verified by NewsService: logon/unlock/connect, and content-changed (no HKLM Run entry); optional Start menu entry |
 | All | Configurable via `appsettings.json` with registry override under `HKLM\Software\[Company]\[NewsCentral]\` |
 
 ---
@@ -154,4 +154,4 @@ These are not auto-loaded. Read the ones a task touches; a prompt's READ FIRST l
 | docs/production-deployment.md | GPO rollout and pilot validation |
 | docs/security.md | signing phase history, auth per component |
 | docs/solution-structure.md | project/file layout and references |
-| deploy/scheduled-tasks/README.md, scripts/Register-NewsViewerTasks.ps1 | NewsViewer scheduled tasks (task XMLs, reference installer) |
+| deploy/scheduled-tasks/README.md, scripts/Register-NewsViewerTasks.ps1 | NewsViewer scheduled tasks (task XMLs, reference installer; the packaged script is a build artifact, docs/packaging.md) |

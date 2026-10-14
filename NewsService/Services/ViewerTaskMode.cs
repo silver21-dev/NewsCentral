@@ -1,12 +1,9 @@
 namespace NewsService.Services;
 
-/// <summary>How much of the NewsViewer launch surface NewsService manages (<c>ViewerTasks:Mode</c>).</summary>
+/// <summary>What NewsService does about the NewsViewer launch surface (<c>ViewerTasks:Mode</c>). It never creates or repairs it.</summary>
 internal enum ViewerTaskMode
 {
-    /// <summary>Create, verify and repair (the default).</summary>
-    Manage,
-
-    /// <summary>Verify and log drift; change nothing.</summary>
+    /// <summary>Verify and report drift (the default).</summary>
     VerifyOnly,
 
     /// <summary>Do nothing.</summary>
@@ -17,30 +14,26 @@ internal enum ViewerTaskMode
 internal readonly record struct ViewerTaskModeResult(ViewerTaskMode Mode, string? Error);
 
 /// <summary>
-/// Resolves <c>ViewerTasks:Mode</c>. Pure. A typo must never disable the launch surface, so an
-/// unrecognised value falls back to <see cref="ViewerTaskMode.Manage"/> (with an error), never to Off.
-/// An unset Mode defers to the older <c>ViewerTasks:Manage</c> bool, so existing "Manage = 0"
-/// deployments stay hands-off.
+/// Resolves <c>ViewerTasks:Mode</c>. Pure. Absent or unrecognised falls back to
+/// <see cref="ViewerTaskMode.VerifyOnly"/> (an unrecognised value with an error): a typo must not
+/// silently switch the check off.
 /// </summary>
 internal static class ViewerTaskModeResolver
 {
-    public const string ValidValues = "Manage, VerifyOnly, Off";
+    public const string ValidValues = "VerifyOnly, Off";
 
-    public static ViewerTaskModeResult Resolve(string? mode, bool legacyManage)
+    public static ViewerTaskModeResult Resolve(string? mode)
     {
-        if (string.IsNullOrWhiteSpace(mode))
-            return new(legacyManage ? ViewerTaskMode.Manage : ViewerTaskMode.Off, null);
+        if (string.IsNullOrWhiteSpace(mode)) return new(ViewerTaskMode.VerifyOnly, null);
 
-        // Explicit names only: Enum.TryParse would also accept "1", "2" and "0,1".
+        // Explicit names only: Enum.TryParse would also accept "1" and "0,1".
         switch (mode.Trim().ToLowerInvariant())
         {
-            case "manage": return new(ViewerTaskMode.Manage, null);
             case "verifyonly": return new(ViewerTaskMode.VerifyOnly, null);
             case "off": return new(ViewerTaskMode.Off, null);
             default:
-                return new(ViewerTaskMode.Manage,
-                    $"ViewerTasks:Mode '{mode}' is not recognised; valid values are {ValidValues}. " +
-                    "Falling back to Manage so the launch surface is not disabled by a typo");
+                return new(ViewerTaskMode.VerifyOnly,
+                    $"ViewerTasks:Mode '{mode}' is not recognised; valid values are {ValidValues}. Falling back to VerifyOnly");
         }
     }
 }

@@ -7,9 +7,6 @@ namespace NewsService.Tests;
 public sealed class ViewerTaskModeResolverTests
 {
     [Theory]
-    [InlineData("Manage", "Manage")]
-    [InlineData("manage", "Manage")]
-    [InlineData("MANAGE", "Manage")]
     [InlineData("VerifyOnly", "VerifyOnly")]
     [InlineData("verifyonly", "VerifyOnly")]
     [InlineData(" VERIFYONLY ", "VerifyOnly")]
@@ -18,51 +15,34 @@ public sealed class ViewerTaskModeResolverTests
     [InlineData("OFF", "Off")]
     public void ValidValues_AreCaseInsensitive_AndHaveNoError(string raw, string expected)
     {
-        var result = ViewerTaskModeResolver.Resolve(raw, legacyManage: true);
+        var result = ViewerTaskModeResolver.Resolve(raw);
         Assert.Equal(expected, result.Mode.ToString());
         Assert.Null(result.Error);
     }
 
     [Theory]
-    [InlineData("Verify")]
+    [InlineData("Manage")]   // the removed mode
     [InlineData("Disabled")]
     [InlineData("1")]
-    [InlineData("0")]
     [InlineData("true")]
-    public void UnrecognisedValue_FallsBackToManage_WithAnErrorNamingValueAndValidSet(string raw)
+    public void UnrecognisedValue_FallsBackToVerifyOnly_WithAnErrorNamingValueAndValidSet(string raw)
     {
-        // Even when the legacy bool says hands-off: a typo must never disable the launch surface.
-        var result = ViewerTaskModeResolver.Resolve(raw, legacyManage: false);
-        Assert.Equal(ViewerTaskMode.Manage, result.Mode);
+        var result = ViewerTaskModeResolver.Resolve(raw);
+        Assert.Equal(ViewerTaskMode.VerifyOnly, result.Mode);
         Assert.NotNull(result.Error);
         Assert.Contains($"'{raw}'", result.Error);
-        Assert.Contains("Manage, VerifyOnly, Off", result.Error);
+        Assert.Contains("VerifyOnly, Off", result.Error);
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void AbsentValue_DefaultsToManage(string? raw)
+    public void AbsentValue_DefaultsToVerifyOnly(string? raw)
     {
-        var result = ViewerTaskModeResolver.Resolve(raw, legacyManage: true);
-        Assert.Equal(ViewerTaskMode.Manage, result.Mode);
+        var result = ViewerTaskModeResolver.Resolve(raw);
+        Assert.Equal(ViewerTaskMode.VerifyOnly, result.Mode);
         Assert.Null(result.Error);
-    }
-
-    [Fact]
-    public void AbsentValue_WithLegacyManageFalse_StaysHandsOff()
-    {
-        var result = ViewerTaskModeResolver.Resolve(null, legacyManage: false);
-        Assert.Equal(ViewerTaskMode.Off, result.Mode);
-        Assert.Null(result.Error);
-    }
-
-    [Fact]
-    public void ExplicitMode_WinsOverLegacyManage()
-    {
-        Assert.Equal(ViewerTaskMode.VerifyOnly, ViewerTaskModeResolver.Resolve("VerifyOnly", legacyManage: false).Mode);
-        Assert.Equal(ViewerTaskMode.Manage, ViewerTaskModeResolver.Resolve("Manage", legacyManage: false).Mode);
     }
 }
 
@@ -158,27 +138,52 @@ public sealed class TaskScriptGeneratorTests
         Assert.Throws<ArgumentException>(() => Generate(Inputs with { EventSourceName = "a'b" }));
 
     [Fact]
-    public void Emitter_DoesNotRewriteWhenOnlyTheTimestampDiffers_ButRewritesOnRealChange()
+    public void Script_RequiresAdministrator_AndWritesTheStamp()
     {
-        var path = Path.Combine(Path.GetTempPath(), "nc-script-" + Guid.NewGuid().ToString("N"), "r.ps1");
+        var script = Generate();
+        Assert.StartsWith("#Requires -RunAsAdministrator", script);
+        Assert.Contains("' [nc-hash:'", script);
+        Assert.Contains("build time", script);
+    }
+
+    private static string Squash(string s) => new(s.Where(c => !char.IsWhiteSpace(c)).ToArray());
+
+    [Fact]
+    public void ScriptStamp_EqualsTheHashTheServiceExpects_AndWhatIfLeavesNoTempFiles()
+    {
+        var powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        if (!File.Exists(powershell)) return;   // Windows PowerShell 5.1 ships with every supported Windows
+
+        var dir = Path.Combine(Path.GetTempPath(), "nc-stamp-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
         try
         {
-            Assert.Equal(EmitOutcome.Written, TaskScriptEmitter.Emit(path, Generate()));
-            var stamp = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-            File.SetLastWriteTimeUtc(path, stamp);
+            // #Requires -RunAsAdministrator would stop a non-elevated test run before it does anything.
+            var script = string.Join("\r\n", Generate().Split("\r\n").Where(l => !l.StartsWith("#Requires")));
+            var path = Path.Combine(dir, "r.ps1");
+            File.WriteAllText(path, script, System.Text.Encoding.ASCII);
+            var before = Directory.GetFiles(Path.GetTempPath(), "NewsViewerTask*.xml").Length;
 
-            var later = Header with { GeneratedUtc = Header.GeneratedUtc.AddHours(5) };
-            Assert.Equal(EmitOutcome.Unchanged, TaskScriptEmitter.Emit(path, Generate(header: later)));
-            Assert.Equal(stamp, File.GetLastWriteTimeUtc(path));
+            var psi = new System.Diagnostics.ProcessStartInfo(powershell)
+            {
+                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
+            };
+            foreach (var a in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path, "-WhatIf", "-Verbose" }) psi.ArgumentList.Add(a);
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            var output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+            p.WaitForExit();
 
-            Assert.Equal(EmitOutcome.Written, TaskScriptEmitter.Emit(path, Generate(Inputs with { ExePath = @"D:\Other\NewsViewer.exe" })));
-            Assert.NotEqual(stamp, File.GetLastWriteTimeUtc(path));
+            Assert.Equal(0, p.ExitCode);
+            foreach (var kind in new[] { ViewerTaskKind.Launch, ViewerTaskKind.ContentArrived })
+            {
+                var expected = TaskDefinitionBuilder.Build(kind, TaskDefinitionBuilder.LoadTemplate(kind), Inputs);
+                // The host wraps long verbose lines when output is redirected: compare without whitespace.
+                Assert.Contains(Squash($"nc-hash {expected.TaskName} {expected.Hash}"), Squash(output));
+                Assert.Contains(expected.TaskName, output);   // the -WhatIf preview names the task
+            }
+            Assert.Equal(before, Directory.GetFiles(Path.GetTempPath(), "NewsViewerTask*.xml").Length);
         }
-        finally
-        {
-            var dir = Path.GetDirectoryName(path)!;
-            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
-        }
+        finally { Directory.Delete(dir, recursive: true); }
     }
 
     [Fact]
@@ -207,6 +212,22 @@ public sealed class TaskScriptGeneratorTests
     }
 
     [Fact]
+    public void EmitCommand_WithNoPath_PrintsUsage_AndExitsNonZero()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "nc-emit-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "appsettings.json"), "{}");
+            var stderr = new StringWriter();
+            var code = EmitTaskScriptCommand.Run(["--emit-task-script"], new StringWriter(), stderr, dir, useRegistry: false);
+            Assert.NotEqual(0, code);
+            Assert.Contains("Usage: NewsService.exe --emit-task-script <path>", stderr.ToString());
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
     public void EmitCommand_WithoutAppsettings_FailsNonZeroWithReason()
     {
         var dir = Path.Combine(Path.GetTempPath(), "nc-emit-" + Guid.NewGuid().ToString("N"));
@@ -217,22 +238,6 @@ public sealed class TaskScriptGeneratorTests
             var code = EmitTaskScriptCommand.Run(["--emit-task-script", Path.Combine(dir, "r.ps1")], new StringWriter(), stderr, dir, useRegistry: false);
             Assert.NotEqual(0, code);
             Assert.Contains("--emit-task-script failed", stderr.ToString());
-        }
-        finally { Directory.Delete(dir, recursive: true); }
-    }
-
-    [Fact]
-    public void EmitCommand_WithNoPathAndEmptyScriptPath_Fails()
-    {
-        var dir = Path.Combine(Path.GetTempPath(), "nc-emit-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
-        try
-        {
-            File.WriteAllText(Path.Combine(dir, "appsettings.json"), """{"ViewerTasks":{"ScriptPath":""}}""");
-            var stderr = new StringWriter();
-            var code = EmitTaskScriptCommand.Run(["--emit-task-script"], new StringWriter(), stderr, dir, useRegistry: false);
-            Assert.Equal(1, code);
-            Assert.Contains("No output path", stderr.ToString());
         }
         finally { Directory.Delete(dir, recursive: true); }
     }

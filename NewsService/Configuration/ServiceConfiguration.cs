@@ -19,31 +19,19 @@ public class ServiceConfiguration
 public class ViewerTasksSection
 {
     /// <summary>
-    /// True (default) = NewsService registers, verifies and repairs the two NewsViewer scheduled
-    /// tasks on every start and retires the legacy launch surface (HKLM Run value, legacy tasks).
-    /// False = completely hands-off: no task is registered, repaired or deleted and the Run key is
-    /// not touched — packaging owns the launch surface.
+    /// <c>VerifyOnly</c> (default) or <c>Off</c>, case-insensitive; resolved by
+    /// <see cref="NewsService.Services.ViewerTaskModeResolver"/>. NewsService never creates or repairs the
+    /// NewsViewer scheduled tasks - the installer owns them. VerifyOnly = verify and log drift; Off = do
+    /// nothing. Empty or unrecognised = VerifyOnly (an unrecognised value also logs an Error). Registry:
+    /// REG_SZ (an enum, never a DWORD).
     /// </summary>
-    public bool Manage { get; set; } = true;
+    public string Mode { get; set; } = "VerifyOnly";
 
     /// <summary>
-    /// Raw <c>Manage | VerifyOnly | Off</c> (case-insensitive), always read as text and resolved by
-    /// <see cref="NewsService.Services.ViewerTaskModeResolver"/>. Empty (default) = not set: the effective
-    /// mode follows the legacy <see cref="Manage"/> bool (true = Manage, false = Off). An unrecognised
-    /// value is an Error and falls back to Manage. Registry: REG_SZ (an enum, never a DWORD).
-    /// </summary>
-    public string Mode { get; set; } = string.Empty;
-
-    /// <summary>
-    /// False = NewsService never creates the EventLog source. Registry: REG_SZ "true"/"false".
+    /// True (default) = NewsService creates the EventLog source explicitly at startup when it is missing.
+    /// False = it never creates the source and never writes to a missing one. Registry: REG_SZ "true"/"false".
     /// </summary>
     public bool RegisterEventSource { get; set; } = true;
-
-    /// <summary>
-    /// Where the self-contained registration script is written when Mode is VerifyOnly or Off.
-    /// Environment variables are expanded. Empty = do not emit.
-    /// </summary>
-    public string ScriptPath { get; set; } = @"%ProgramData%\NewsCentral\deploy\Register-NewsViewerTasks.generated.ps1";
 
     /// <summary>
     /// Full path of NewsViewer.exe the tasks launch. Empty (default) = <c>..\NewsViewer\NewsViewer.exe</c>

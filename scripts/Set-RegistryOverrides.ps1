@@ -73,10 +73,8 @@
     ├── Telemetry\
     │       UploadEnabled          DWORD
     ├── ViewerTasks\
-    │       Manage                 DWORD    (0 = NewsService leaves the NewsViewer scheduled tasks and the HKLM Run key alone; default 1)
-    │       Mode                   REG_SZ   ("Manage" / "VerifyOnly" / "Off"; an enum, never DWORD; unset = follows Manage)
+    │       Mode                   REG_SZ   ("VerifyOnly" or "Off"; an enum, never DWORD; default VerifyOnly)
     │       RegisterEventSource    REG_SZ   "true" or "false" (false = NewsService never creates the EventLog source)
-    │       ScriptPath             REG_SZ   (where the generated registration script is written for VerifyOnly/Off; empty = none)
     │       NewsViewerPath         REG_SZ  (full path of NewsViewer.exe the tasks launch; empty/absent = ..\NewsViewer\NewsViewer.exe next to the service)
     ├── Logging\
     │       LogLevel\Default               REG_SZ
@@ -304,26 +302,17 @@
     telemetry to the repository (the local 30-day retention sweep still runs).
     Default true. NewsService only.
 
-.PARAMETER ViewerTasksManage
-    ViewerTasks:Manage (DWORD 0/1). Default $true: NewsService registers, verifies and repairs the two
-    NewsViewer scheduled tasks on every start and removes the legacy HKLM Run value. $false = completely
-    hands-off: NewsService neither registers, repairs nor deletes any task and does not touch the Run
-    key (packaging owns the launch surface). Bind as $false (not omitted) to write the value. NewsService only.
-
 .PARAMETER ViewerTasksMode
-    ViewerTasks:Mode (REG_SZ, never a DWORD): Manage (default) = NewsService creates, verifies and repairs the
-    NewsViewer scheduled tasks; VerifyOnly = it verifies and logs drift but changes nothing; Off = it does
-    nothing. VerifyOnly and Off make NewsService write a self-contained registration script (see
-    -ViewerTasksScriptPath) for the external actor. Unset = follows ViewerTasks:Manage. NewsService only.
+    ViewerTasks:Mode (REG_SZ, never a DWORD): VerifyOnly (default) = NewsService verifies the NewsViewer scheduled
+    tasks and logs drift; Off = it does nothing. NewsService never creates or repairs the tasks in either mode
+    - the installer owns them (docs/packaging.md). NewsService only.
 
 .PARAMETER RegisterEventSource
-    ViewerTasks:RegisterEventSource (REG_SZ "true"/"false"). $false = NewsService never creates the EventLog
-    source; register it externally or the Content Arrived task never fires. Bind as $false (not omitted)
+    ViewerTasks:RegisterEventSource (REG_SZ "true"/"false"). Default true: NewsService creates the EventLog
+    source explicitly at startup when it is missing. $false = it never creates the source and never writes to a
+    missing one; register it externally or the Content Arrived task never fires. Bind as $false (not omitted)
     to write the value. NewsService only.
 
-.PARAMETER ViewerTasksScriptPath
-    ViewerTasks:ScriptPath (REG_SZ) - where the generated registration script is written when Mode is VerifyOnly
-    or Off. Environment variables are expanded. Empty = do not emit. NewsService only.
 
 .PARAMETER ViewerTasksNewsViewerPath
     ViewerTasks:NewsViewerPath — full path of the NewsViewer.exe the scheduled tasks launch. Empty or
@@ -428,11 +417,11 @@
         -ViewerTasksNewsViewerPath "C:\src\NewsCentral\NewsViewer\bin\Debug\net10.0-windows\NewsViewer.exe"
 
 .EXAMPLE
-    # NewsService hands-off: packaging owns the NewsViewer scheduled tasks
+    # NewsService does not verify the NewsViewer scheduled tasks (the installer owns them)
     .\Set-RegistryOverrides.ps1 `
         -Company "Contoso" `
         -ComponentName NewsService `
-        -ViewerTasksManage $false
+        -ViewerTasksMode Off
 
 .EXAMPLE
     # NewsCentral — two policy-defined environments, operator-added environments still allowed
@@ -558,11 +547,9 @@ param(
     [Nullable[bool]] $Active,
 
     # ── ViewerTasks (NewsService only) ────────────────────────────────────────────
-    [Nullable[bool]] $ViewerTasksManage,
-    [ValidateSet("Manage","VerifyOnly","Off")]
+    [ValidateSet("VerifyOnly","Off")]
     [string] $ViewerTasksMode,
     [Nullable[bool]] $RegisterEventSource,
-    [string] $ViewerTasksScriptPath,
     [string] $ViewerTasksNewsViewerPath,
 
     # ── Telemetry / Logging (NewsService only) ────────────────────────────────────
@@ -594,7 +581,7 @@ $newParameterNames = @(
     "DefaultLockScreenPath", "PublishedImagePath", "LockScreenEnabled", "WallpaperEnabled",
     "DefaultWallpaperPath", "WallpaperStyle", "WallpaperBackgroundColor",
     "LogicalDayStartHour", "Theme", "TelemetryUploadEnabled", "LogLevel", "EventLogLevel",
-    "ViewerTasksManage", "ViewerTasksNewsViewerPath", "ViewerTasksMode", "RegisterEventSource", "ViewerTasksScriptPath",
+    "ViewerTasksNewsViewerPath", "ViewerTasksMode", "RegisterEventSource",
     "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions", "FrameColor", "FrameTextColor"
 )
 
@@ -612,7 +599,7 @@ $componentAllowedParams = @{
         "DefaultLockScreenPath", "DefaultWallpaperPath", "PublishedImagePath",
         "LockScreenEnabled", "WallpaperEnabled",
         "TelemetryUploadEnabled", "LogLevel", "EventLogLevel",
-        "ViewerTasksManage", "ViewerTasksNewsViewerPath", "ViewerTasksMode", "RegisterEventSource", "ViewerTasksScriptPath",
+        "ViewerTasksNewsViewerPath", "ViewerTasksMode", "RegisterEventSource",
         "PollIntervalSeconds", "StorageMode", "SharePath"
     )
     NewsViewer = @(
@@ -1017,19 +1004,12 @@ if ($PSBoundParameters.ContainsKey("NotifyNewContent")) {
 }
 
 # ── ViewerTasks\ ─────────────────────────────────────────────────────────────
-if ($PSBoundParameters.ContainsKey("ViewerTasksManage")) {
-    $dword = if ($ViewerTasksManage) { 1 } else { 0 }
-    Set-RegValue -Path "$base\ViewerTasks" -Name "Manage" -Value $dword -Type DWord
-}
 if ($PSBoundParameters.ContainsKey("ViewerTasksMode")) {
     Set-RegValue -Path "$base\ViewerTasks" -Name "Mode" -Value $ViewerTasksMode -Type String
 }
 if ($PSBoundParameters.ContainsKey("RegisterEventSource")) {
     $val = if ($RegisterEventSource) { "true" } else { "false" }
     Set-RegValue -Path "$base\ViewerTasks" -Name "RegisterEventSource" -Value $val -Type String
-}
-if ($PSBoundParameters.ContainsKey("ViewerTasksScriptPath")) {
-    Set-RegValue -Path "$base\ViewerTasks" -Name "ScriptPath" -Value $ViewerTasksScriptPath -Type String
 }
 if ($PSBoundParameters.ContainsKey("ViewerTasksNewsViewerPath")) {
     Set-RegValue -Path "$base\ViewerTasks" -Name "NewsViewerPath" -Value $ViewerTasksNewsViewerPath -Type String

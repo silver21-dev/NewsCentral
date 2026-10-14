@@ -158,23 +158,26 @@ back to English). Neutral cultures cover regional variants via the standard .NET
 (`de` serves `de-DE`/`de-AT`/`de-CH`, etc.; `zh-Hans`/`zh-Hant` are neutral script cultures).
 
 NewsViewer runs per-user, in the interactive session, non-elevated. Its launch surface is two machine-wide
-scheduled tasks (below), **registered and maintained by NewsService**. There is **no HKLM Run entry**.
+scheduled tasks (below), **registered by the installer** and verified by NewsService. There is **no HKLM Run entry**.
 
 ### NewsViewer launch surface
 
-**NewsService owns the tasks.** On every start (after a short delay, off the sync path) it registers both
-tasks from the embedded `deploy/scheduled-tasks` XMLs, verifies them and repairs any that is missing or
-outdated; if a pass fails (for example NewsViewer is not installed yet) it retries every 5 minutes until
-one pass succeeds. Each task's Description ends with `[nc-hash:<sha256>]` over its final XML (install
-path, company, event log/source, template), so a moved install or a changed template is detected and the
-task re-registered with `/F`. Only after **both** tasks are confirmed in place does NewsService retire the
-old launch surface: the legacy Workstation Unlock task, the old dev-box tasks and the HKLM Run value
-`NewsViewer` (only when its data contains `NewsViewer.exe`) — so a machine is never left with neither a
-Run entry nor a logon trigger. It uses `schtasks.exe` only (no Task Scheduler COM). Opt-out:
-`ViewerTasks\Manage` = 0 makes NewsService completely hands-off (packaging then owns the tasks and the
-Run key); `ViewerTasks\NewsViewerPath` overrides the exe path (default
-`..\NewsViewer\NewsViewer.exe` relative to the NewsService install folder — matches the install layout
-above). See `docs/configuration.md`, `docs/newsservice-spec.md`.
+**The installer owns the tasks.** NewsService does not create, modify, repair or delete scheduled tasks
+under any configuration: a LocalSystem service registering scheduled tasks is a persistence technique that
+EDR products and ASR rules watch for, and a disabled capability would still have to be audited on every
+machine. Instead it **verifies and reports** (`ViewerTasks\Mode`, **REG_SZ**, `VerifyOnly` by default or
+`Off`): after a short delay, and then once per hour, it reads both tasks with `schtasks.exe /Query /XML`
+(no Task Scheduler COM, no write verb) and compares them with the definitions built from the embedded
+`deploy/scheduled-tasks` XMLs. A matching `[nc-hash:<sha256>]` stamp in the task's Description (written by
+the registration script over the whole final definition) passes, a different stamp is drift, and a task
+without a stamp (hand-made or legacy) is compared on command, working directory, event subscription and
+trigger set. Drift - a missing task, a moved install, a changed trigger or principal - is logged at
+`Warning` once per change; nothing is repaired, so the installer (or the script it ships) must be re-run.
+`ViewerTasks\NewsViewerPath` overrides the exe path NewsService expects (default
+`..\NewsViewer\NewsViewer.exe` relative to the NewsService install folder - matches the install layout
+above). The former `ViewerTasks\Manage` value is gone; if it is still in the registry it is ignored and a
+`Warning` names `ViewerTasks\Mode` as its replacement. See `docs/configuration.md`,
+`docs/newsservice-spec.md`.
 
 1. **Scheduled task `\{Company}\NewsCentral\NewsViewer Launch`** — session presence. Triggers: **logon**
    of any user (15 s delay so the shell is up), workstation **unlock**, **RemoteConnect** (RDP connect /
@@ -203,76 +206,73 @@ and content arrival.
 
 **What the installer must do**
 
-- **Not** register the scheduled tasks and **not** write an HKLM Run value: NewsService registers and
-  maintains both tasks itself (see above). Only with `ViewerTasks\Manage` = 0 does packaging register them
-  from `deploy/scheduled-tasks/NewsViewer-Launch.xml` and `NewsViewer-ContentArrived.xml`, with the
-  `{Company}` install path substituted into `Command` and `WorkingDirectory`
-  (`schtasks /Create /XML <file> /TN "<task>" /F`; the files are UTF-16 LE with BOM — `schtasks` is
-  sensitive to file encoding, so keep that encoding for any rewritten copy).
-- Register the **NewsService event source** (`NewsService`, log `Application`) — see "NewsService —
-  installation". On a fresh machine this must happen before NewsService first runs, so the first 2001
-  event is attributed to a registered source and the Content Arrived task can fire.
-- **Remove the legacy Workstation Unlock task** (`\{Company}\NewsCentral\NewsViewer`), tolerantly (a
-  missing task is not a failure), or an unlock starts NewsViewer twice. (NewsService also removes it once
-  both tasks are in place; doing it at install time just avoids the window before its first pass.)
-- **On upgrade, stop writing the HKLM Run value.** An upgraded package that recreates it would be
-  undone by NewsService on every start, and a Run value alongside the logon trigger starts NewsViewer
-  twice at logon (the single-instance mutex absorbs it, but it is wasted work).
-- **On uninstall, remove both tasks** (`scripts/Register-NewsViewerTasks.ps1 -Company <Company> -Uninstall`
-  is the equivalent). NewsService cannot clean up after its own uninstall, and while it is installed with
-  `ViewerTasks\Manage` = 1 it registers the tasks again on every start.
+The installer owns scheduled-task **creation and removal**. There is no runtime fallback: NewsService
+does not create, modify, repair or delete a scheduled task under any configuration, and a deleted task is
+only reported (see above).
 
-The 70 % / pilot path without an installer remains `scripts/Register-NewsViewerTasks.ps1`: it registers
-the same tasks and removes the Run value; NewsService then takes the tasks over on its next start (they
-carry no `nc-hash`, so they are re-registered once).
+- **Register both tasks by running the registration script from the package** (see "The registration
+  script is a build artifact" below). Do not hand-roll `schtasks` calls, and do not write an HKLM Run value.
+  The script registers `NewsViewer-Launch.xml` and `NewsViewer-ContentArrived.xml` with the install path
+  substituted into `Command` and `WorkingDirectory`, as UTF-16 LE with BOM (`schtasks` is sensitive to file
+  encoding, so keep that encoding for any rewritten copy), and stamps each task's Description with the
+  `nc-hash` NewsService verifies.
+- **Register the NewsService event source** (`NewsService`, log `Application`). The script does this when
+  the source is missing; NewsService also creates it explicitly at startup unless
+  `ViewerTasks\RegisterEventSource` = `"false"`. Where it is `"false"`, the installer (the script) is the
+  only creator and must run before NewsService first writes the ContentChanged event, so the first 2001
+  event is attributed to a registered source and the Content Arrived task can fire.
+- **Remove the legacy Workstation Unlock task** (`\{Company}\NewsCentral\NewsViewer`) and the old dev-box
+  tasks, tolerantly (a missing task is not a failure), or an unlock starts NewsViewer twice. The script does
+  this. NewsService no longer retires them.
+- **Remove the legacy HKLM Run value `NewsViewer` on upgrade** (only when its data contains
+  `NewsViewer.exe`) and stop writing it. NewsService no longer removes it; a Run value alongside the logon
+  trigger starts NewsViewer twice at logon (the single-instance mutex absorbs it, but it is wasted work).
+  `scripts/Register-NewsViewerTasks.ps1` does this; the generated script does not.
+- **On uninstall, remove both tasks** (`Register-NewsViewerTasks.generated.ps1 -Uninstall`, or the
+  installer's equivalent). **The service can never remove its own tasks** - it cannot act on its own
+  uninstall - so uninstall-side ownership stays with the installer.
+
+### The registration script is a build artifact
+
+The script is generated **once, on the build machine, from the publish output**, shipped inside the
+package, reviewed, signed and versioned with the release, and run by the installer from the package. No
+production machine generates it and no running service writes it. Add this build step after publishing:
+
+```
+NewsService.exe --emit-task-script <package-staging>\Register-NewsViewerTasks.generated.ps1 --newsviewer-path "<target install dir>\NewsViewer\NewsViewer.exe"
+```
+
+- The path argument is required (no argument: the usage line on stderr and a non-zero exit). Exit code 0 on
+  success; the reason on stderr and non-zero otherwise.
+- `--newsviewer-path` is the NewsViewer.exe path **as it will be on the target machine**. Always pass it:
+  without it the path is derived from the build layout, and a `ViewerTasks\NewsViewerPath` value in the build
+  machine's registry would also be baked in. The command prints the `Company` and exe path it used - check
+  them in the build log.
+- The script carries `Company` (`SolutionConstants.Company`), the install path, the event log and source
+  names, both task names, the legacy task names, and both task XMLs embedded as base64 of the exact file
+  bytes (the UTF-16 LE BOM that `schtasks` needs survives). The packaging team needs no separate briefing on
+  any of them, and a `Company` mismatch (which fails silently) cannot happen. It contains no secret.
+- Run it elevated from the package: `-WhatIf` previews both tasks, the event source and the legacy
+  removal; no switch registers them; `-Uninstall` removes both tasks. It is idempotent. Do not hand-edit it:
+  rebuild it.
+- Its header records the generating NewsService version, the generation timestamp and the build machine.
+
+`scripts/Register-NewsViewerTasks.ps1` remains the dev-box and pilot path (no build step needed): it
+registers the same tasks, creates the event source and removes the legacy tasks and the Run value. Tasks it
+registers carry no `nc-hash`, so NewsService verifies them by field comparison only.
 
 **Log/Source must match.** The Content Arrived subscription names the event log and source literally.
 They MUST equal NewsService's `Logging:EventLog:LogName` / `SourceName` (shipped: `Application` /
-`NewsService`). NewsService builds the subscription from those same two settings, so under
-`ViewerTasks\Manage` = 1 a changed value is picked up at the next service start (the hash changes, the
-task is re-registered). Where the tasks are registered by hand or by the reference script, changing either
-value requires re-running it with `-EventLogName` / `-EventSourceName`, or the task silently never fires.
+`NewsService`). The generated script bakes in the values the build machine resolved, so build the script
+with the same configuration the fleet will run; changing either value on the fleet requires regenerating the
+script and re-running it, or the task silently never fires. NewsService reports a mismatch as drift
+(`VerifyOnly`).
 
 **Ship NewsService and NewsViewer together.** NewsViewer's notification records and `source`-marked
 poster records add optional fields to the HMAC-signed session telemetry record. An older NewsService
 verifying such a record deserializes without those fields, computes a different signature and
 **discards the record as invalid** (ordinary poster records are unaffected). Upgrade both components in
 the same rollout (NewsService first where the order is controllable).
-
-**Reference implementation:** `scripts/Register-NewsViewerTasks.ps1` (`-Company`/`-InstallDir`, or
-`-ExePath` for a dev box; `-EventLogName`, `-EventSourceName`, `-LegacyTaskName`; `-Uninstall`;
-idempotent; also removes the HKLM Run value). It is the dev/pilot tool and the reference for what
-NewsService does by itself; with NewsService running (`ViewerTasks\Manage` = 1) a package does not need to
-register the tasks at all.
-
-### Externally managed launch surface (`ViewerTasks:Mode` = `VerifyOnly` or `Off`)
-
-A LocalSystem service creating scheduled tasks is a pattern EDR products and ASR rules flag, and some
-sites forbid runtime Task Scheduler changes outright. For those sites set `ViewerTasks\Mode` (**REG_SZ**,
-never a DWORD) to `Off` (NewsService does nothing) or `VerifyOnly` (it verifies and logs drift, but
-changes nothing), and `ViewerTasks\RegisterEventSource` to `"false"` if the event source is also created
-externally. Your packaging or change-control process then registers the tasks.
-
-**Obtaining the script.** It is self-contained (both task XMLs embedded as base64 of the exact file bytes,
-Company, task names, event log/source and exe path baked in) and needs no repo checkout or NewsService
-install:
-
-- at package time, without installing the service:
-  `NewsService.exe --emit-task-script <path> --newsviewer-path "<target>\NewsViewer.exe"` (exit code 0,
-  or the reason on stderr and non-zero). Pass `--newsviewer-path` with the exe path as it will be on the
-  target machine; without it the path is derived from the build layout.
-- at run time: with `Mode` = `VerifyOnly` or `Off`, NewsService writes it to `ViewerTasks\ScriptPath`
-  (default `%ProgramData%\NewsCentral\deploy\Register-NewsViewerTasks.generated.ps1`) at start, only when
-  its content changed. Copy it into your change process rather than running it from that folder.
-
-Run it elevated: `-WhatIf` previews both tasks and the event source, no switch registers them,
-`-Uninstall` removes both tasks. It is idempotent. Do not hand-edit it; regenerate it.
-
-**Ownership.** In these modes the installer owns creation **and** removal of the tasks. The service can
-never remove its own tasks in any mode (it cannot act on its own uninstall), so uninstall-side ownership
-stays with the installer everywhere. In `VerifyOnly`, drift (missing task, wrong command path, wrong
-trigger set) is reported at `Warning` and is not repaired, so a deleted task is visible rather than a silent
-fleet outage.
 
 **Task definition files:** the most robust way to create a task is to import a task-definition XML
 (`schtasks /create /xml ...`). `schtasks` has historically been sensitive to file encoding — UTF-16 LE
@@ -421,10 +421,10 @@ has no configuration, verify that the built-in `Company` value and the GPO hive 
 **NewsService:** files → register service (LocalSystem, delayed-auto) → set recovery actions →
 register EventLog source → start service.
 
-**NewsViewer:** files → register the NewsService event source if missing → (optionally) remove the legacy
-Workstation Unlock task. No Run value; NewsService registers both scheduled tasks (`NewsViewer Launch`,
-`NewsViewer Content Arrived`; Users SID, least privilege, Parallel) on its first start. With
-`ViewerTasks\Manage` = 0 packaging registers them instead.
+**NewsViewer:** files -> run the packaged `Register-NewsViewerTasks.generated.ps1` (registers `NewsViewer Launch` and
+`NewsViewer Content Arrived`; Users SID, least privilege, Parallel; creates the NewsService event source if
+missing; removes the legacy Workstation Unlock task) -> remove a legacy HKLM Run value. NewsService never creates
+tasks.
 
 **Uninstall:** remove files, service, the six PersonalizationCSP display-surface values
 (ownership-checked first) and the published-image folder, both NewsViewer tasks, ProgramData cache; leave

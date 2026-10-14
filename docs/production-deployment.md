@@ -560,23 +560,25 @@ The "News arrived!" notification (NewsViewer) and the launch surface behind it
 1. **Install NewsService and NewsViewer together** (NewsService first where the order is controllable). The
    notification records add optional fields to the HMAC-signed session telemetry; an older NewsService
    discards those records as invalid.
-2. **Nothing to register by hand: NewsService owns the scheduled tasks.** On its first start it registers
-   `NewsViewer Launch` (logon + 15 s, unlock, RDP connect, console connect) and `NewsViewer Content
-   Arrived` (NewsService event 2001, `--trigger content`) from the embedded `deploy/scheduled-tasks/`
-   XMLs, with the install path substituted (default `..\NewsViewer\NewsViewer.exe` beside the NewsService
-   folder), verifies them at every start and repairs any that is missing or outdated. Once both are in
-   place it removes the **legacy Workstation Unlock task** (`\{Company}\NewsCentral\NewsViewer`) and the
-   **HKLM Run value** `NewsViewer` — there is no Run entry any more; logon is a trigger of the Launch
-   task. Make sure the package no longer writes the Run value. If a site wants packaging to own the
-   tasks instead, deliver `ViewerTasks\Manage` = `0` by GPO (NewsService is then fully hands-off) and
-   register them with `scripts/Register-NewsViewerTasks.ps1` or the installer. Watch the first start in
-   the Application log (source `NewsService`): "registered" lines mean it worked; an Error naming a
-   path means NewsViewer is not where `ViewerTasks\NewsViewerPath` / the default says (retried every
-   5 minutes).
-3. **Register the NewsService event source** (`NewsService`, log `Application`) before NewsService first
-   runs. The Content Arrived task subscribes to exactly that log/source; NewsService builds the
-   subscription from `Logging:EventLog:LogName`/`SourceName`, so a changed value is re-registered at the
-   next service start (restart the service after the GPO change).
+2. **Register the scheduled tasks from the package: the installer owns them.** Run the packaged
+   `Register-NewsViewerTasks.generated.ps1` elevated (docs/packaging.md, "The registration script is a build
+   artifact"). It registers `NewsViewer Launch` (logon + 15 s, unlock, RDP connect, console connect) and
+   `NewsViewer Content Arrived` (NewsService event 2001, `--trigger content`) with the install path, company
+   and event log/source baked in at build time, creates the event source if missing, and removes the
+   **legacy Workstation Unlock task** (`\{Company}\NewsCentral\NewsViewer`). **NewsService never creates,
+   repairs or deletes tasks**; it only verifies them (`ViewerTasks\Mode` = `VerifyOnly`, default) once per
+   hour and logs drift at `Warning`. There is no Run entry any more; logon is a trigger of the Launch task.
+   Make sure the package no longer writes the HKLM Run value `NewsViewer`, and remove an existing one on
+   upgrade (NewsService no longer does). If the obsolete `ViewerTasks\Manage` value is still deployed by
+   GPO, remove it: it is ignored and NewsService logs one `Warning` at startup. Watch the first start in the
+   Application log (source `NewsService`): "verified: both are in place" means it worked; a `Warning` naming
+   a missing task or path means the script was not run or NewsViewer is not where
+   `ViewerTasks\NewsViewerPath` / the default says.
+3. **The NewsService event source** (`NewsService`, log `Application`) is created by the script above and,
+   unless `ViewerTasks\RegisterEventSource` = `"false"`, by NewsService itself explicitly at startup. The
+   Content Arrived task subscribes to exactly that log/source; the script bakes in the values it was built
+   with, so after a GPO change of `Logging:EventLog:LogName`/`SourceName` rebuild and re-run the script
+   (NewsService reports the old subscription as drift).
 4. **`Ui:NotifyNewContent`** (NewsViewer, DWORD, default on = `1`) controls the notification. To turn it
    off fleet-wide, deliver `HKLM\Software\{Company}\NewsCentral\NewsViewer\Ui\NotifyNewContent` = `0` by
    GPO; on a dev/pilot machine:
@@ -612,34 +614,28 @@ The "News arrived!" notification (NewsViewer) and the launch surface behind it
   presentation than before. If the daily gate was already hit that day, that user gets one
   "News arrived!" for it. Expected, once.
 
-**Dev-box task setup.** Point NewsService at the build instead of hand-editing the XML: set
-`ViewerTasks\NewsViewerPath` to the Debug exe, then run NewsService **elevated** (it needs admin rights
-to write machine-wide tasks; run non-elevated it only logs a Warning and retries every 5 minutes)
-(elevated PowerShell at the repo root):
+**Dev-box task setup.** NewsService does not register tasks. Point the verifier at the build with
+`ViewerTasks\NewsViewerPath` (elevated PowerShell at the repo root), then register the tasks with the
+script - either the reference script or one generated from your build:
 
 ```
 dotnet build
 $exe = (Resolve-Path .\NewsViewer\bin\Debug\net10.0-windows\NewsViewer.exe).Path
 .\scripts\Set-RegistryOverrides.ps1 -Company "<Company>" -ComponentName NewsService -ViewerTasksNewsViewerPath $exe
+.\scripts\Register-NewsViewerTasks.ps1 -Company "<Company>" -ExePath $exe
 dotnet run --project NewsService
 ```
 
-NewsService registers both tasks with that path, removes the legacy unlock task
-(`\<Company>\NewsCentral\NewsViewer`), the leftover dev-box tasks at the old `\NewsCentral\` path and the
-HKLM Run value, and logs each step. Restarting it is harmless (an unchanged task is only logged at Debug).
-
-Without NewsService (a bare pilot box) the script does the same job once:
-
-```
-.\scripts\Register-NewsViewerTasks.ps1 -Company "<Company>" -ExePath $exe
-```
-
 `-Company` is required in every mode (it names the `\<Company>\NewsCentral\` task folder). The script
-registers both tasks with that path, makes sure the event source exists, removes the legacy unlock task and
-the leftover dev-box tasks and the Run value, and prints each task's triggers (including the logon trigger),
+registers both tasks with that path, makes sure the event source exists, removes the legacy unlock task, the
+leftover dev-box tasks and the Run value, and prints each task's triggers (including the logon trigger),
 arguments and command. Re-running is harmless; `-Company "<Company>" -Uninstall` removes the two tasks.
-Tasks the script registered carry no `nc-hash`, so a NewsService with `ViewerTasks\Manage` = 1 re-registers
-them once on its next start.
+To exercise the packaged path instead, build the artifact and run it:
+`NewsService.exe --emit-task-script .\Register-NewsViewerTasks.generated.ps1 --newsviewer-path $exe`, then
+`.\Register-NewsViewerTasks.generated.ps1 -WhatIf` and without `-WhatIf`. Tasks registered by the reference
+script carry no `nc-hash`, so NewsService verifies them by field comparison only; the generated script stamps
+them. NewsService run non-elevated is fine: it only reads the tasks. If a dev box still has the old
+`ViewerTasks\Manage` value, NewsService logs one Warning and ignores it.
 
 ### 8.6 Field validation checklist (notification and launch surface)
 

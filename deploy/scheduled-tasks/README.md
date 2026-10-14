@@ -3,15 +3,17 @@
 Two Task Scheduler definitions that launch NewsViewer in the logged-on user's session. They are the
 **whole** launch surface: there is no HKLM Run entry (logon is a trigger of the Launch task).
 
-**NewsService owns the tasks.** It embeds these two files (linked at build time, never copied), applies the
-substitutions below, and on every start registers, verifies and repairs both tasks (`ViewerTasks:Manage`,
-default on; `false` = hands-off). A task carries `[nc-hash:<sha256>]` at the end of its Description; a
-missing or different hash means "outdated" and the task is re-registered. These files are the only task
-definitions - nothing is generated in code. `scripts/Register-NewsViewerTasks.ps1` is the dev/pilot
-equivalent for a machine without NewsService management; `NewsService.exe --emit-task-script` produces a
-self-contained equivalent (these XMLs embedded as base64) for sites that run with `ViewerTasks:Mode` = `VerifyOnly` or `Off`. Behavior of the launches themselves (decision
-rules, notification) is in `docs/newsviewer-spec.md`; installer requirements are in `docs/packaging.md`
-("NewsViewer launch surface").
+**The installer owns the tasks; NewsService only verifies them.** NewsService never creates, modifies,
+repairs or deletes a scheduled task. It embeds these two files (linked at build time, never copied) so it can
+build the expected definitions and report drift (`ViewerTasks:Mode`, `VerifyOnly` by default). The tasks are
+registered by the **registration script, a build artifact**: `NewsService.exe --emit-task-script
+<package-staging>\Register-NewsViewerTasks.generated.ps1` runs on the build machine from the publish output,
+embeds these XMLs as base64 of the exact file bytes, bakes in `Company`, the install path and the event
+log/source, stamps each task with `[nc-hash:<sha256>]` at the end of its Description, and ships in the
+package for the installer to run (docs/packaging.md). These files are the only task definitions - nothing is
+generated in code. `scripts/Register-NewsViewerTasks.ps1` is the dev/pilot equivalent. Behavior of the
+launches themselves (decision rules, notification) is in `docs/newsviewer-spec.md`; installer requirements
+are in `docs/packaging.md` ("NewsViewer launch surface").
 
 | File | Task | Trigger | Arguments |
 |---|---|---|---|
@@ -53,7 +55,7 @@ WorkingDirectory:  C:\Program Files\{Company}\NewsCentral\NewsViewer
 
 The task name actually registered is the one passed to `schtasks /Create /TN`; keep it equal to the URI.
 
-NewsService (or `Register-NewsViewerTasks.ps1`) substitutes the real company name, or the actual
+The registration script (generated, or `Register-NewsViewerTasks.ps1`) substitutes the real company name, or the actual
 folder for a non-standard location such as a dev box. The event subscription in
 `NewsViewer-ContentArrived.xml` carries the NewsService log name and source (`Application` /
 `NewsService`); they **must match** NewsService's `Logging:EventLog:LogName` / `SourceName`, or the task
