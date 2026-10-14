@@ -1,6 +1,4 @@
-using System.Security.AccessControl;
 using System.Security.Cryptography;
-using System.Security.Principal;
 using NewsService.Configuration;
 
 namespace NewsService.Services;
@@ -103,6 +101,9 @@ public sealed class ImagePublisher(
             return null;
         }
 
+        // A folder a non-administrator can write to is refused outright (see IsPublishFolderUserWritable).
+        if (IsPublishFolderUserWritable(publishRoot)) return null;
+
         var targetPath = Path.Combine(publishRoot, fileName);
         if (File.Exists(targetPath))
         {
@@ -131,6 +132,7 @@ public sealed class ImagePublisher(
     {
         var publishRoot = config.Delivery.PublishedImagePath;
         if (string.IsNullOrWhiteSpace(publishRoot) || !Directory.Exists(publishRoot)) return;
+        if (IsPublishFolderUserWritable(publishRoot)) return;
 
         var glob = $"{prefix}-*";
         IEnumerable<string> candidates;
@@ -168,66 +170,90 @@ public sealed class ImagePublisher(
             ? hash[Sha256Prefix.Length..]
             : hash;
 
+
+    // ── Publish-folder write-exposure gate ───────────────────────────────────────
+
+    private readonly object _gate = new();
+    private string? _reportedSignature;   // the exposure last reported (null = none reported / cleared)
+    private bool _reportedUnreadable;
+
     /// <summary>
-    /// Startup sanity check, called once from Program.cs after the host is built. Never throws and
-    /// never stops the service: a bad or user-writable publish path just means every future
-    /// <see cref="Publish"/> call fails (folder unusable) or the protection is void (folder
-    /// writable) — every managed surface then falls back to its foreign-value-never-cleared /
-    /// stays-frozen fail-closed behavior, which is the safe failure mode, but the operator needs
-    /// to know why.
+    /// Verifies the publish folder is not writable by a non-administrator (see <see cref="PublishFolderAcl"/>).
+    /// Returns true when it IS user-writable, in which case publishing and sweeping are refused: the images
+    /// are handed to the wallpaper and lock-screen APIs in every session, so a non-administrator who can
+    /// replace one bypasses the index-signing chain. Logged once per distinct finding (Error), and once when
+    /// it clears; never throws. The service verifies and reports - it never applies an ACL; the installer owns
+    /// the folder's ACL. A folder whose ACL cannot be read is not refused (the failure is reported once).
     /// </summary>
-    internal static void CheckPublishFolderAcl(string publishRoot, ILogger logger)
+    internal bool IsPublishFolderUserWritable(string publishRoot)
     {
         string fullPath;
+        try { fullPath = Path.GetFullPath(publishRoot); }
+        catch { return false; }
+
+        try
+        {
+            if (!Directory.Exists(fullPath)) return false;   // created on first publish; checked again then
+            var exposure = PublishFolderAcl.FindWriteExposure(PublishFolderAcl.Read(fullPath));
+            lock (_gate)
+            {
+                _reportedUnreadable = false;
+                if (exposure is null)
+                {
+                    if (_reportedSignature is not null)
+                        logger.LogInformation("Delivery:PublishedImagePath ({Path}) is no longer user-writable; publishing resumes", fullPath);
+                    _reportedSignature = null;
+                    return false;
+                }
+
+                if (exposure.Signature != _reportedSignature)
+                {
+                    _reportedSignature = exposure.Signature;
+                    logger.LogError(
+                        "Delivery:PublishedImagePath ({Path}) is user-writable: {Identity} ({Sid}) holds {Rights}. " +
+                        "Publishing and sweeping are refused and the previous state is left alone, because a " +
+                        "non-administrator who can replace a published image bypasses the signed index. {Remediation}",
+                        fullPath, exposure.Identity, exposure.Sid, exposure.Rights, PublishFolderAcl.Remediation(fullPath));
+                }
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            lock (_gate)
+            {
+                if (!_reportedUnreadable)
+                {
+                    _reportedUnreadable = true;
+                    logger.LogWarning(ex, "Could not read the ACL of {Path} - publishing is not refused, but the write-access check did not run", fullPath);
+                }
+            }
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Startup check, called once from Program.cs after the host is built. Never throws and never stops the
+    /// service. An empty or relative path is an Error (every publish would fail); a user-writable folder is an
+    /// Error and refuses publishing from then on (see <see cref="IsPublishFolderUserWritable"/>).
+    /// </summary>
+    internal void VerifyPublishFolder()
+    {
+        var publishRoot = config.Delivery.PublishedImagePath;
         try
         {
             if (string.IsNullOrWhiteSpace(publishRoot) || !Path.IsPathRooted(publishRoot))
             {
                 logger.LogError(
-                    "Delivery:PublishedImagePath is empty or not an absolute path: '{Path}' — " +
+                    "Delivery:PublishedImagePath is empty or not an absolute path: '{Path}' - " +
                     "image publishing will fail every cycle for every surface", publishRoot);
                 return;
             }
-            fullPath = Path.GetFullPath(publishRoot);
+            IsPublishFolderUserWritable(publishRoot);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex,
-                "Delivery:PublishedImagePath is not a usable path: '{Path}' — " +
-                "image publishing will fail every cycle for every surface", publishRoot);
-            return;
-        }
-
-        try
-        {
-            if (!Directory.Exists(fullPath)) return;   // created on first publish; nothing to check yet
-
-            var security = new DirectoryInfo(fullPath).GetAccessControl();
-            var usersSid = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-            var authUsersSid = new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
-            const FileSystemRights riskyRights =
-                FileSystemRights.Write | FileSystemRights.Modify | FileSystemRights.FullControl;
-
-            foreach (FileSystemAccessRule rule in
-                security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)))
-            {
-                if (rule.AccessControlType != AccessControlType.Allow) continue;
-                if ((rule.FileSystemRights & riskyRights) == 0) continue;
-                if (rule.IdentityReference is not SecurityIdentifier sid) continue;
-
-                if (sid.Equals(usersSid) || sid.Equals(authUsersSid))
-                {
-                    var name = sid.Equals(usersSid) ? "Users (S-1-5-32-545)" : "Authenticated Users (S-1-5-11)";
-                    logger.LogWarning(
-                        "Delivery:PublishedImagePath ({Path}) grants Write/Modify/FullControl to {Identity} — " +
-                        "this folder must not be user-writable or lock-screen publishing loses its protection",
-                        fullPath, name);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "Could not read ACL for {Path} — skipping the write-access sanity check", fullPath);
+            logger.LogError(ex, "Delivery:PublishedImagePath is not a usable path: '{Path}'", publishRoot);
         }
     }
 }

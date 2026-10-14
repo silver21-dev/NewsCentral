@@ -717,8 +717,9 @@ on an environment that was already repaired is a safe no-op.
 | 7.2 | NewsViewer registry tree authored — including its **own** `teams\` and `Signing\` | IT / Ops | ☐ |
 | 7.3 | GPO linked to the pilot OU and applied | IT / Ops | ☐ |
 | 7.4 | *(ClientSecretEnv only)* machine environment variable provisioned | IT / Ops | ☐ |
-| 7.5 | Registration script emitted from the release build (`NewsService.exe --emit-task-script`, docs/packaging.md) and handed to the packaging team, with the note that it needs 64-bit PowerShell | Build / Release | ☐ |
-| 7.6 | Installer registers both NewsViewer tasks at install (runs the packaged script, expects exit 0) and removes both at uninstall (`-Uninstall`) | Packaging | ☐ |
+| 7.5 | `Delivery:PublishedImagePath` confirmed not user-writable: the default `%SystemRoot%\Web\NewsCentral` (or, for any other path, an explicit installer-set ACL); check with `icacls` that `Users`/`Everyone`/`Authenticated Users`/`INTERACTIVE` have read-only rights only. A writable folder makes NewsService log an `Error` and refuse to publish | IT / Ops | ☐ |
+| 7.6 | Registration script emitted from the release build (`NewsService.exe --emit-task-script`, docs/packaging.md) and handed to the packaging team, with the note that it needs 64-bit PowerShell | Build / Release | ☐ |
+| 7.7 | Installer registers both NewsViewer tasks at install (runs the packaged script, expects exit 0) and removes both at uninstall (`-Uninstall`) | Packaging | ☐ |
 | 8.1 | Pilot validation checks 1-13 passed | QA / Ops | ☐ |
 | 8.2 | Stabilisation window completed on the pilot group | Project lead | ☐ |
 | 8.3 | `RequireSignedIndex` flipped to `true` on both components | IT / Ops | ☐ |

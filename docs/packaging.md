@@ -110,6 +110,16 @@ subscribes to for the `ContentChanged` event (EventID 2001, written once per syn
 content): register the source **before NewsService first runs**, and see "NewsViewer launch surface" below
 for the match rule.
 
+**Publish-folder ACL:** the installer owns the ACL of the folder named by `Delivery:PublishedImagePath`; NewsService
+never sets it. The supported location is `%SystemRoot%\Web\NewsCentral`, which inherits `%SystemRoot%\Web`'s ACL
+(administrators and SYSTEM full control, Users read-only) and needs nothing further. If the installer creates the
+folder, or the path is configured anywhere else (it would otherwise inherit from its parent, and
+`C:\ProgramData\...` lets standard users create files), the installer must set an explicit ACL: administrators and
+SYSTEM write, everyone else read-only, with inheritance from the parent removed. NewsService verifies this at
+startup and before every publish; a folder that `Users`, `Everyone`, `Authenticated Users` or `INTERACTIVE` can
+write to makes it log an `Error` and **refuse to publish** (no lock screen or wallpaper change) until the ACL is
+fixed. See `docs/configuration.md`.
+
 Start the service at the end of installation.
 
 **NewsService — no configuration actions:** the installer does NOT write the component's runtime

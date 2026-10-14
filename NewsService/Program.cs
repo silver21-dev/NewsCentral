@@ -100,11 +100,10 @@ var host = builder.Build();
 // depend on Logging:EventLog:LogLevel (the first write could otherwise be ContentChanged itself).
 EventSourceGuard.EnsureSource(builder.Configuration, host.Services.GetRequiredService<ILogger<Program>>());
 
-// Startup sanity check — never fatal; a bad or user-writable publish path just means neither
-// surface (lock screen, wallpaper) can be reliably managed (see ImagePublisher.Publish), but the
+// Startup check — never fatal. A bad path, or a publish folder a non-administrator can write to, means
+// publishing is refused (see ImagePublisher.Publish); the service never applies an ACL itself. The
 // operator needs to know why.
-ImagePublisher.CheckPublishFolderAcl(
-    config.Delivery.PublishedImagePath, host.Services.GetRequiredService<ILogger<ImagePublisher>>());
+((ImagePublisher)host.Services.GetRequiredService<IImagePublisher>()).VerifyPublishFolder();
 
 // Session-host advisory — never fatal, best-effort heuristic (see comment below); a wrong read
 // just means the warning doesn't fire, which is the safe direction to err in.

@@ -220,8 +220,8 @@ admin-supplied default — and only a match is copied into
 which does not grant standard users write access). The published file name is content-derived
 (`{prefix}-{hash16}.ext`, `prefix` = `"lockscreen"` or `"wallpaper"`), so CSP is pointed at a file
 whose name is only ever correct — no window exists where the path exists but the bytes don't yet
-match it. A startup check (`ImagePublisher.CheckPublishFolderAcl`) warns if the configured folder
-is ever found to grant `Write`/`Modify`/`FullControl` to `Users` or `Authenticated Users`, since a
+match it. A startup check and a per-publish check (`ImagePublisher.IsPublishFolderUserWritable`) refuse to publish
+if the configured folder is found to be writable by `Users`, `Everyone`, `Authenticated Users` or `INTERACTIVE`, since a
 user-writable publish folder would defeat the entire mechanism for **either** surface. See
 `docs/configuration.md` for `Delivery:PublishedImagePath` and `docs/newsservice-spec.md` for the
 full publish-then-apply flow.
