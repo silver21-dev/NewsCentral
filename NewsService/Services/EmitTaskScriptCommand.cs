@@ -6,11 +6,11 @@ namespace NewsService.Services;
 /// <summary>
 /// <c>NewsService.exe --emit-task-script &lt;path&gt; [--newsviewer-path exe]</c>: the BUILD-time step that
 /// writes the registration script and exits, before any host exists - so it works where the service is
-/// not installed and the configuration is only appsettings.json (plus the registry overlay, when
-/// present). The script is a build artifact shipped in the package; no running service writes it.
-/// <c>--newsviewer-path</c> sets the NewsViewer.exe the tasks will launch on the TARGET machine (it
-/// overrides ViewerTasks:NewsViewerPath, including a registry value on the build machine); without it
-/// the build layout would be baked in.
+/// not installed and the only configuration is the shipped appsettings.json (event log and source).
+/// The registry overlay and appsettings.Development.json are deliberately NOT read. The script is a build
+/// artifact shipped in the package; no running service writes it.
+/// <c>--newsviewer-path</c> overrides the NewsViewer.exe the tasks launch on the TARGET machine; the default is
+/// %ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe, never ViewerTasks:NewsViewerPath.
 /// </summary>
 internal static class EmitTaskScriptCommand
 {
@@ -23,8 +23,18 @@ internal static class EmitTaskScriptCommand
     public static bool IsRequested(string[] args) =>
         args.Any(a => string.Equals(a, Switch, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>%ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe (the install layout in docs/packaging.md).</summary>
+    internal static string DefaultViewerPath() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+        SolutionConstants.Company, "NewsCentral", "NewsViewer", "NewsViewer.exe");
+
+    private static bool LooksLikeBuildOutput(string path) =>
+        path.Contains(@"\bin\Debug\", StringComparison.OrdinalIgnoreCase)
+        || path.Contains(@"\bin\Release\", StringComparison.OrdinalIgnoreCase)
+        || path.Contains(@"\source\repos\", StringComparison.OrdinalIgnoreCase);
+
     /// <returns>0 on success; non-zero with the reason on <paramref name="stderr"/> on failure.</returns>
-    public static int Run(string[] args, TextWriter stdout, TextWriter stderr, string? baseDirectory = null, bool useRegistry = true)
+    public static int Run(string[] args, TextWriter stdout, TextWriter stderr, string? baseDirectory = null)
     {
         try
         {
@@ -51,21 +61,32 @@ internal static class EmitTaskScriptCommand
                 return 2;
             }
 
-            var builder = new ConfigurationBuilder()
+            // Deterministic inputs: appsettings.json only. No registry overlay and no
+            // appsettings.Development.json - the build machine's configuration describes the build
+            // machine, not the targets the script is shipped to.
+            var settingsFile = Path.Combine(baseDirectory, "appsettings.json");
+            var configuration = new ConfigurationBuilder()
                 .SetBasePath(baseDirectory)
                 .AddJsonFile("appsettings.json", optional: false)
-                .AddJsonFile("appsettings.Development.json", optional: true);
-            if (useRegistry) builder.AddRegistryOverrides(SolutionConstants.Company, SolutionConstants.SolutionName, "NewsService");
-            var configuration = builder.Build();
+                .Build();
 
-            var config = configuration.Get<ServiceConfiguration>() ?? new ServiceConfiguration();
-            if (!string.IsNullOrWhiteSpace(viewerPath)) config.ViewerTasks.NewsViewerPath = viewerPath;
+            // The NewsViewer path never comes from configuration: the override, else the canonical install path.
+            var viewerSource = !string.IsNullOrWhiteSpace(viewerPath)
+                ? "--newsviewer-path"
+                : @"default %ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe";
+            var exePath = !string.IsNullOrWhiteSpace(viewerPath) ? viewerPath : DefaultViewerPath();
+            var config = new ServiceConfiguration { ViewerTasks = { NewsViewerPath = exePath } };
+            if (LooksLikeBuildOutput(exePath))
+                stderr.WriteLine($"Warning: NewsViewer path '{exePath}' looks like a build output; it is baked into a script shipped to target machines.");
 
             var target = Environment.ExpandEnvironmentVariables(pathArg.Trim());
             var inputs = TaskDefinitionInputsResolver.Resolve(config, configuration, baseDirectory);
             var script = TaskScriptGenerator.Generate(inputs, TaskScriptEmitter.NewHeader(), TaskDefinitionBuilder.LoadTemplateBytes);
             TaskScriptEmitter.Write(target, script);
-            stdout.WriteLine($"Wrote: {target} (Company '{inputs.Company}', NewsViewer '{inputs.ExePath}')");
+            stdout.WriteLine($"Wrote: {target}");
+            stdout.WriteLine($"  Company:          {inputs.Company} (compiled in)");
+            stdout.WriteLine($"  NewsViewer:       {inputs.ExePath} (source: {viewerSource})");
+            stdout.WriteLine($"  Event log/source: {inputs.EventLogName} / {inputs.EventSourceName} (source: {settingsFile}; registry and appsettings.Development.json are not consulted)");
             return 0;
         }
         catch (Exception ex)

@@ -180,6 +180,7 @@ public sealed class TaskScriptGeneratorTests
                 // The host wraps long verbose lines when output is redirected: compare without whitespace.
                 Assert.Contains(Squash($"nc-hash {expected.TaskName} {expected.Hash}"), Squash(output));
                 Assert.Contains(expected.TaskName, output);   // the -WhatIf preview names the task
+                Assert.Contains("Legacy HKLM Run value", output);
             }
             Assert.Equal(before, Directory.GetFiles(Path.GetTempPath(), "NewsViewerTask*.xml").Length);
         }
@@ -200,13 +201,41 @@ public sealed class TaskScriptGeneratorTests
 
             var code = EmitTaskScriptCommand.Run(
                 ["--emit-task-script", target, "--newsviewer-path", @"C:\X\NewsViewer.exe"],
-                stdout, stderr, dir, useRegistry: false);
+                stdout, stderr, dir);
 
             Assert.Equal(0, code);
             Assert.Equal("", stderr.ToString());
             var script = File.ReadAllText(target);
             Assert.Contains($"'{SolutionConstants.Company}'", script);
             Assert.Contains(@"'C:\X\NewsViewer.exe'", script);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void EmitCommand_IgnoresTheDevelopmentOverlay_AndUsesTheCanonicalViewerPath()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "nc-emit-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "appsettings.json"),
+                """{"ViewerTasks":{"NewsViewerPath":"C:\\Base\\NewsViewer.exe"},"Logging":{"EventLog":{"SourceName":"BaseSource","LogName":"BaseLog"}}}""");
+            File.WriteAllText(Path.Combine(dir, "appsettings.Development.json"),
+                """{"Logging":{"EventLog":{"SourceName":"DevSource"}}}""");
+            var target = Path.Combine(dir, "r.ps1");
+            var stdout = new StringWriter(); var err = new StringWriter();
+
+            var code = EmitTaskScriptCommand.Run(["--emit-task-script", target], stdout, err, dir);
+
+            Assert.True(code == 0, err.ToString());
+            var script = File.ReadAllText(target);
+            Assert.Contains("'BaseSource'", script);
+            Assert.Contains("'BaseLog'", script);
+            Assert.DoesNotContain("DevSource", script);
+            Assert.DoesNotContain(@"Base\NewsViewer", script);   // not even appsettings.json supplies the exe path
+            Assert.Contains("'" + EmitTaskScriptCommand.DefaultViewerPath() + "'", script);
+            Assert.Contains("appsettings.Development.json are not consulted", stdout.ToString());
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
@@ -220,7 +249,7 @@ public sealed class TaskScriptGeneratorTests
         {
             File.WriteAllText(Path.Combine(dir, "appsettings.json"), "{}");
             var stderr = new StringWriter();
-            var code = EmitTaskScriptCommand.Run(["--emit-task-script"], new StringWriter(), stderr, dir, useRegistry: false);
+            var code = EmitTaskScriptCommand.Run(["--emit-task-script"], new StringWriter(), stderr, dir);
             Assert.NotEqual(0, code);
             Assert.Contains("Usage: NewsService.exe --emit-task-script <path>", stderr.ToString());
         }
@@ -235,7 +264,7 @@ public sealed class TaskScriptGeneratorTests
         try
         {
             var stderr = new StringWriter();
-            var code = EmitTaskScriptCommand.Run(["--emit-task-script", Path.Combine(dir, "r.ps1")], new StringWriter(), stderr, dir, useRegistry: false);
+            var code = EmitTaskScriptCommand.Run(["--emit-task-script", Path.Combine(dir, "r.ps1")], new StringWriter(), stderr, dir);
             Assert.NotEqual(0, code);
             Assert.Contains("--emit-task-script failed", stderr.ToString());
         }

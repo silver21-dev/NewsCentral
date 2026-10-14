@@ -111,7 +111,8 @@ internal static class TaskScriptGenerator
 #  checkout, no NewsService install and no knowledge of the Company value.
 #
 #  Registers the two NewsViewer scheduled tasks, creates the NewsService event
-#  source when missing and removes the legacy Workstation Unlock task. With
+#  source when missing, removes the legacy Workstation Unlock task and the
+#  legacy HKLM Run value "NewsViewer". With
 #  -Uninstall it removes both tasks (NewsService never modifies Task Scheduler,
 #  so the installer owns their creation and removal). It writes no
 #  configuration and contains no secret.
@@ -130,7 +131,7 @@ internal static class TaskScriptGenerator
     Idempotent: running it twice gives the same result. Supports -WhatIf.
 
 .PARAMETER Uninstall
-    Removes both NewsViewer tasks. The event source and the legacy task are not touched.
+    Removes both NewsViewer tasks and the legacy HKLM Run value. The event source and the legacy tasks are not touched.
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -194,6 +195,40 @@ function Remove-TaskIfPresent {
     return $true
 }
 
+# Legacy HKLM Run value: value name exactly "NewsViewer", removed only when its data contains NewsViewer.exe,
+# read through the 64-bit registry view; nothing else under Run is touched (same rule as
+# scripts/Register-NewsViewerTasks.ps1). The Launch task has a logon trigger, so a Run entry is a duplicate
+# launch, and a stale one pointing at an old install fails at every logon.
+function Remove-LegacyRunValue {
+    Write-Host ''
+    Write-Step 'Legacy HKLM Run value'
+    $hklm = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
+    $run = $null
+    try {
+        # Read-only first: -WhatIf (and a value that is absent or not ours) never needs write access.
+        $run = $hklm.OpenSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\Run', $false)
+        $runData = if ($run) { $run.GetValue('NewsViewer') } else { $null }
+        if ($null -eq $runData) {
+            Write-Host '  not found HKLM Run value NewsViewer (nothing to remove)'
+        }
+        elseif (("$runData") -like '*NewsViewer.exe*') {
+            if ($PSCmdlet.ShouldProcess('HKLM Run value NewsViewer', "Remove ($runData)")) {
+                $run.Dispose()
+                $run = $hklm.OpenSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\Run', $true)
+                $run.DeleteValue('NewsViewer')
+                Write-Host "  removed   HKLM Run value NewsViewer ($runData)"
+            }
+        }
+        else {
+            Write-Host "  kept      HKLM Run value NewsViewer does not point at NewsViewer.exe ($runData)"
+        }
+    }
+    finally {
+        if ($run) { $run.Dispose() }
+        $hklm.Dispose()
+    }
+}
+
 # ---- Uninstall ---------------------------------------------------------------
 if ($Uninstall) {
     Write-Step 'Removing NewsViewer scheduled tasks'
@@ -201,6 +236,8 @@ if ($Uninstall) {
         if (Remove-TaskIfPresent $name) { Write-Host "  removed   $name" }
         else { Write-Host "  nothing removed (absent, or -WhatIf): $name" }
     }
+    # A machine upgraded from an older package may still carry the Run value.
+    Remove-LegacyRunValue
     return
 }
 
@@ -305,6 +342,9 @@ foreach ($old in $LegacyTasks) {
     if (Remove-TaskIfPresent $old) { Write-Host "  removed   $old" }
     else { Write-Host "  nothing removed (absent, or -WhatIf): $old" }
 }
+
+# ---- Legacy Run value (the tasks are in place: a failed registration threw above) ----
+Remove-LegacyRunValue
 Write-Host ''
 """;
 }

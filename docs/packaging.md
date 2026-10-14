@@ -224,10 +224,13 @@ only reported (see above).
 - **Remove the legacy Workstation Unlock task** (`\{Company}\NewsCentral\NewsViewer`) and the old dev-box
   tasks, tolerantly (a missing task is not a failure), or an unlock starts NewsViewer twice. The script does
   this. NewsService no longer retires them.
-- **Remove the legacy HKLM Run value `NewsViewer` on upgrade** (only when its data contains
-  `NewsViewer.exe`) and stop writing it. NewsService no longer removes it; a Run value alongside the logon
-  trigger starts NewsViewer twice at logon (the single-instance mutex absorbs it, but it is wasted work).
-  `scripts/Register-NewsViewerTasks.ps1` does this; the generated script does not.
+- **Remove the legacy HKLM Run value `NewsViewer`** (only when its data contains `NewsViewer.exe`) and
+  stop writing it. NewsService no longer removes it. The Launch task has a logon trigger, so a Run entry is a
+  duplicate launch (the single-instance mutex absorbs that), and a stale one pointing at a previous install
+  fails at every logon with nothing in the task history to explain it. The generated script does this in both
+  the install and the `-Uninstall` path (a machine upgraded from an older package may still carry the value),
+  tolerantly (an absent value is reported, not an error) and honouring `-WhatIf`, exactly as
+  `scripts/Register-NewsViewerTasks.ps1` does.
 - **On uninstall, remove both tasks** (`Register-NewsViewerTasks.generated.ps1 -Uninstall`, or the
   installer's equivalent). **The service can never remove its own tasks** - it cannot act on its own
   uninstall - so uninstall-side ownership stays with the installer.
@@ -239,15 +242,19 @@ package, reviewed, signed and versioned with the release, and run by the install
 production machine generates it and no running service writes it. Add this build step after publishing:
 
 ```
-NewsService.exe --emit-task-script <package-staging>\Register-NewsViewerTasks.generated.ps1 --newsviewer-path "<target install dir>\NewsViewer\NewsViewer.exe"
+NewsService.exe --emit-task-script <package-staging>\Register-NewsViewerTasks.generated.ps1
 ```
 
 - The path argument is required (no argument: the usage line on stderr and a non-zero exit). Exit code 0 on
   success; the reason on stderr and non-zero otherwise.
-- `--newsviewer-path` is the NewsViewer.exe path **as it will be on the target machine**. Always pass it:
-  without it the path is derived from the build layout, and a `ViewerTasks\NewsViewerPath` value in the build
-  machine's registry would also be baked in. The command prints the `Company` and exe path it used - check
-  them in the build log.
+- `--newsviewer-path` is an **override** for a non-standard install location; without it the script targets
+  `%ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe`, derived from the compiled-in `Company`.
+  In this mode the command deliberately reads **only `appsettings.json`** (for `Logging:EventLog:LogName` and
+  `SourceName`, the shipped base layer that goes into the same package): it ignores the registry overlay and
+  `appsettings.Development.json`, and never uses `ViewerTasks:NewsViewerPath`, so the build machine's own
+  configuration cannot leak into an artifact shipped to every target. (Normal service startup is unchanged
+  and uses the full stack.) The command echoes `Company`, the exe path and the sources it used - keep that in
+  the build log - and warns on stderr when `--newsviewer-path` looks like a build output.
 - The script carries `Company` (`SolutionConstants.Company`), the install path, the event log and source
   names, both task names, the legacy task names, and both task XMLs embedded as base64 of the exact file
   bytes (the UTF-16 LE BOM that `schtasks` needs survives). The packaging team needs no separate briefing on
@@ -423,7 +430,7 @@ register EventLog source → start service.
 
 **NewsViewer:** files -> run the packaged `Register-NewsViewerTasks.generated.ps1` (registers `NewsViewer Launch` and
 `NewsViewer Content Arrived`; Users SID, least privilege, Parallel; creates the NewsService event source if
-missing; removes the legacy Workstation Unlock task) -> remove a legacy HKLM Run value. NewsService never creates
+missing; removes the legacy Workstation Unlock task and the legacy HKLM Run value). NewsService never creates
 tasks.
 
 **Uninstall:** remove files, service, the six PersonalizationCSP display-surface values
