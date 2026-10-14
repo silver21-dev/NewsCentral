@@ -101,8 +101,9 @@ runtime by retrying on its next poll cycle.
 - Reset failure count: after 1 day
 
 **EventLog source:** NewsService writes to the Windows Application log using source name `NewsService`.
-The installer must register this EventLog source (creation requires the elevated installer context;
-the service running as LocalSystem can write to it but must not be relied on to create it).
+The registration script (or the installer) registers this EventLog source. NewsService also creates it
+explicitly at startup when it is missing, unless ViewerTasks:RegisterEventSource is false, so do not rely on
+either alone where that key is false.
 Log name: Application. The shipped `appsettings.json` names this same source and log in its
 `Logging:EventLog` section (`SourceName`/`LogName`) — the two must stay in step; do not edit either
 side alone. The same source and log are what NewsViewer's **`NewsViewer Content Arrived`** scheduled task
