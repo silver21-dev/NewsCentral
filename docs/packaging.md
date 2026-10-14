@@ -262,6 +262,16 @@ NewsService.exe --emit-task-script <package-staging>\Register-NewsViewerTasks.ge
 - Run it elevated from the package: `-WhatIf` previews both tasks, the event source, the legacy removal and
   the Run-value removal (and skips verification, with a notice); no switch registers them; `-Uninstall`
   removes both tasks and the Run value. It is idempotent. Do not hand-edit it: rebuild it.
+- **It requires 64-bit PowerShell and refuses a 32-bit host.** Under 32-bit PowerShell `%ProgramFiles%` expands to
+  the `Program Files (x86)` folder, so the `nc-hash` the script writes would differ from the one the 64-bit
+  NewsService computes (the install would report success and the drift would appear later with no clue why), and
+  the HKLM Run value would be read through the redirected `WOW6432Node` view. So the script (and
+  `scripts/Register-NewsViewerTasks.ps1`) checks `[Environment]::Is64BitProcess` before it reads or writes anything,
+  in every mode including `-WhatIf` and `-Uninstall`, prints the cause and the remedy and **exits 1**. **Packaging
+  note:** SCCM and Intune have historically launched 32-bit PowerShell. When the caller is itself 32-bit, invoke
+  `%SystemRoot%\sysnative\WindowsPowerShell\v1.0\powershell.exe -File <script>`; from a 64-bit caller use
+  `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`. Both scripts read the Run value through the
+  64-bit registry view explicitly (`OpenBaseKey(LocalMachine, Registry64)`).
 - **It verifies what it registered, and fails the install if that is wrong.** After registering it prints the
   same Verification readout as `scripts/Register-NewsViewerTasks.ps1` (per task: every trigger with its
   details, command, arguments, working directory, principal, run level; then the event source state) and
@@ -284,7 +294,10 @@ NewsService.exe --emit-task-script <package-staging>\Register-NewsViewerTasks.ge
   sides (the generated script's `Get-NormalizedPath` and NewsService's `TaskPathNormalizer` are the same steps);
   the registered XML keeps the path as written. This changes the hash of every previously registered task
   (earlier stamps covered the raw text, and the task descriptions changed too), so already-registered tasks show
-  as drifted once until the installer re-registers them during the upgrade. That is expected and corrects itself.
+  as drifted once until the installer re-registers them during the upgrade. That is expected and corrects itself. This includes pilot machines: a pilot machine whose tasks carry a stamp from
+  an older build will show the `nc-hash mismatch` drift `Warning` after the upgrade until the registration script is
+  re-run once (the installer's normal upgrade step does it). That is expected, not a fault - do not chase it as a
+  NewsService problem.
 - Its header records the generating NewsService version, the generation timestamp and the build machine.
 
 `scripts/Register-NewsViewerTasks.ps1` remains the dev-box and pilot path (no build step needed): it

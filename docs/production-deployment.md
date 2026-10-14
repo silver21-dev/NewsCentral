@@ -453,6 +453,9 @@ HKLM\Software\{Company}\NewsCentral\NewsViewer\
 | 8 | Telemetry round-trip | `session-*.json` appears in `uploads\`, is forwarded, then removed | `%ProgramData%\NewsCentral\uploads\` |
 | 9 | Dynamic teams *(if enabled)* | `resolved-teams.json` lists the expected teams with `State: Active` | `%ProgramData%\NewsCentral\resolved-teams.json` |
 | 10 | Negative: tampered index rejected | Team skipped, `Error` logged | Event Log |
+| 11 | NewsViewer launch surface registered | Both tasks exist: `\<Company>\NewsCentral\NewsViewer Launch` and `\<Company>\NewsCentral\NewsViewer Content Arrived`; principal group `S-1-5-32-545`, run level `LeastPrivilege`. The installer log of the registration script ends with `Verification passed` and exit code 0 | `Get-ScheduledTask -TaskPath '\<Company>\NewsCentral\' \| % { $_.TaskName, $_.Principal.GroupId, $_.Principal.RunLevel }`; installer log |
+| 12 | NewsService event source present | `[System.Diagnostics.EventLog]::SourceExists('NewsService')` is true and the source is under the `Application` log (the script creates it; NewsService also creates it at startup unless `ViewerTasks\RegisterEventSource` = `"false"`) | PowerShell; Event Viewer -> Application |
+| 13 | NewsService logs no launch-surface drift at startup | Within about 10 s of service start: `NewsViewer scheduled tasks verified: both are in place (... matched by nc-hash stamp ...)` and **no** `Warning` containing `launch surface has drifted` or `NewsViewer executable not found` | Event Log -> Application, source `NewsService` |
 
 ### 8.2 Flipping the fail-closed switch
 
@@ -623,6 +626,8 @@ dotnet build
 $exe = (Resolve-Path .\NewsViewer\bin\Debug\net10.0-windows\NewsViewer.exe).Path
 .\scripts\Set-RegistryOverrides.ps1 -Company "<Company>" -ComponentName NewsService -ViewerTasksNewsViewerPath $exe
 .\scripts\Register-NewsViewerTasks.ps1 -Company "<Company>" -ExePath $exe
+# Optional: run NewsService in a console. It does NOT register or repair anything - the script above did that;
+# NewsService only verifies the tasks and logs "verified" or a drift Warning.
 dotnet run --project NewsService
 ```
 
@@ -634,7 +639,7 @@ To exercise the packaged path instead, build the artifact and run it:
 `NewsService.exe --emit-task-script .\Register-NewsViewerTasks.generated.ps1 --newsviewer-path $exe`, then
 `.\Register-NewsViewerTasks.generated.ps1 -WhatIf` and without `-WhatIf`. Tasks registered by the reference
 script carry no `nc-hash`, so NewsService verifies them by field comparison only; the generated script stamps
-them. NewsService run non-elevated is fine: it only reads the tasks. If a dev box still has the old
+them. Both scripts must be run from **64-bit** PowerShell (they refuse a 32-bit host with a non-zero exit; see docs/packaging.md). NewsService run non-elevated is fine: it only reads the tasks. If a dev box still has the old
 `ViewerTasks\Manage` value, NewsService logs one Warning and ignores it.
 
 ### 8.6 Field validation checklist (notification and launch surface)
@@ -648,7 +653,7 @@ Not yet validated in the field. Run on the listed environment and record the res
 | 3 | **Windows Hello (face/fingerprint) unlock** | The unlock-triggered launch is **not** treated as idle (the idle check applies only to `--trigger content`); the poster / notification behave exactly as after a password unlock. |
 | 4 | **Fast user switching (local console)** and the **`ConsoleConnect`** trigger | `ConsoleConnect` launches NewsViewer in the session that is switched back to. With two simultaneous **local** sessions, **each** gets its own notification (Parallel tasks + the per-session `Local\` mutex): no `AlreadyRunning` caused by the other session. |
 | 5 | **150% scaling / mixed DPI / multiple monitors** | The notification appears on the **primary** monitor only, at the bottom-right of its working area (bottom-left for Arabic), 5 DIPs from the corner, correctly scaled; no clipping in de/zh/pt/ar. |
-| 6 | **Fresh machine** | The event source is registered by the installer before NewsService first runs; after the first sync that changes content, event 2001 appears and the Content Arrived task fires (`Last Run Result` 0x0 in Task Scheduler). |
+| 6 | **Fresh machine** | The event source is registered by the registration script (and created by NewsService at startup if still missing) before the first content event; after the first sync that changes content, event 2001 appears and the Content Arrived task fires (`Last Run Result` 0x0 in Task Scheduler). |
 | 7 | **Live Entra multi-team validation** *(carried over)* | On an Entra-joined box with `Entra:Enabled=true`, a device in several dynamic teams resolves them all (`resolved-teams.json`), one cycle produces one event, and NewsViewer selects the newest-to-team item across the union. See `docs/entra-dynamic-teams.md`. |
 | 8 | **Real RDP session** (a full desktop) | The `RemoteConnect` launch is logged in `launch.log` of that session. A publish shows the mini form inside the RDP session (and the poster, once per day); lock the RDP session (pause during lock), disconnect and reconnect (the reconnect launch is logged, no duplicate poster, marker respected). The wallpaper style is **not** rewritten (check `HKCU\Control Panel\Desktop\WallpaperStyle` is untouched). |
 | 9 | **Citrix / Horizon full desktop** | Same as 8: poster and notification appear in the published desktop; detection works for ICA (`SM_REMOTESESSION`) and Horizon (`ViewClient_Machine_Name`). |
@@ -658,7 +663,7 @@ Not yet validated in the field. Run on the listed environment and record the res
 | 13 | **RDP / Citrix / Horizon client window below 1920×1080** | Expect `reason=NoQualifyingMonitor` (no poster, no notification). Decide later whether to relax the threshold for remote sessions. |
 | 14 | **`Display:ShowInRemoteSessions` = 0** | In a remote session a launch logs `reason=RemoteSession` and shows nothing; `--manual` still shows the poster. Setting it back to `1` restores posters. |
 | 15 | **Logon trigger** (task-owned, no Run value) | About 15 s after sign-in NewsViewer starts (`launch.log` has a line for the logon). Note whether a second line with `reason=AlreadyRunning` follows (ConsoleConnect also firing at logon is harmless). The HKLM Run `NewsViewer` value is gone. |
-| 16 | **NewsService repairs the tasks** | Delete `NewsViewer Launch` (elevated), restart NewsService: it is logged "registered" and recreated. A non-elevated delete attempt is refused ("Access is denied"). |
+| 16 | **NewsService reports a deleted task; it does not repair it** | Delete `NewsViewer Launch` (elevated), restart NewsService: within about 10 s it logs a `Warning` that the task is missing (`launch surface has drifted`) and does **not** recreate it; re-running the registration script restores it and the next check logs `verified`. A non-elevated delete attempt is refused ("Access is denied"). |
 
 ---
 
@@ -712,7 +717,9 @@ on an environment that was already repaired is a safe no-op.
 | 7.2 | NewsViewer registry tree authored — including its **own** `teams\` and `Signing\` | IT / Ops | ☐ |
 | 7.3 | GPO linked to the pilot OU and applied | IT / Ops | ☐ |
 | 7.4 | *(ClientSecretEnv only)* machine environment variable provisioned | IT / Ops | ☐ |
-| 8.1 | Pilot validation checks 1–10 passed | QA / Ops | ☐ |
+| 7.5 | Registration script emitted from the release build (`NewsService.exe --emit-task-script`, docs/packaging.md) and handed to the packaging team, with the note that it needs 64-bit PowerShell | Build / Release | ☐ |
+| 7.6 | Installer registers both NewsViewer tasks at install (runs the packaged script, expects exit 0) and removes both at uninstall (`-Uninstall`) | Packaging | ☐ |
+| 8.1 | Pilot validation checks 1-13 passed | QA / Ops | ☐ |
 | 8.2 | Stabilisation window completed on the pilot group | Project lead | ☐ |
 | 8.3 | `RequireSignedIndex` flipped to `true` on both components | IT / Ops | ☐ |
 | 8.4 | Rollout to the wider fleet | IT / Ops | ☐ |

@@ -140,6 +140,22 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# ---- 64-bit host required -----------------------------------------------------
+# The task hash covers Command and WorkingDirectory after environment variables are expanded, and a 32-bit
+# host expands %ProgramFiles% to the "Program Files (x86)" folder while the 64-bit NewsService expands it to
+# the "Program Files" folder: the script would register and report success, and NewsService would later report
+# nc-hash drift with no clue why. A 32-bit host also reads the HKLM Run value through the redirected
+# WOW6432Node view. So this is refused up front, before anything is read or written, in every mode
+# (-WhatIf and -Uninstall included) rather than compensated for.
+if (-not [Environment]::Is64BitProcess) {
+    Write-Host 'ERROR: this script must be run from 64-bit PowerShell; this is a 32-bit PowerShell host.' -ForegroundColor Red
+    Write-Host '  The task hash depends on how %ProgramFiles% expands (the Program Files (x86) folder in a 32-bit host), and a' -ForegroundColor Red
+    Write-Host '  32-bit host reads the redirected registry view. Nothing was read or changed.' -ForegroundColor Red
+    Write-Host '  Remedy: run it with %SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe or, when the caller is itself' -ForegroundColor Red
+    Write-Host '  32-bit (some SCCM/Intune launchers), with %SystemRoot%\sysnative\WindowsPowerShell\v1.0\powershell.exe.' -ForegroundColor Red
+    exit 1
+}
+
 # ---- Baked in at generation time ---------------------------------------------
 $Company         = @@COMPANY@@
 $LaunchTask      = @@LAUNCHTASK@@

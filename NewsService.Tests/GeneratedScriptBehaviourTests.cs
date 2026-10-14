@@ -357,3 +357,116 @@ public sealed class ExitCodeAndNormalisationTests
         Assert.Contains("exit 1", main);
     }
 }
+
+/// <summary>
+/// The scripts refuse to run in a 32-bit PowerShell host. These tests run them under the real
+/// SysWOW64 powershell.exe (no mocking) and assert the EXIT CODE as well as the message.
+/// </summary>
+public sealed class BitnessGuardTests
+{
+    private static readonly string Company = SolutionConstants.Company;
+
+    private static string? Ps32 =>
+        Environment.GetEnvironmentVariable("SystemRoot") is { } root
+        && Path.Combine(root, "SysWOW64", "WindowsPowerShell", "v1.0", "powershell.exe") is var p && File.Exists(p) ? p : null;
+
+    private static string Generated() => TaskScriptGenerator.Generate(
+        new TaskDefinitionInputs(Company, TaskDefinitionInputsResolver.CanonicalViewerPath(), "Application", "NewsService"),
+        new TaskScriptHeader("1", DateTimeOffset.UnixEpoch, "B"), TaskDefinitionBuilder.LoadTemplateBytes);
+
+    private static string ReferenceScriptText()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "scripts", "Register-NewsViewerTasks.ps1"))) dir = dir.Parent;
+        Assert.NotNull(dir);
+        return File.ReadAllText(Path.Combine(dir!.FullName, "scripts", "Register-NewsViewerTasks.ps1"));
+    }
+
+    // #Requires -RunAsAdministrator would stop a non-elevated run before the guard is reached.
+    private static string WithoutRequires(string script) =>
+        string.Join("\n", script.Replace("\r\n", "\n").Split('\n').Where(l => !l.StartsWith("#Requires")));
+
+    private static (int ExitCode, string Output) RunUnder32Bit(string scriptText, string args)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "nc-bit-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "s.ps1");
+            File.WriteAllText(path, WithoutRequires(scriptText), System.Text.Encoding.UTF8);
+            var psi = new System.Diagnostics.ProcessStartInfo(Ps32!)
+            {
+                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
+            };
+            // Invoked like a caller that reads $LASTEXITCODE, so a script that merely stops would report a stale code.
+            foreach (var a in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "& '" + path + "' " + args + "; exit $LASTEXITCODE" })
+                psi.ArgumentList.Add(a);
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            var output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            return (p.ExitCode, output);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void The32BitHost_IsReallyA32BitHost()
+    {
+        if (Ps32 is null) return;
+        var (code, output) = RunUnder32Bit("Write-Output ('64=' + [Environment]::Is64BitProcess)", "");
+        Assert.Equal(0, code);
+        Assert.Contains("64=False", output);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("-WhatIf")]
+    [InlineData("-Uninstall")]
+    [InlineData("-Uninstall -WhatIf")]
+    public void GeneratedScript_RefusesA32BitHost_InEveryMode_WithANonZeroExit(string args)
+    {
+        if (Ps32 is null) return;
+        var (code, output) = RunUnder32Bit(Generated(), args);
+
+        Assert.NotEqual(0, code);
+        Assert.Contains("must be run from 64-bit PowerShell", output);
+        Assert.Contains("%ProgramFiles%", output);                 // the cause
+        Assert.Contains(@"sysnative\WindowsPowerShell\v1.0\powershell.exe", output);   // the remedy
+        // Refused before anything was read or done: none of the script's own output appeared.
+        Assert.DoesNotContain("Registering NewsViewer", output);
+        Assert.DoesNotContain("Removing NewsViewer", output);
+        Assert.DoesNotContain("Legacy HKLM Run value", output);
+        Assert.DoesNotContain("Verification passed", output);
+    }
+
+    [Theory]
+    [InlineData("-Company Contoso")]
+    [InlineData("-Company Contoso -Uninstall")]
+    public void ReferenceScript_RefusesA32BitHost_WithANonZeroExit(string args)
+    {
+        if (Ps32 is null) return;
+        var (code, output) = RunUnder32Bit(ReferenceScriptText(), args);
+
+        Assert.NotEqual(0, code);
+        Assert.Contains("must be run from 64-bit PowerShell", output);
+        Assert.Contains(@"sysnative\WindowsPowerShell\v1.0\powershell.exe", output);
+        Assert.DoesNotContain("Registering NewsViewer", output);
+        Assert.DoesNotContain("Removing NewsViewer", output);
+    }
+
+    [Fact]
+    public void BothScripts_GuardBeforeAnythingElse_AndReadTheRunValueThroughThe64BitView()
+    {
+        foreach (var script in new[] { Generated(), ReferenceScriptText() })
+        {
+            var text = script.Replace("\r\n", "\n");
+            var guard = text.IndexOf("[Environment]::Is64BitProcess", StringComparison.Ordinal);
+            Assert.True(guard > 0);
+            // The guard precedes every function definition and every side effect.
+            Assert.True(guard < text.IndexOf("function ", StringComparison.Ordinal));
+            Assert.True(guard < text.IndexOf("schtasks.exe", StringComparison.Ordinal));
+            Assert.Contains("[Microsoft.Win32.RegistryView]::Registry64", text);
+            Assert.DoesNotContain("HKLM:", text);   // no provider path, which a 32-bit host would redirect
+        }
+    }
+}
