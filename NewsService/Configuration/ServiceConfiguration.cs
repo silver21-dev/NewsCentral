@@ -27,6 +27,25 @@ public class ViewerTasksSection
     public bool Manage { get; set; } = true;
 
     /// <summary>
+    /// Raw <c>Manage | VerifyOnly | Off</c> (case-insensitive), always read as text and resolved by
+    /// <see cref="NewsService.Services.ViewerTaskModeResolver"/>. Empty (default) = not set: the effective
+    /// mode follows the legacy <see cref="Manage"/> bool (true = Manage, false = Off). An unrecognised
+    /// value is an Error and falls back to Manage. Registry: REG_SZ (an enum, never a DWORD).
+    /// </summary>
+    public string Mode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// False = NewsService never creates the EventLog source. Registry: REG_SZ "true"/"false".
+    /// </summary>
+    public bool RegisterEventSource { get; set; } = true;
+
+    /// <summary>
+    /// Where the self-contained registration script is written when Mode is VerifyOnly or Off.
+    /// Environment variables are expanded. Empty = do not emit.
+    /// </summary>
+    public string ScriptPath { get; set; } = @"%ProgramData%\NewsCentral\deploy\Register-NewsViewerTasks.generated.ps1";
+
+    /// <summary>
     /// Full path of NewsViewer.exe the tasks launch. Empty (default) = <c>..\NewsViewer\NewsViewer.exe</c>
     /// relative to the NewsService install folder (the install layout in docs/packaging.md). A
     /// non-empty value is used as given — for dev boxes pointing at a Debug build.

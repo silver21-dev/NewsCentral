@@ -60,12 +60,26 @@ internal static class TaskDefinitionBuilder
     public static bool IsValidEventName(string? value) =>
         !string.IsNullOrWhiteSpace(value) && ValidEventName.IsMatch(value);
 
+    /// <summary>The exact bytes of the embedded template file (BOM included) - what the script generator embeds.</summary>
+    public static byte[] LoadTemplateBytes(ViewerTaskKind kind)
+    {
+        using var stream = OpenTemplate(kind);
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
+
+    private static Stream OpenTemplate(ViewerTaskKind kind)
+    {
+        var name = TemplateResourceName(kind);
+        return typeof(TaskDefinitionBuilder).Assembly.GetManifestResourceStream(name)
+            ?? throw new InvalidOperationException($"Embedded task definition '{name}' not found.");
+    }
+
     /// <summary>Loads a template from the NewsService assembly's embedded resources.</summary>
     public static string LoadTemplate(ViewerTaskKind kind)
     {
-        var name = TemplateResourceName(kind);
-        using var stream = typeof(TaskDefinitionBuilder).Assembly.GetManifestResourceStream(name)
-            ?? throw new InvalidOperationException($"Embedded task definition '{name}' not found.");
+        using var stream = OpenTemplate(kind);
         // The templates are UTF-16 LE with BOM; XmlDocument honours the BOM / declaration.
         var doc = new XmlDocument { PreserveWhitespace = true };
         doc.Load(stream);

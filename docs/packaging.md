@@ -245,6 +245,35 @@ idempotent; also removes the HKLM Run value). It is the dev/pilot tool and the r
 NewsService does by itself; with NewsService running (`ViewerTasks\Manage` = 1) a package does not need to
 register the tasks at all.
 
+### Externally managed launch surface (`ViewerTasks:Mode` = `VerifyOnly` or `Off`)
+
+A LocalSystem service creating scheduled tasks is a pattern EDR products and ASR rules flag, and some
+sites forbid runtime Task Scheduler changes outright. For those sites set `ViewerTasks\Mode` (**REG_SZ**,
+never a DWORD) to `Off` (NewsService does nothing) or `VerifyOnly` (it verifies and logs drift, but
+changes nothing), and `ViewerTasks\RegisterEventSource` to `"false"` if the event source is also created
+externally. Your packaging or change-control process then registers the tasks.
+
+**Obtaining the script.** It is self-contained (both task XMLs embedded as base64 of the exact file bytes,
+Company, task names, event log/source and exe path baked in) and needs no repo checkout or NewsService
+install:
+
+- at package time, without installing the service:
+  `NewsService.exe --emit-task-script <path> --newsviewer-path "<target>\NewsViewer.exe"` (exit code 0,
+  or the reason on stderr and non-zero). Pass `--newsviewer-path` with the exe path as it will be on the
+  target machine; without it the path is derived from the build layout.
+- at run time: with `Mode` = `VerifyOnly` or `Off`, NewsService writes it to `ViewerTasks\ScriptPath`
+  (default `%ProgramData%\NewsCentral\deploy\Register-NewsViewerTasks.generated.ps1`) at start, only when
+  its content changed. Copy it into your change process rather than running it from that folder.
+
+Run it elevated: `-WhatIf` previews both tasks and the event source, no switch registers them,
+`-Uninstall` removes both tasks. It is idempotent. Do not hand-edit it; regenerate it.
+
+**Ownership.** In these modes the installer owns creation **and** removal of the tasks. The service can
+never remove its own tasks in any mode (it cannot act on its own uninstall), so uninstall-side ownership
+stays with the installer everywhere. In `VerifyOnly`, drift (missing task, wrong command path, wrong
+trigger set) is reported at `Warning` and is not repaired, so a deleted task is visible rather than a silent
+fleet outage.
+
 **Task definition files:** the most robust way to create a task is to import a task-definition XML
 (`schtasks /create /xml ...`). `schtasks` has historically been sensitive to file encoding — UTF-16 LE
 with BOM is the safe choice. `.gitattributes` marks `deploy/scheduled-tasks/*.xml` as binary so Git never

@@ -25,12 +25,23 @@ public sealed class EventLogContentChangedNotifier(
 {
     internal const string Message = "New content accepted and available in local cache.";
 
+    private bool _warnedMissingSource;
+
     public void NotifyContentChanged()
     {
         try
         {
-            var source = configuration["Logging:EventLog:SourceName"];
-            if (string.IsNullOrWhiteSpace(source)) source = "NewsService";
+            var source = EventSourceGuard.SourceName(configuration);
+            // WriteEntry would create a missing source; with registration disabled, that is not ours to do.
+            if (!EventSourceGuard.RegistrationAllowed(configuration) && EventSourceGuard.SourceExists(source) == false)
+            {
+                if (!_warnedMissingSource)
+                {
+                    _warnedMissingSource = true;
+                    logger.LogWarning("{Message}", EventSourceGuard.MissingSourceMessage(source));
+                }
+                return;
+            }
             EventLog.WriteEntry(source, Message, EventLogEntryType.Information, ServiceEventIds.ContentChanged);
         }
         catch (Exception ex)

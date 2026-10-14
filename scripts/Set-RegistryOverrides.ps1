@@ -74,7 +74,10 @@
     │       UploadEnabled          DWORD
     ├── ViewerTasks\
     │       Manage                 DWORD    (0 = NewsService leaves the NewsViewer scheduled tasks and the HKLM Run key alone; default 1)
-    │       NewsViewerPath         REG_SZ   (full path of NewsViewer.exe the tasks launch; empty/absent = ..\NewsViewer\NewsViewer.exe next to the service)
+    │       Mode                   REG_SZ   ("Manage" / "VerifyOnly" / "Off"; an enum, never DWORD; unset = follows Manage)
+    │       RegisterEventSource    REG_SZ   "true" or "false" (false = NewsService never creates the EventLog source)
+    │       ScriptPath             REG_SZ   (where the generated registration script is written for VerifyOnly/Off; empty = none)
+    │       NewsViewerPath         REG_SZ  (full path of NewsViewer.exe the tasks launch; empty/absent = ..\NewsViewer\NewsViewer.exe next to the service)
     ├── Logging\
     │       LogLevel\Default               REG_SZ
     │       EventLog\LogLevel\Default      REG_SZ
@@ -306,6 +309,21 @@
     NewsViewer scheduled tasks on every start and removes the legacy HKLM Run value. $false = completely
     hands-off: NewsService neither registers, repairs nor deletes any task and does not touch the Run
     key (packaging owns the launch surface). Bind as $false (not omitted) to write the value. NewsService only.
+
+.PARAMETER ViewerTasksMode
+    ViewerTasks:Mode (REG_SZ, never a DWORD): Manage (default) = NewsService creates, verifies and repairs the
+    NewsViewer scheduled tasks; VerifyOnly = it verifies and logs drift but changes nothing; Off = it does
+    nothing. VerifyOnly and Off make NewsService write a self-contained registration script (see
+    -ViewerTasksScriptPath) for the external actor. Unset = follows ViewerTasks:Manage. NewsService only.
+
+.PARAMETER RegisterEventSource
+    ViewerTasks:RegisterEventSource (REG_SZ "true"/"false"). $false = NewsService never creates the EventLog
+    source; register it externally or the Content Arrived task never fires. Bind as $false (not omitted)
+    to write the value. NewsService only.
+
+.PARAMETER ViewerTasksScriptPath
+    ViewerTasks:ScriptPath (REG_SZ) - where the generated registration script is written when Mode is VerifyOnly
+    or Off. Environment variables are expanded. Empty = do not emit. NewsService only.
 
 .PARAMETER ViewerTasksNewsViewerPath
     ViewerTasks:NewsViewerPath — full path of the NewsViewer.exe the scheduled tasks launch. Empty or
@@ -541,6 +559,10 @@ param(
 
     # ── ViewerTasks (NewsService only) ────────────────────────────────────────────
     [Nullable[bool]] $ViewerTasksManage,
+    [ValidateSet("Manage","VerifyOnly","Off")]
+    [string] $ViewerTasksMode,
+    [Nullable[bool]] $RegisterEventSource,
+    [string] $ViewerTasksScriptPath,
     [string] $ViewerTasksNewsViewerPath,
 
     # ── Telemetry / Logging (NewsService only) ────────────────────────────────────
@@ -572,7 +594,7 @@ $newParameterNames = @(
     "DefaultLockScreenPath", "PublishedImagePath", "LockScreenEnabled", "WallpaperEnabled",
     "DefaultWallpaperPath", "WallpaperStyle", "WallpaperBackgroundColor",
     "LogicalDayStartHour", "Theme", "TelemetryUploadEnabled", "LogLevel", "EventLogLevel",
-    "ViewerTasksManage", "ViewerTasksNewsViewerPath",
+    "ViewerTasksManage", "ViewerTasksNewsViewerPath", "ViewerTasksMode", "RegisterEventSource", "ViewerTasksScriptPath",
     "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions", "FrameColor", "FrameTextColor"
 )
 
@@ -590,7 +612,7 @@ $componentAllowedParams = @{
         "DefaultLockScreenPath", "DefaultWallpaperPath", "PublishedImagePath",
         "LockScreenEnabled", "WallpaperEnabled",
         "TelemetryUploadEnabled", "LogLevel", "EventLogLevel",
-        "ViewerTasksManage", "ViewerTasksNewsViewerPath",
+        "ViewerTasksManage", "ViewerTasksNewsViewerPath", "ViewerTasksMode", "RegisterEventSource", "ViewerTasksScriptPath",
         "PollIntervalSeconds", "StorageMode", "SharePath"
     )
     NewsViewer = @(
@@ -998,6 +1020,16 @@ if ($PSBoundParameters.ContainsKey("NotifyNewContent")) {
 if ($PSBoundParameters.ContainsKey("ViewerTasksManage")) {
     $dword = if ($ViewerTasksManage) { 1 } else { 0 }
     Set-RegValue -Path "$base\ViewerTasks" -Name "Manage" -Value $dword -Type DWord
+}
+if ($PSBoundParameters.ContainsKey("ViewerTasksMode")) {
+    Set-RegValue -Path "$base\ViewerTasks" -Name "Mode" -Value $ViewerTasksMode -Type String
+}
+if ($PSBoundParameters.ContainsKey("RegisterEventSource")) {
+    $val = if ($RegisterEventSource) { "true" } else { "false" }
+    Set-RegValue -Path "$base\ViewerTasks" -Name "RegisterEventSource" -Value $val -Type String
+}
+if ($PSBoundParameters.ContainsKey("ViewerTasksScriptPath")) {
+    Set-RegValue -Path "$base\ViewerTasks" -Name "ScriptPath" -Value $ViewerTasksScriptPath -Type String
 }
 if ($PSBoundParameters.ContainsKey("ViewerTasksNewsViewerPath")) {
     Set-RegValue -Path "$base\ViewerTasks" -Name "NewsViewerPath" -Value $ViewerTasksNewsViewerPath -Type String

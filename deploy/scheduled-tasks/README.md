@@ -8,7 +8,8 @@ substitutions below, and on every start registers, verifies and repairs both tas
 default on; `false` = hands-off). A task carries `[nc-hash:<sha256>]` at the end of its Description; a
 missing or different hash means "outdated" and the task is re-registered. These files are the only task
 definitions - nothing is generated in code. `scripts/Register-NewsViewerTasks.ps1` is the dev/pilot
-equivalent for a machine without NewsService management. Behavior of the launches themselves (decision
+equivalent for a machine without NewsService management; `NewsService.exe --emit-task-script` produces a
+self-contained equivalent (these XMLs embedded as base64) for sites that run with `ViewerTasks:Mode` = `VerifyOnly` or `Off`. Behavior of the launches themselves (decision
 rules, notification) is in `docs/newsviewer-spec.md`; installer requirements are in `docs/packaging.md`
 ("NewsViewer launch surface").
 

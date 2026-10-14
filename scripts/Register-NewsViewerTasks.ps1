@@ -12,6 +12,7 @@
 #  ViewerTasks\Manage = 1, NewsService takes the tasks over on its next start
 #  (they carry no nc-hash stamp, so they are re-registered once). The script
 #  writes no configuration.
+#  NewsService.exe --emit-task-script produces a self-contained equivalent for external use.
 #
 #  AUTHORITATIVE REFERENCES:
 #    deploy/scheduled-tasks/README.md   what each task does and why

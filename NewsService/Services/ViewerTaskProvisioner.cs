@@ -19,7 +19,8 @@ internal sealed class ViewerTaskProvisioner(
     ILogger<ViewerTaskProvisioner> logger,
     string? baseDirectory = null,
     Func<ViewerTaskKind, string>? loadTemplate = null,
-    Func<string, bool>? fileExists = null)
+    Func<string, bool>? fileExists = null,
+    Func<ViewerTaskKind, byte[]>? loadTemplateBytes = null)
 {
     internal const string RunValueName = "NewsViewer";
     private const string ViewerExeName = "NewsViewer.exe";
@@ -27,15 +28,20 @@ internal sealed class ViewerTaskProvisioner(
     private readonly string _baseDirectory = baseDirectory ?? AppContext.BaseDirectory;
     private readonly Func<ViewerTaskKind, string> _loadTemplate = loadTemplate ?? TaskDefinitionBuilder.LoadTemplate;
     private readonly Func<string, bool> _fileExists = fileExists ?? File.Exists;
+    private readonly Func<ViewerTaskKind, byte[]> _loadTemplateBytes = loadTemplateBytes ?? TaskDefinitionBuilder.LoadTemplateBytes;
+
+    /// <summary>The effective mode; a non-null error is for the caller to log once.</summary>
+    public ViewerTaskModeResult ResolveMode() =>
+        ViewerTaskModeResolver.Resolve(config.ViewerTasks.Mode, config.ViewerTasks.Manage);
 
     /// <summary>Runs one pass. True = nothing further to do (success, or hands-off); false = retry later.</summary>
     public async Task<bool> RunPassAsync(CancellationToken ct)
     {
         try
         {
-            if (!config.ViewerTasks.Manage)
+            if (ResolveMode().Mode != ViewerTaskMode.Manage)
             {
-                logger.LogDebug("ViewerTasks:Manage is off — the NewsViewer launch surface is left to packaging");
+                logger.LogDebug("ViewerTasks management is not in Manage mode — the NewsViewer launch surface is left to packaging");
                 return true;
             }
 
@@ -48,11 +54,7 @@ internal sealed class ViewerTaskProvisioner(
                 return false;
             }
 
-            var inputs = new TaskDefinitionInputs(
-                SolutionConstants.Company,
-                exe,
-                Setting("Logging:EventLog:LogName", "Application"),
-                Setting("Logging:EventLog:SourceName", "NewsService"));
+            var inputs = TaskDefinitionInputsResolver.Resolve(config, configuration, _baseDirectory);
 
             var inPlace = true;
             foreach (var kind in new[] { ViewerTaskKind.Launch, ViewerTaskKind.ContentArrived })
@@ -76,18 +78,78 @@ internal sealed class ViewerTaskProvisioner(
         }
     }
 
-    private string ResolveExePath()
+    private string ResolveExePath() => TaskDefinitionInputsResolver.ResolveExePath(config, _baseDirectory);
+
+    /// <summary>
+    /// Writes the generated registration script to <c>ViewerTasks:ScriptPath</c> (no-op when empty).
+    /// Never throws: emission must not block start or fail a cycle. Returns the path when a file exists
+    /// afterwards, null when nothing was emitted.
+    /// </summary>
+    public string? TryEmitScript()
     {
-        var configured = config.ViewerTasks.NewsViewerPath;
-        return string.IsNullOrWhiteSpace(configured)
-            ? Path.GetFullPath(Path.Combine(_baseDirectory, "..", "NewsViewer", ViewerExeName))
-            : configured;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(config.ViewerTasks.ScriptPath)) return null;
+            var path = TaskScriptEmitter.ExpandPath(config.ViewerTasks.ScriptPath);
+            var inputs = TaskDefinitionInputsResolver.Resolve(config, configuration, _baseDirectory);
+            var script = TaskScriptGenerator.Generate(inputs, TaskScriptEmitter.NewHeader(), _loadTemplateBytes);
+            var outcome = TaskScriptEmitter.Emit(path, script);
+            logger.LogInformation(
+                outcome == EmitOutcome.Written
+                    ? "NewsViewer task registration script written to '{Path}'"
+                    : "NewsViewer task registration script at '{Path}' is up to date", path);
+            return path;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not write the NewsViewer task registration script to '{Path}'; continuing", config.ViewerTasks.ScriptPath);
+            return null;
+        }
     }
 
-    private string Setting(string key, string fallback)
+    /// <summary>
+    /// Verify-only pass: describes how the launch surface differs from what NewsService would register,
+    /// and changes nothing. Empty = in place. Null = could not verify (already logged).
+    /// </summary>
+    public async Task<IReadOnlyList<string>?> VerifyAsync(CancellationToken ct)
     {
-        var value = configuration[key];
-        return string.IsNullOrWhiteSpace(value) ? fallback : value;
+        try
+        {
+            var inputs = TaskDefinitionInputsResolver.Resolve(config, configuration, _baseDirectory);
+            var drift = new List<string>();
+            if (!_fileExists(inputs.ExePath))
+                drift.Add($"NewsViewer executable not found at '{inputs.ExePath}' (ViewerTasks:NewsViewerPath)");
+
+            foreach (var kind in new[] { ViewerTaskKind.Launch, ViewerTaskKind.ContentArrived })
+            {
+                BuiltTaskDefinition expected;
+                try { expected = TaskDefinitionBuilder.Build(kind, _loadTemplate(kind), inputs); }
+                catch (ArgumentException ex)
+                {
+                    drift.Add($"cannot build the expected '{TaskDefinitionBuilder.TaskName(kind, inputs.Company)}' task: {ex.Message}");
+                    continue;
+                }
+
+                var query = await scheduler.QueryAsync(expected.TaskName, ct);
+                if (!query.Exists) { drift.Add($"task '{expected.TaskName}' is missing"); continue; }
+
+                // A hash match is proof; tasks registered by the generated script carry no stamp, so
+                // fall back to comparing what actually matters: command, working directory, triggers.
+                if (string.Equals(TaskDefinitionBuilder.ExtractHash(query.Xml), expected.Hash, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                drift.AddRange(TaskDriftComparer.Compare(expected.TaskName, expected.Xml, query.Xml));
+            }
+            return drift;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "NewsViewer task verification failed unexpectedly");
+            return null;
+        }
     }
 
     private async Task<bool> EnsureTaskAsync(ViewerTaskKind kind, TaskDefinitionInputs inputs, CancellationToken ct)

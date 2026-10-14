@@ -4,6 +4,11 @@ using NewsService;
 using NewsService.Configuration;
 using NewsService.Services;
 
+// --emit-task-script is handled before any host exists, so it works on a machine where the service
+// is not installed (a packaging pipeline) and needs nothing but appsettings.json.
+if (EmitTaskScriptCommand.IsRequested(args))
+    return EmitTaskScriptCommand.Run(args, Console.Out, Console.Error);
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddWindowsService(options => options.ServiceName = "NewsService");
@@ -22,6 +27,19 @@ builder.Configuration.AddRegistryOverrides(SolutionConstants.Company, SolutionCo
 // Bind typed POCOs from the merged (appsettings + registry) configuration.
 var config = builder.Configuration.Get<ServiceConfiguration>() ?? new ServiceConfiguration();
 builder.Services.AddSingleton(config);
+
+// ViewerTasks:RegisterEventSource=false: the host's EventLog logger provider would create a missing
+// source on its first write, so it is not added while the source is absent. Unknown = leave it alone.
+var eventSourceMissingAndNotOurs = !EventSourceGuard.RegistrationAllowed(builder.Configuration)
+    && EventSourceGuard.SourceExists(EventSourceGuard.SourceName(builder.Configuration)) == false;
+if (eventSourceMissingAndNotOurs)
+{
+    var providers = builder.Services
+        .Where(d => d.ServiceType == typeof(ILoggerProvider)
+                    && d.ImplementationType == typeof(Microsoft.Extensions.Logging.EventLog.EventLogLoggerProvider))
+        .ToList();
+    foreach (var d in providers) builder.Services.Remove(d);
+}
 
 // ── Repository reader — mode resolved from merged configuration ───────────────
 if (config.Repository.StorageMode.Equals("Azure", StringComparison.OrdinalIgnoreCase))
@@ -93,7 +111,12 @@ ImagePublisher.CheckPublishFolderAcl(
 // just means the warning doesn't fire, which is the safe direction to err in.
 WarnIfSessionHostSurfaceUnmanaged(config, host.Services.GetRequiredService<ILogger<Program>>());
 
+if (eventSourceMissingAndNotOurs)
+    host.Services.GetRequiredService<ILogger<Program>>().LogWarning(
+        "{Message}", EventSourceGuard.MissingSourceMessage(EventSourceGuard.SourceName(builder.Configuration)));
+
 host.Run();
+return 0;
 
 /// <summary>
 /// Warns once at startup when this machine looks like a Windows Server with Remote Desktop
