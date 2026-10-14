@@ -117,12 +117,6 @@ internal static class TaskScriptGenerator
 #  modifies Task Scheduler, so the installer owns their creation and removal).
 #  It writes no configuration and contains no secret.
 #
-#  DIFFERENCE FROM THE REFERENCE: scripts/Register-NewsViewerTasks.ps1 prints
-#  the same Verification readout but exits 0 even when a task is MISSING. This
-#  script runs unattended inside an installer, so it EXITS 1 when verification
-#  fails (a task is missing or does not match what was just registered, or the
-#  event source is missing). Verification is skipped under -WhatIf.
-#
 #  Reference implementation: scripts/Register-NewsViewerTasks.ps1
 #  Details: docs/packaging.md (launch surface)
 # ============================================================================
@@ -187,6 +181,16 @@ function Invoke-Schtasks {
 function Test-TaskExists {
     param([string]$Name)
     return ((Invoke-Schtasks @('/Query', '/TN', $Name)) -eq 0)
+}
+
+# Canonical form of a path for hashing and comparing (same steps as NewsService's TaskPathNormalizer):
+# trim, strip surrounding quotes, expand environment variables, '/' to '\', drop a trailing '\', lower-case.
+function Get-NormalizedPath {
+    param([string]$Path)
+    $p = $Path.Trim().Trim('"').Trim()
+    $p = [System.Environment]::ExpandEnvironmentVariables($p)
+    $p = $p.Replace('/', '\').TrimEnd('\')
+    return $p.ToLowerInvariant()
 }
 
 function Test-EventSourceExists { param([string]$Name) return [System.Diagnostics.EventLog]::SourceExists($Name) }
@@ -305,8 +309,13 @@ function Register-Task {
         # Stamp: SHA-256 of the final definition (without the stamp), appended to the Description as
         # " [nc-hash:<hex>]". NewsService (ViewerTasks:Mode = VerifyOnly) compares it to detect drift in
         # settings a field comparison cannot see (principal, time limit, ...). It builds the same text:
-        # an unindented XmlWriter over a StringWriter, hashed as UTF-8. Computed over the path exactly as
-        # written (a %ProgramFiles% token stays a token).
+        # an unindented XmlWriter over a StringWriter, hashed as UTF-8. Command and WorkingDirectory enter
+        # the hash in their NORMALISED form (Get-NormalizedPath), so a %ProgramFiles% token and the literal
+        # path it expands to hash equally; the registered XML keeps the text as written.
+        $writtenCommand = $command.InnerText
+        $writtenWorkDir = $workDir.InnerText
+        $command.InnerText = Get-NormalizedPath $writtenCommand
+        $workDir.InnerText = Get-NormalizedPath $writtenWorkDir
         $sw = New-Object System.IO.StringWriter
         $stampSettings = New-Object System.Xml.XmlWriterSettings
         $stampSettings.Indent = $false
@@ -315,6 +324,8 @@ function Register-Task {
         $sha = [System.Security.Cryptography.SHA256]::Create()
         try { $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($sw.ToString())) } finally { $sha.Dispose() }
         $hash = (($hashBytes | ForEach-Object { $_.ToString('x2') }) -join '')
+        $command.InnerText = $writtenCommand
+        $workDir.InnerText = $writtenWorkDir
         $description = $doc.SelectSingleNode('//t:RegistrationInfo/t:Description', $ns)
         if (-not $description) { throw "The embedded definition for '$TaskName' has no description." }
         $description.InnerText = $description.InnerText + ' [nc-hash:' + $hash + ']'
@@ -364,7 +375,7 @@ function Compare-RegisteredTask {
     $doc.LoadXml([string]$xmlText)
     $ns = New-Object System.Xml.XmlNamespaceManager($doc.NameTable)
     $ns.AddNamespace('t', 'http://schemas.microsoft.com/windows/2004/02/mit/task')
-    $expand = { param($s) [System.Environment]::ExpandEnvironmentVariables(([string]$s).Trim().Trim('"')) }
+    $expand = { param($s) Get-NormalizedPath $s }
     $text = { param($xpath) $n = $doc.SelectSingleNode($xpath, $ns); if ($n) { $n.InnerText.Trim() } else { '' } }
 
     $problems = @()
@@ -433,6 +444,7 @@ function Test-LaunchSurface {
 }
 
 # ---- Main --------------------------------------------------------------------
+try {
 # ---- Uninstall ---------------------------------------------------------------
 if ($Uninstall) {
     Write-Step 'Removing NewsViewer scheduled tasks'
@@ -441,7 +453,7 @@ if ($Uninstall) {
     }
     # A machine upgraded from an older package may still carry the Run value.
     Remove-LegacyRunValue
-    return
+    exit 0
 }
 
 # ---- Tasks -------------------------------------------------------------------
@@ -493,5 +505,13 @@ else {
     Write-Host 'Verification passed: both tasks are registered as intended.' -ForegroundColor Green
 }
 Write-Host ''
+# Explicit success code: never fall off the end, where the exit code would be whatever a native probe
+# (the schtasks query for a legacy task that rightly does not exist) left in $LASTEXITCODE.
+exit 0
+}
+catch {
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
 """;
 }

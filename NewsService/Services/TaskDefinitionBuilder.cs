@@ -118,7 +118,18 @@ internal static class TaskDefinitionBuilder
         }
 
         // The hash covers the final XML with the stamp absent; the stamp is then appended to the Description.
+        // Command and WorkingDirectory enter the hash in their normalised form (TaskPathNormalizer), so a
+        // %ProgramFiles% token and the literal path it expands to hash equally. The registered XML keeps the
+        // text as written. The generated script does exactly the same.
+        var commandNode = Node(doc, ns, "//t:Exec/t:Command");
+        var workDirNode = Node(doc, ns, "//t:Exec/t:WorkingDirectory");
+        var writtenCommand = commandNode.InnerText;
+        var writtenWorkDir = workDirNode.InnerText;
+        commandNode.InnerText = TaskPathNormalizer.Normalize(writtenCommand);
+        workDirNode.InnerText = TaskPathNormalizer.Normalize(writtenWorkDir);
         var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Serialize(doc))));
+        commandNode.InnerText = writtenCommand;
+        workDirNode.InnerText = writtenWorkDir;
         var description = Node(doc, ns, "//t:RegistrationInfo/t:Description");
         description.InnerText = description.InnerText + " " + HashMarkerPrefix + hash + "]";
 

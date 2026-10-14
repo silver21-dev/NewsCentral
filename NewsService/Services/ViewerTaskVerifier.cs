@@ -12,15 +12,16 @@ internal sealed class ViewerTaskVerifier(
     IConfiguration configuration,
     ITaskQueryClient scheduler,
     ILogger<ViewerTaskVerifier> logger,
-    string? baseDirectory = null,
     Func<ViewerTaskKind, string>? loadTemplate = null,
     Func<string, bool>? fileExists = null)
 {
     internal const string ObsoleteManageKey = "ViewerTasks:Manage";
 
-    private readonly string _baseDirectory = baseDirectory ?? AppContext.BaseDirectory;
     private readonly Func<ViewerTaskKind, string> _loadTemplate = loadTemplate ?? TaskDefinitionBuilder.LoadTemplate;
     private readonly Func<string, bool> _fileExists = fileExists ?? File.Exists;
+
+    /// <summary>What this verifier expects: the shared resolver's answer, and where the NewsViewer path came from.</summary>
+    internal ResolvedTaskInputs ResolveInputs() => TaskDefinitionInputsResolver.Resolve(config, configuration);
 
     /// <summary>The effective mode; a non-null error is for the caller to log once.</summary>
     public ViewerTaskModeResult ResolveMode() => ViewerTaskModeResolver.Resolve(config.ViewerTasks.Mode);
@@ -46,11 +47,17 @@ internal sealed class ViewerTaskVerifier(
     {
         try
         {
-            var inputs = TaskDefinitionInputsResolver.Resolve(config, configuration, _baseDirectory);
+            var resolved = ResolveInputs();
+            var inputs = resolved.Inputs;
             var drift = new List<string>();
             var paths = new List<string>();
-            if (!_fileExists(TaskDefinitionInputsResolver.Expand(inputs.ExePath)))
-                drift.Add($"NewsViewer executable not found at '{inputs.ExePath}' (ViewerTasks:NewsViewerPath)");
+
+            // A missing NewsViewer payload is not drift of the launch surface (the tasks can be registered
+            // correctly before the payload lands): it is its own notice, outside the drift verdict.
+            string? exeNotice = null;
+            var expandedExe = TaskDefinitionInputsResolver.Expand(inputs.ExePath);
+            if (!_fileExists(expandedExe))
+                exeNotice = $"NewsViewer executable not found at '{expandedExe}' (source: {resolved.ExePathSource})";
 
             foreach (var kind in new[] { ViewerTaskKind.Launch, ViewerTaskKind.ContentArrived })
             {
@@ -88,7 +95,7 @@ internal sealed class ViewerTaskVerifier(
                 drift.AddRange(TaskDriftComparer.Compare(expected.TaskName, expected.Xml, query.Xml));
                 paths.Add($"{label}: nc-hash mismatch");
             }
-            return new VerifyReport(drift, paths);
+            return new VerifyReport(drift, paths, exeNotice);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -103,7 +110,7 @@ internal sealed class ViewerTaskVerifier(
 }
 
 /// <summary>Drift found, plus per task the path the verdict was reached on (nc-hash stamp or field comparison).</summary>
-internal sealed record VerifyReport(IReadOnlyList<string> Drift, IReadOnlyList<string> Paths);
+internal sealed record VerifyReport(IReadOnlyList<string> Drift, IReadOnlyList<string> Paths, string? ExecutableNotice = null);
 
 /// <summary>
 /// Turns verification reports into log lines: log on change, stay quiet otherwise. The state compared
@@ -113,9 +120,26 @@ internal sealed record VerifyReport(IReadOnlyList<string> Drift, IReadOnlyList<s
 internal sealed class VerifyReporter(ILogger logger)
 {
     private string? _reported;
+    private string? _reportedNotice;
+    private bool _noticeEverReported;
 
     public void Report(VerifyReport report)
     {
+        // The NewsViewer-not-found notice is gated on its own state and is not part of the drift state.
+        if (report.ExecutableNotice != _reportedNotice && (report.ExecutableNotice is not null || _noticeEverReported))
+        {
+            if (report.ExecutableNotice is not null)
+            {
+                logger.LogWarning("{Notice}. This is not launch-surface drift; the tasks cannot start NewsViewer until it is installed", report.ExecutableNotice);
+                _noticeEverReported = true;
+            }
+            else
+            {
+                logger.LogInformation("NewsViewer executable is now present");
+            }
+            _reportedNotice = report.ExecutableNotice;
+        }
+
         var state = string.Join("\n", report.Drift) + "\n--\n" + string.Join("\n", report.Paths);
         if (state == _reported) return;
         _reported = state;

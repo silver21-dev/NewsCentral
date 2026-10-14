@@ -53,7 +53,10 @@ public sealed class GeneratedScriptBehaviourTests
             {
                 RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
             };
-            foreach (var a in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path }.Concat(args)) psi.ArgumentList.Add(a);
+            // Invoked the way a caller that is not "-File" sees it: the exit code is whatever $LASTEXITCODE holds when
+            // the script returns, so a script that falls off the end after a failing native probe reports 1.
+            var command = "& '" + path + "' " + string.Join(' ', args) + "; exit $LASTEXITCODE";
+            foreach (var a in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command }) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi)!;
             var output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
             p.WaitForExit();
@@ -64,7 +67,9 @@ public sealed class GeneratedScriptBehaviourTests
 
     private const string CommonMocks = """
 function Invoke-Schtasks { param([string[]]$Arguments) $script:SchtasksOutput = 'SUCCESS'; return 0 }
-function Test-TaskExists { param($Name) return $false }
+# Faithful to the real probe: a native command that exits 1 leaves $LASTEXITCODE = 1, which is exactly what
+# the script used to leak as its exit code when it fell off the end.
+function Test-TaskExists { param($Name) & cmd.exe /c exit 1; return $false }
 function Remove-LegacyRunValue { Write-Host 'mock: run value step' }
 function Test-EventSourceExists { param($Name) return $true }
 function Get-EventSourceLogName { param($Name) return $EventLogName }
@@ -176,7 +181,7 @@ function Export-ScheduledTask {
         Assert.DoesNotContain("-WhatIf", realUninstall);
 
         // -WhatIf with the tasks present: a distinct "would remove" line, in both paths.
-        var present = Mocks().Replace("function Test-TaskExists { param($Name) return $false }", "function Test-TaskExists { param($Name) return $true }");
+        var present = Mocks().Replace("& cmd.exe /c exit 1; return $false", "& cmd.exe /c exit 1; return $true");
         var (_, whatIf) = Run(WithMocks(script, present), "-WhatIf");
         Assert.Contains("would remove legacy ", whatIf);
         Assert.Contains("(-WhatIf: nothing was changed)", whatIf);
@@ -233,5 +238,122 @@ public sealed class EmittedPathTests
             Assert.DoesNotContain("'%ProgramFiles%", script);
         }
         finally { Directory.Delete(dir, recursive: true); }
+    }
+}
+
+public sealed class ExitCodeAndNormalisationTests
+{
+    private static readonly string Company = SolutionConstants.Company;
+
+    private static string? PowerShell =>
+        Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe") is var p && File.Exists(p) ? p : null;
+
+    private static BuiltTaskDefinition Build(ViewerTaskKind kind, string exe) =>
+        TaskDefinitionBuilder.Build(kind, TaskDefinitionBuilder.LoadTemplate(kind),
+            new TaskDefinitionInputs(Company, exe, "Application", "NewsService"));
+
+    [Fact]
+    public void TokenAndExpandedForms_HashEqual_AndDifferentPathsDoNot()
+    {
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var tail = Company + @"\NewsCentral\NewsViewer\NewsViewer.exe";
+        string[] same =
+        [
+            @"%ProgramFiles%\" + tail,
+            programFiles + @"\" + tail,
+            programFiles.ToUpperInvariant() + @"\" + tail.ToLowerInvariant(),
+            programFiles.Replace('\\', '/') + "/" + tail.Replace('\\', '/'),
+            "%ProgramFiles%/" + tail.Replace('\\', '/'),
+        ];
+        foreach (var kind in new[] { ViewerTaskKind.Launch, ViewerTaskKind.ContentArrived })
+        {
+            var hashes = same.Select(p => Build(kind, p).Hash).Distinct().ToList();
+            Assert.Single(hashes);
+            Assert.NotEqual(hashes[0], Build(kind, @"%ProgramFiles%\Other\NewsViewer.exe").Hash);
+        }
+    }
+
+    [Fact]
+    public void TheRegisteredXml_KeepsThePathAsWritten_EvenThoughTheHashIsNormalised()
+    {
+        var built = Build(ViewerTaskKind.Launch, @"%ProgramFiles%\" + Company + @"\NewsCentral\NewsViewer\NewsViewer.exe");
+        Assert.Contains("%ProgramFiles%", built.Xml);
+        Assert.DoesNotContain(@"%programfiles%\" + Company.ToLowerInvariant(), built.Xml);
+    }
+
+    [Theory]
+    [InlineData("\"C:\\Program Files\\X\\NewsViewer.exe\"")]
+    [InlineData("  c:/Program Files/X/NewsViewer.exe/ ")]
+    [InlineData("%ProgramFiles%\\X\\NewsViewer.exe")]
+    [InlineData("C:\\Program Files\\X\\NEWSVIEWER.EXE\\")]
+    public void NormaliseIsEqualInCSharpAndInThePowerShellScript(string input)
+    {
+        var ps = PowerShell;
+        if (ps is null) return;
+        var script = TaskScriptGenerator.Generate(
+            new TaskDefinitionInputs(Company, TaskDefinitionInputsResolver.CanonicalViewerPath(), "Application", "NewsService"),
+            new TaskScriptHeader("1", DateTimeOffset.UnixEpoch, "B"), TaskDefinitionBuilder.LoadTemplateBytes);
+        var functions = script[..script.IndexOf("# ---- Main ----", StringComparison.Ordinal)]
+            .Replace("#Requires -RunAsAdministrator", "");
+        var dir = Path.Combine(Path.GetTempPath(), "nc-norm-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var file = Path.Combine(dir, "n.ps1");
+            File.WriteAllText(file, functions + "\r\nWrite-Output ('<<' + (Get-NormalizedPath $env:NC_INPUT) + '>>')\r\n", System.Text.Encoding.ASCII);
+            var psi = new System.Diagnostics.ProcessStartInfo(ps)
+            {
+                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
+            };
+            psi.Environment["NC_INPUT"] = input;
+            foreach (var a in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", file }) psi.ArgumentList.Add(a);
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            var output = p.StandardOutput.ReadToEnd();
+            p.WaitForExit();
+
+            Assert.Contains("<<" + TaskPathNormalizer.Normalize(input) + ">>", output);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void TaskDescriptions_NameTheRightComponent()
+    {
+        foreach (var kind in new[] { ViewerTaskKind.Launch, ViewerTaskKind.ContentArrived })
+        {
+            var xml = TaskDefinitionBuilder.LoadTemplate(kind);
+            Assert.DoesNotContain("maintained by NewsService", xml);
+            Assert.DoesNotContain("repaired by NewsService", xml);
+            Assert.Contains("Registered by the installer or the registration script, and verified by NewsService.", xml);
+        }
+    }
+
+    [Fact]
+    public void ReferenceScript_HasExplicitExitCodes_AndTheGeneratedBannerNoLongerNotesADivergence()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "scripts", "Register-NewsViewerTasks.ps1"))) dir = dir.Parent;
+        Assert.NotNull(dir);
+        var text = File.ReadAllText(Path.Combine(dir!.FullName, "scripts", "Register-NewsViewerTasks.ps1"));
+        Assert.Contains("exit 1", text);
+        Assert.Contains("exit 0", text);
+        Assert.Contains("VERIFICATION FAILED", text);
+
+        var generated = TaskScriptGenerator.Generate(
+            new TaskDefinitionInputs(Company, TaskDefinitionInputsResolver.CanonicalViewerPath(), "Application", "NewsService"),
+            new TaskScriptHeader("1", DateTimeOffset.UnixEpoch, "B"), TaskDefinitionBuilder.LoadTemplateBytes);
+        Assert.DoesNotContain("DIFFERENCE FROM THE REFERENCE", generated);
+    }
+
+    [Fact]
+    public void GeneratedScript_ExitsExplicitly_OnEveryTerminalPath()
+    {
+        var generated = TaskScriptGenerator.Generate(
+            new TaskDefinitionInputs(Company, TaskDefinitionInputsResolver.CanonicalViewerPath(), "Application", "NewsService"),
+            new TaskScriptHeader("1", DateTimeOffset.UnixEpoch, "B"), TaskDefinitionBuilder.LoadTemplateBytes);
+        var main = generated[generated.IndexOf("# ---- Main ----", StringComparison.Ordinal)..];
+        Assert.DoesNotContain("\r\n    return\r\n", main);   // the uninstall path exits 0 rather than falling out
+        Assert.Contains("exit 0", main);
+        Assert.Contains("exit 1", main);
     }
 }

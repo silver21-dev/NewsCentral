@@ -173,9 +173,9 @@ the registration script over the whole final definition) passes, a different sta
 without a stamp (hand-made or legacy) is compared on command, working directory, event subscription and
 trigger set. Drift - a missing task, a moved install, a changed trigger or principal - is logged at
 `Warning` once per change; nothing is repaired, so the installer (or the script it ships) must be re-run.
-`ViewerTasks\NewsViewerPath` overrides the exe path NewsService expects (default
-`..\NewsViewer\NewsViewer.exe` relative to the NewsService install folder - matches the install layout
-above). The former `ViewerTasks\Manage` value is gone; if it is still in the registry it is ignored and a
+`ViewerTasks\NewsViewerPath` overrides the exe path NewsService expects (default: the deployed layout
+`%ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe`, the same default the generated script registers - there is one resolver for both, and no path relative to
+the service). The former `ViewerTasks\Manage` value is gone; if it is still in the registry it is ignored and a
 `Warning` names `ViewerTasks\Mode` as its replacement. See `docs/configuration.md`,
 `docs/newsservice-spec.md`.
 
@@ -268,20 +268,23 @@ NewsService.exe --emit-task-script <package-staging>\Register-NewsViewerTasks.ge
   compares the registered definition with what it just wrote: command, working directory, trigger set, event
   subscription and `nc-hash` stamp. A missing task, any mismatch or a missing event source makes the script
   **exit 1** with `VERIFICATION FAILED`, so an installer custom action sees a failure instead of installing
-  onto a machine that will never show anything. This is a deliberate difference from the reference script,
-  which prints the readout but exits 0; the generated script's banner says so. The readout lands in the
-  installer log as evidence the launch surface was established.
+  onto a machine that will never show anything. `scripts/Register-NewsViewerTasks.ps1` behaves the same way.
+  Both scripts set an explicit exit code on every terminal path (0 on success, on `-WhatIf` and on `-Uninstall`; 1 on a
+  failed verification or any error) and never depend on a `$LASTEXITCODE` left behind by a probe such as the
+  schtasks query for a legacy task that rightly does not exist. The readout lands in the installer log as
+  evidence the launch surface was established.
 - **The canonical path ships as an unexpanded token.** With no `--newsviewer-path` the script registers
   `%ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe` (and the same token in the working
   directory) so the target machine, not the build machine, expands it. Task Scheduler expands environment
   variables in `Command` and `WorkingDirectory` and keeps the token in the stored XML
   (`deploy/scheduled-tasks/README.md`). A path given with `--newsviewer-path` is written literally. The `nc-hash`
-  stamp covers the string as written, and NewsService computes its expected stamp the same way (the default
-  sibling path under Program Files is tokenised; a configured `ViewerTasks\NewsViewerPath` is literal), so tasks
-  registered by an earlier generated script, which carried the expanded path, show as drifted until the
-  installer re-registers them during the upgrade. That is expected and corrects itself. Field comparison
-  expands environment variables on both sides, so a tokenised stored command still matches an expanded
-  expected path for tasks without a stamp.
+  stamp and the field comparison both use a normalised form of Command and WorkingDirectory: trim, strip
+  surrounding quotes, expand environment variables, `/` to `\`, drop a trailing `\`, lower-case. A
+  `%ProgramFiles%` token and the literal path it expands to therefore hash equally and compare equal, on both
+  sides (the generated script's `Get-NormalizedPath` and NewsService's `TaskPathNormalizer` are the same steps);
+  the registered XML keeps the path as written. This changes the hash of every previously registered task
+  (earlier stamps covered the raw text, and the task descriptions changed too), so already-registered tasks show
+  as drifted once until the installer re-registers them during the upgrade. That is expected and corrects itself.
 - Its header records the generating NewsService version, the generation timestamp and the build machine.
 
 `scripts/Register-NewsViewerTasks.ps1` remains the dev-box and pilot path (no build step needed): it

@@ -75,7 +75,7 @@
     ├── ViewerTasks\
     │       Mode                   REG_SZ   ("VerifyOnly" or "Off"; an enum, never DWORD; default VerifyOnly)
     │       RegisterEventSource    REG_SZ   "true" or "false" (false = NewsService never creates the EventLog source)
-    │       NewsViewerPath         REG_SZ  (full path of NewsViewer.exe the tasks launch; empty/absent = ..\NewsViewer\NewsViewer.exe next to the service)
+    │       NewsViewerPath         REG_SZ  (full path of NewsViewer.exe the tasks launch; empty/absent = %ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe)
     ├── Logging\
     │       LogLevel\Default               REG_SZ
     │       EventLog\LogLevel\Default      REG_SZ
@@ -316,8 +316,8 @@
 
 .PARAMETER ViewerTasksNewsViewerPath
     ViewerTasks:NewsViewerPath — full path of the NewsViewer.exe the scheduled tasks launch. Empty or
-    absent = ..\NewsViewer\NewsViewer.exe relative to the NewsService install folder (the install
-    layout in docs/packaging.md). Set it on a dev box to point at a Debug build. The Configuration Review
+    absent = the deployed layout %ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe
+    (docs/packaging.md). Set it on a dev box to point at a Debug build. The Configuration Review
     page also uses it to find NewsViewer's install folder. NewsService only.
 
 .PARAMETER LogLevel

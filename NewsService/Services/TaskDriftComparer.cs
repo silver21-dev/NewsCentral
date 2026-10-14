@@ -42,18 +42,21 @@ internal static class TaskDriftComparer
     private static void Check(List<string> drift, string taskName, string what,
         XmlDocument expected, XmlDocument actual, string xpath, bool unquote, bool expand)
     {
-        var want = Text(expected, xpath, unquote, expand);
-        var have = Text(actual, xpath, unquote, expand);
-        if (!string.Equals(want, have, StringComparison.OrdinalIgnoreCase))
+        var want = Text(expected, xpath, unquote);
+        var have = Text(actual, xpath, unquote);
+        // Paths compare in their normalised form (a token and the literal it expands to are the same file);
+        // the message shows the values as registered.
+        var same = expand && want is not null && have is not null
+            ? string.Equals(TaskPathNormalizer.Normalize(want), TaskPathNormalizer.Normalize(have), StringComparison.Ordinal)
+            : string.Equals(want, have, StringComparison.OrdinalIgnoreCase);
+        if (!same)
             drift.Add($"task '{taskName}': wrong {what} - expected '{want ?? "(none)"}', found '{have ?? "(none)"}'");
     }
 
-    private static string? Text(XmlDocument doc, string xpath, bool unquote, bool expand)
+    private static string? Text(XmlDocument doc, string xpath, bool unquote)
     {
         var text = doc.SelectSingleNode(xpath, Ns(doc))?.InnerText.Trim();
-        if (unquote) text = text?.Trim((char)34);
-        // A stored command may carry %ProgramFiles% while the expected one is expanded (or the reverse).
-        return expand && text is not null ? Environment.ExpandEnvironmentVariables(text) : text;
+        return unquote ? text?.Trim((char)34) : text;
     }
 
     // One entry per trigger: the element name, plus the state-change kind for session triggers.

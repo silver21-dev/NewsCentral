@@ -92,7 +92,7 @@ public static class ConfigManifests
                 "true | false (registry: REG_SZ \"true\"/\"false\"); true = NewsService creates the EventLog source explicitly at startup when it is missing; false = it never creates the source and never writes to a missing one (register it externally or the Content Arrived task never fires)"),
             Key("ViewerTasks:NewsViewerPath", "", @"ViewerTasks\NewsViewerPath", RegistryValueType.RegSz,
                 ControlKind.Path, OverridableState.Overridable,
-                "full path of NewsViewer.exe the tasks launch (registry: REG_SZ); empty = ..\\NewsViewer\\NewsViewer.exe next to the NewsService install folder; set it on a dev box to point at a Debug build; warning: an empty REG_SZ is a PRESENT value that overrides the appsettings path with empty"),
+                "full path of NewsViewer.exe the tasks launch (registry: REG_SZ); empty = the deployed layout %ProgramFiles%\\{Company}\\NewsCentral\\NewsViewer\\NewsViewer.exe (no service-relative default); set it on a dev box to point at a Debug build; warning: an empty REG_SZ is a PRESENT value that overrides the appsettings path with empty"),
             Key("Telemetry:UploadEnabled", "true", @"Telemetry\UploadEnabled", RegistryValueType.Dword,
                 ControlKind.Toggle, OverridableState.Overridable,
                 "true | false (registry: DWORD 0/1 — genuine bool, DWORD is safe); false = session telemetry is not forwarded to the repository; the fixed 30-day local retention sweep still runs"),

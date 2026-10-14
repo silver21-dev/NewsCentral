@@ -41,7 +41,7 @@ public sealed class ViewerTaskVerifierTests
 
         public ViewerTaskVerifier Sut() => new(
             Config, new ConfigurationBuilder().AddInMemoryCollection(Settings).Build(),
-            Scheduler, Log, baseDirectory: @"C:\Install\NewsService", fileExists: _ => ExeExists);
+            Scheduler, Log, fileExists: _ => ExeExists);
 
         /// <summary>What the registration script writes: the built definition, stamp included.</summary>
         public void RegisterBoth(string exe = Exe)
@@ -119,23 +119,117 @@ public sealed class ViewerTaskVerifierTests
         var drift = (await rig.Sut().VerifyAsync(default))!.Drift;
 
         Assert.Contains(drift, d => d.Contains(Content) && d.Contains("missing"));
-        Assert.Contains(drift, d => d.Contains("executable not found") && d.Contains(Exe));
+    }
+
+
+    [Fact]
+    public void DefaultPath_IsTheDeployedLayout_AndTheSourceSaysDefault()
+    {
+        var resolved = TaskDefinitionInputsResolver.Resolve(new ServiceConfiguration(), new ConfigurationBuilder().Build());
+
+        Assert.Equal(@"%ProgramFiles%\" + Company + @"\NewsCentral\NewsViewer\NewsViewer.exe", resolved.Inputs.ExePath);
+        Assert.StartsWith("default", resolved.ExePathSource);
     }
 
     [Fact]
-    public async Task DefaultExePath_IsTheSiblingNewsViewerFolder()
+    public void ConfiguredAndOverridePaths_AreUsedLiterally_WithTheirOwnProvenance()
     {
-        var rig = new Rig();
-        rig.Config.ViewerTasks.NewsViewerPath = "";
-        string? probed = null;
-        var sut = new ViewerTaskVerifier(rig.Config, new ConfigurationBuilder().Build(), rig.Scheduler, rig.Log,
-            baseDirectory: @"C:\Install\NewsService", fileExists: p => { probed = p; return true; });
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var configured = programFiles + @"\X\NewsViewer.exe";
 
-        await sut.VerifyAsync(default);
+        var fromConfig = TaskDefinitionInputsResolver.Resolve(
+            new ServiceConfiguration { ViewerTasks = { NewsViewerPath = configured } }, new ConfigurationBuilder().Build());
+        Assert.Equal(configured, fromConfig.Inputs.ExePath);
+        Assert.Equal("ViewerTasks:NewsViewerPath", fromConfig.ExePathSource);
 
-        Assert.Equal(@"C:\Install\NewsViewer\NewsViewer.exe", probed);
+        var fromOverride = TaskDefinitionInputsResolver.Resolve(
+            new ServiceConfiguration { ViewerTasks = { NewsViewerPath = configured } }, new ConfigurationBuilder().Build(), @"D:\O\NewsViewer.exe");
+        Assert.Equal(@"D:\O\NewsViewer.exe", fromOverride.Inputs.ExePath);
+        Assert.Equal("--newsviewer-path", fromOverride.ExePathSource);
     }
 
+    // ---- Regression guard: emitter and verifier must resolve the same path -------------------------
+
+    private static string EmittedExePath(string dir, string? appsettingsKey, string? overridePath)
+    {
+        File.WriteAllText(Path.Combine(dir, "appsettings.json"),
+            appsettingsKey is null ? "{}" : "{\"ViewerTasks\":{\"NewsViewerPath\":" + System.Text.Json.JsonSerializer.Serialize(appsettingsKey) + "}}");
+        var target = Path.Combine(dir, "r.ps1");
+        string[] args = overridePath is null ? ["--emit-task-script", target] : ["--emit-task-script", target, "--newsviewer-path", overridePath];
+        Assert.Equal(0, EmitTaskScriptCommand.Run(args, new StringWriter(), new StringWriter(), dir));
+        var line = File.ReadAllLines(target).Single(l => l.StartsWith("$ExePath "));
+        return line[(line.IndexOf('\'') + 1)..line.LastIndexOf('\'')];
+    }
+
+    [Theory]
+    [InlineData(0)]   // nothing configured
+    [InlineData(1)]   // the key set in configuration (the emitter is given the same value explicitly: it never reads the key itself)
+    [InlineData(2)]   // --newsviewer-path supplied (and a different key present in appsettings.json, which the emitter ignores)
+    public void EmitterAndVerifier_ResolveTheByteIdenticalPath(int scenario)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "nc-parity-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            const string configured = @"D:\Apps\NewsViewer\NewsViewer.exe";
+            var verifierConfig = new ServiceConfiguration();
+            string emitted;
+            switch (scenario)
+            {
+                case 0:
+                    emitted = EmittedExePath(dir, null, null);
+                    break;
+                case 1:
+                    verifierConfig.ViewerTasks.NewsViewerPath = configured;
+                    emitted = EmittedExePath(dir, null, configured);
+                    break;
+                default:
+                    verifierConfig.ViewerTasks.NewsViewerPath = configured;
+                    emitted = EmittedExePath(dir, @"C:\Other\NewsViewer.exe", configured);
+                    break;
+            }
+
+            var verifier = new ViewerTaskVerifier(verifierConfig, new ConfigurationBuilder().Build(), new FakeScheduler(),
+                new CapturingLogger<ViewerTaskVerifier>());
+            Assert.Equal(emitted, verifier.ResolveInputs().Inputs.ExePath);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task MissingExe_IsANoticeOutsideTheDriftVerdict_NamingTheDefaultAsItsSource()
+    {
+        var rig = new Rig { ExeExists = false };
+        rig.Config.ViewerTasks.NewsViewerPath = "";
+        rig.RegisterBoth(TaskDefinitionInputsResolver.CanonicalViewerPath());
+
+        var report = (await rig.Sut().VerifyAsync(default))!;
+
+        Assert.Empty(report.Drift);   // the tasks are registered correctly; only the payload has not landed
+        Assert.NotNull(report.ExecutableNotice);
+        Assert.Contains("source: default", report.ExecutableNotice);
+        Assert.DoesNotContain("ViewerTasks:NewsViewerPath", report.ExecutableNotice);
+    }
+
+    [Fact]
+    public void MissingExeNotice_HasItsOwnGating_AndNeverTouchesTheDriftState()
+    {
+        var log = new CapturingLogger<ViewerTaskVerifierTests>();
+        var reporter = new VerifyReporter(log);
+        var ok = new VerifyReport([], ["Launch: matched by nc-hash stamp"], null);
+        var missing = ok with { ExecutableNotice = "NewsViewer executable not found at 'X' (source: default)" };
+
+        reporter.Report(missing);   // drift line + notice
+        reporter.Report(missing);   // quiet
+        Assert.Equal(2, log.Entries.Count);
+        Assert.Contains(log.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("not launch-surface drift"));
+        Assert.DoesNotContain(log.Entries, e => e.Message.Contains("drifted"));
+
+        reporter.Report(ok);        // the payload landed: one Information, drift state unchanged
+        reporter.Report(ok);
+        Assert.Equal(3, log.Entries.Count);
+        Assert.Contains("now present", log.Entries[2].Message);
+    }
     [Fact]
     public void ObsoleteManageKey_ProducesOneWarningNamingTheReplacement()
     {
@@ -266,7 +360,7 @@ public sealed class VerifyPathReportingTests
     private static ViewerTaskVerifier Verifier(FakeScheduler scheduler) => new(
         new ServiceConfiguration { ViewerTasks = { NewsViewerPath = Exe } },
         new ConfigurationBuilder().Build(), scheduler, new ViewerTaskVerifierTests.CapturingLogger<ViewerTaskVerifier>(),
-        baseDirectory: @"C:\Install\NewsService", fileExists: _ => true);
+        fileExists: _ => true);
 
     private static async Task<VerifyReport> Verify(bool launchStamped, bool contentStamped)
     {
@@ -352,16 +446,4 @@ public sealed class VerifyPathReportingTests
             WithoutStamp(Stamped(ViewerTaskKind.Launch, @"%ProgramFiles%\Other\NewsViewer.exe"))));
     }
 
-    [Fact]
-    public void DefaultSiblingPath_UnderProgramFiles_IsTokenised_ForTheExpectedStamp_ButAConfiguredPathIsLiteral()
-    {
-        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-        var baseDir = programFiles + @"\" + Company + @"\NewsCentral\NewsService";
-        var path = TaskDefinitionInputsResolver.ResolveExePath(new ServiceConfiguration(), baseDir);
-        Assert.Equal(@"%ProgramFiles%\" + Company + @"\NewsCentral\NewsViewer\NewsViewer.exe", path);
-
-        var configured = programFiles + @"\X\NewsViewer.exe";
-        Assert.Equal(configured, TaskDefinitionInputsResolver.ResolveExePath(
-            new ServiceConfiguration { ViewerTasks = { NewsViewerPath = configured } }, baseDir));
-    }
 }

@@ -5,14 +5,17 @@
 #  Registers the two NewsViewer scheduled tasks from deploy/scheduled-tasks
 #  (logon is a trigger of the Launch task), registers the NewsService event
 #  source, removes the legacy Workstation Unlock task and removes the HKLM Run
-#  value NewsViewer (the Run entry is gone, not kept). It is the reference
-#  implementation of what NewsService does on its own start (ViewerTasks, see
-#  docs/newsservice-spec.md) and the dev/pilot shortcut for a machine without
-#  NewsService management. On a machine where NewsService runs with
-#  ViewerTasks\Manage = 1, NewsService takes the tasks over on its next start
-#  (they carry no nc-hash stamp, so they are re-registered once). The script
-#  writes no configuration.
-#  NewsService.exe --emit-task-script produces a self-contained equivalent for external use.
+#  value NewsViewer (the Run entry is gone, not kept). It is the dev/pilot path
+#  for a machine set up without an installer; NewsService never registers
+#  tasks (it only verifies them, docs/newsservice-spec.md). Tasks registered
+#  here carry no nc-hash stamp, so NewsService verifies them by field
+#  comparison only. The script writes no configuration.
+#  NewsService.exe --emit-task-script produces a self-contained equivalent for
+#  external use (the packaged, stamped build artifact).
+#
+#  EXIT CODE: 0 on success, 1 when registration throws or Verification finds
+#  a missing task, a mismatch or a missing event source - on every terminal
+#  path, never dependent on a leftover $LASTEXITCODE.
 #
 #  AUTHORITATIVE REFERENCES:
 #    deploy/scheduled-tasks/README.md   what each task does and why
@@ -71,8 +74,7 @@
 .PARAMETER Uninstall
     Removes both new tasks. Does not touch the event source, the legacy task or the HKLM Run value.
     Uninstalling NewsViewer MUST remove the tasks (this switch, or the installer's equivalent): NewsService
-    cannot clean up after its own uninstall, and with ViewerTasks\Manage = 1 it would register them again
-    on its next start for as long as it is installed.
+    never creates or removes tasks, so nothing else will.
 
 .EXAMPLE
     .\scripts\Register-NewsViewerTasks.ps1 -Company Contoso
@@ -115,6 +117,74 @@ $DefaultSourceName = "NewsService"
 if (-not $TaskXmlDir) { $TaskXmlDir = Join-Path (Split-Path $PSScriptRoot -Parent) "deploy\scheduled-tasks" }
 
 function Write-Step { param([string]$Text) Write-Host $Text -ForegroundColor Cyan }
+
+# What Verification must find, filled by Register-Task.
+$script:Expected = @{}
+
+# Canonical form of a path for comparing (same steps as NewsService's TaskPathNormalizer): trim, strip
+# surrounding quotes, expand environment variables, '/' to '\', drop a trailing '\', lower-case.
+function Get-NormalizedPath {
+    param([string]$Path)
+    $p = $Path.Trim().Trim('"').Trim()
+    $p = [System.Environment]::ExpandEnvironmentVariables($p)
+    $p = $p.Replace('/', '\').TrimEnd('\')
+    return $p.ToLowerInvariant()
+}
+
+# One entry per trigger: the element name, plus the state-change kind for session triggers (sorted).
+function Get-TriggerSignature {
+    param($Doc, $Ns)
+    $list = @()
+    $triggers = $Doc.SelectSingleNode('//t:Triggers', $Ns)
+    if ($triggers) {
+        foreach ($node in $triggers.ChildNodes) {
+            if ($node.NodeType -ne 'Element') { continue }
+            $state = $node.SelectSingleNode('t:StateChange', $Ns)
+            $list += $(if ($state) { $node.LocalName + ':' + $state.InnerText.Trim() } else { $node.LocalName })
+        }
+    }
+    return @($list | Sort-Object)
+}
+
+# Compares the registered definition with what Register-Task just wrote. Returns the problems found
+# (empty = it matches). Paths are compared in their normalised form.
+function Compare-RegisteredTask {
+    param([string]$Name)
+    $expected = $script:Expected[$Name]
+    if (-not $expected) { return @("no expectation was recorded for this task") }
+    $path = (Split-Path $Name -Parent) + '\'
+    $leaf = Split-Path $Name -Leaf
+    try { $xmlText = Export-ScheduledTask -TaskName $leaf -TaskPath $path -ErrorAction Stop }
+    catch { return @("cannot read the registered definition: $($_.Exception.Message)") }
+
+    $doc = New-Object System.Xml.XmlDocument
+    $doc.PreserveWhitespace = $true
+    $doc.LoadXml([string]$xmlText)
+    $ns = New-Object System.Xml.XmlNamespaceManager($doc.NameTable)
+    $ns.AddNamespace('t', 'http://schemas.microsoft.com/windows/2004/02/mit/task')
+    $text = { param($xpath) $n = $doc.SelectSingleNode($xpath, $ns); if ($n) { $n.InnerText.Trim() } else { '' } }
+
+    $problems = @()
+    $command = & $text '//t:Exec/t:Command'
+    if ((Get-NormalizedPath $command) -ne (Get-NormalizedPath $expected.Command)) {
+        $problems += "wrong command - expected '$($expected.Command)', found '$command'"
+    }
+    $workDir = & $text '//t:Exec/t:WorkingDirectory'
+    if ((Get-NormalizedPath $workDir) -ne (Get-NormalizedPath $expected.WorkingDir)) {
+        $problems += "wrong working directory - expected '$($expected.WorkingDir)', found '$workDir'"
+    }
+    if ($null -ne $expected.Subscription) {
+        $subscription = & $text '//t:EventTrigger/t:Subscription'
+        if ($subscription -ne $expected.Subscription.Trim()) {
+            $problems += "wrong event subscription - expected '$($expected.Subscription)', found '$subscription'"
+        }
+    }
+    $found = @(Get-TriggerSignature $doc $ns)
+    if (($found -join ',') -ne (@($expected.Triggers) -join ',')) {
+        $problems += "wrong trigger set - expected [$(@($expected.Triggers) -join ', ')], found [$($found -join ', ')]"
+    }
+    return $problems
+}
 
 # Runs schtasks and returns its exit code (output is returned through $script:SchtasksOutput).
 function Invoke-Schtasks {
@@ -160,8 +230,8 @@ if ($Uninstall) {
     }
     Write-Host ""
     Write-Host "The event source, the legacy task and the HKLM Run value were not touched." -ForegroundColor DarkGray
-    Write-Host "Uninstalling NewsViewer must remove these tasks; NewsService (ViewerTasks\Manage = 1) re-registers them on its next start." -ForegroundColor DarkGray
-    return
+    Write-Host "Uninstalling NewsViewer must remove these tasks (this switch, or the installer's equivalent): NewsService never removes its own tasks." -ForegroundColor DarkGray
+    exit 0
 }
 
 # ── Parameter validation ─────────────────────────────────────────────────────
@@ -226,6 +296,14 @@ function Register-Task {
             "*[System[Provider[@Name='$EventSourceName'] and EventID=$ContentEventId]]" +
             "</Select></Query></QueryList>"
     }
+    # Record what Verification must find afterwards.
+    $script:Expected[$TaskName] = @{
+        Command      = $command.InnerText
+        WorkingDir   = $workDir.InnerText
+        Subscription = $(if ($RewriteSubscription) { $subscription.InnerText } else { $null })
+        Triggers     = @(Get-TriggerSignature $doc $ns)
+    }
+
 
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("NewsViewerTask-" + [guid]::NewGuid().ToString("N") + ".xml")
     try {
@@ -305,12 +383,13 @@ Write-Host ""
 Write-Step "Verification"
 # TASK_SESSION_STATE_CHANGE_TYPE values, as Get-ScheduledTask reports them.
 $stateNames = @{ 1 = "ConsoleConnect"; 2 = "ConsoleDisconnect"; 3 = "RemoteConnect"; 4 = "RemoteDisconnect"; 7 = "SessionLock"; 8 = "SessionUnlock" }
+$failures = 0
 foreach ($name in @($LaunchTask, $ContentTask)) {
     $path = (Split-Path $name -Parent) + "\"
     $leaf = Split-Path $name -Leaf
     $task = Get-ScheduledTask -TaskPath $path -TaskName $leaf -ErrorAction SilentlyContinue
     Write-Host "  $name" -ForegroundColor Yellow
-    if (-not $task) { Write-Host "    MISSING" -ForegroundColor Red; continue }
+    if (-not $task) { Write-Host "    MISSING" -ForegroundColor Red; $failures++; continue }
     foreach ($trigger in $task.Triggers) {
         $kind = $trigger.CimClass.CimClassName -replace '^MSFT_Task', '' -replace 'Trigger$', ''
         $detail = if ($trigger.PSObject.Properties["StateChange"]) { "StateChange=$($stateNames[[int]$trigger.StateChange])" }
@@ -325,8 +404,22 @@ foreach ($name in @($LaunchTask, $ContentTask)) {
         Write-Host "    workdir   $($action.WorkingDirectory)"
     }
     Write-Host "    principal $($task.Principal.GroupId)  run level $($task.Principal.RunLevel)"
+    foreach ($problem in @(Compare-RegisteredTask $name)) {
+        Write-Host "    MISMATCH  $problem" -ForegroundColor Red
+        $failures++
+    }
 }
 $sourceExists = [System.Diagnostics.EventLog]::SourceExists($EventSourceName)
 Write-Host "  event source '$EventSourceName': $(if ($sourceExists) { 'present' } else { 'MISSING' })" `
     -ForegroundColor $(if ($sourceExists) { "Green" } else { "Red" })
+if (-not $sourceExists) { $failures++ }
 Write-Host ""
+
+# Explicit exit code on every terminal path: never fall off the end, where the exit code would be whatever a
+# native probe (the schtasks query for a legacy task that rightly does not exist) left in $LASTEXITCODE.
+if ($failures -gt 0) {
+    Write-Host "VERIFICATION FAILED: $failures problem(s) above. The launch surface is NOT established." -ForegroundColor Red
+    exit 1
+}
+Write-Host "Verification passed: both tasks are registered as intended." -ForegroundColor Green
+exit 0

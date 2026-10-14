@@ -65,22 +65,20 @@ internal static class EmitTaskScriptCommand
                 .AddJsonFile("appsettings.json", optional: false)
                 .Build();
 
-            // The NewsViewer path never comes from configuration: the override, else the canonical install path.
-            var viewerSource = !string.IsNullOrWhiteSpace(viewerPath)
-                ? "--newsviewer-path"
-                : @"default %ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe";
-            var exePath = !string.IsNullOrWhiteSpace(viewerPath) ? viewerPath : TaskDefinitionInputsResolver.CanonicalViewerPath();
-            var config = new ServiceConfiguration { ViewerTasks = { NewsViewerPath = exePath } };
-            if (LooksLikeBuildOutput(exePath))
-                stderr.WriteLine($"Warning: NewsViewer path '{exePath}' looks like a build output; it is baked into a script shipped to target machines.");
+            // The NewsViewer path never comes from configuration: the single resolver is given only the
+            // --newsviewer-path override and an EMPTY ServiceConfiguration, so appsettings.json's
+            // ViewerTasks:NewsViewerPath (and any registry value) cannot reach it. Otherwise the deployed layout.
+            var resolved = TaskDefinitionInputsResolver.Resolve(new ServiceConfiguration(), configuration, viewerPath);
+            var inputs = resolved.Inputs;
+            if (LooksLikeBuildOutput(inputs.ExePath))
+                stderr.WriteLine($"Warning: NewsViewer path '{inputs.ExePath}' looks like a build output; it is baked into a script shipped to target machines.");
 
             var target = Environment.ExpandEnvironmentVariables(pathArg.Trim());
-            var inputs = TaskDefinitionInputsResolver.Resolve(config, configuration, baseDirectory);
             var script = TaskScriptGenerator.Generate(inputs, TaskScriptEmitter.NewHeader(), TaskDefinitionBuilder.LoadTemplateBytes);
             TaskScriptEmitter.Write(target, script);
             stdout.WriteLine($"Wrote: {target}");
             stdout.WriteLine($"  Company:          {inputs.Company} (compiled in)");
-            stdout.WriteLine($"  NewsViewer:       {inputs.ExePath} (source: {viewerSource})");
+            stdout.WriteLine($"  NewsViewer:       {inputs.ExePath} (source: {resolved.ExePathSource})");
             stdout.WriteLine($"  Event log/source: {inputs.EventLogName} / {inputs.EventSourceName} (source: {settingsFile}; registry and appsettings.Development.json are not consulted)");
             return 0;
         }

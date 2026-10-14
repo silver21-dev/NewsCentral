@@ -34,8 +34,8 @@ public class ViewerTasksSection
     public bool RegisterEventSource { get; set; } = true;
 
     /// <summary>
-    /// Full path of NewsViewer.exe the tasks launch. Empty (default) = <c>..\NewsViewer\NewsViewer.exe</c>
-    /// relative to the NewsService install folder (the install layout in docs/packaging.md). A
+    /// Full path of NewsViewer.exe the tasks launch. Empty (default) = the deployed layout <c>%ProgramFiles%\{Company}\NewsCentral\NewsViewer\NewsViewer.exe</c>
+    /// (token left unexpanded; the one resolver is TaskDefinitionInputsResolver). A
     /// non-empty value is used as given — for dev boxes pointing at a Debug build.
     /// </summary>
     public string NewsViewerPath { get; set; } = string.Empty;

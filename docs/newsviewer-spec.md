@@ -18,7 +18,7 @@ NewsViewer is a **one-shot process**: launch → run the launch decision (`Launc
 
 ### Launch surface — logon, unlock, connect, content
 
-The triggers are **complementary, not redundant**, and all of them are scheduled tasks maintained by NewsService:
+The triggers are **complementary, not redundant**, and all of them are scheduled tasks registered by the installer and verified by NewsService:
 
 - **Scheduled task "NewsViewer Launch"** fires at **logon** (any user, `LogonTrigger` with a 15 s delay so the shell is up), on workstation **unlock**, RDP connect and console connect, no arguments. The logon trigger replaces the former HKLM `Run` value (removed by NewsService once both tasks are in place); a logon that is also reported as a console connect just starts a second instance that exits as `AlreadyRunning` — the mutex absorbs overlapping triggers.
 - **Scheduled task "NewsViewer Content Arrived"** fires on the NewsService `ContentChanged` event (below) with the argument **`--trigger content`**. Unknown `--trigger` values are ignored (treated as absent).
