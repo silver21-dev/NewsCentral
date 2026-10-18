@@ -482,6 +482,24 @@ public sealed class EnvironmentDirectoryService
         Changed?.Invoke();
     }
 
+    /// <summary>Per-operator, per-machine "Process on open" flag for poster statistics (default false).</summary>
+    public bool ProcessStatisticsOnOpen => GetState().ProcessStatisticsOnOpen;
+
+    /// <summary>Persists the per-operator "Process on open" flag for poster statistics (local file only; failure is logged, never thrown).</summary>
+    public async Task SetProcessStatisticsOnOpenAsync(bool value)
+    {
+        try
+        {
+            var state = GetState();
+            state.ProcessStatisticsOnOpen = value;
+            await SaveStateAsync(state);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[EnvironmentDirectoryService] Failed to save ProcessStatisticsOnOpen: {ex.Message}");
+        }
+    }
+
     /// <summary>
     /// Records the current environment as "last used" — called only after a SUCCESSFUL login (Login
     /// or UPN Login), never on mere selection in the picker. Best-effort: a write failure is logged

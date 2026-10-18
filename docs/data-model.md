@@ -538,6 +538,8 @@ Aggregated by the authoring app from the telemetry inbox (see "Session Telemetry
 
 **`StatsRunSummary`** (`_run.json`): `startedUtc`, `finishedUtc`, `outcome` (`Completed`, `Stopped`, `Failed`, `NotAvailable`), `processed` (input files handled; formerly `sorted`, which is still accepted when reading an old file), `counted` (files that produced a view), `invalid`, `duplicatesDropped`, `pruned`, `recoverMs`, `processMs`, `pruneMs`, `message`. Written on Completed / Stopped / Failed; a run refused by the lock or owner guard does not overwrite it.
 
+**UI semantics.** The Assignments page shows these figures per Published batch: the sum of the day buckets dated on or after the UTC date of the earliest `PublishedDate` in the batch (day granularity; `PosterStatsQuery`). See `docs/newscentral-spec.md` "Statistics in the Assignments panel".
+
 **Retention.** Counted raw files and `_invalid\` are deleted after `StatisticsDefaults.RawRetentionMonths` (13) by LastWriteTime — a constant, not a setting. Aggregates are kept.
 
 ## Cache Folder Structure

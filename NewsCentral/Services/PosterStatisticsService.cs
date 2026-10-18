@@ -25,32 +25,67 @@ public sealed class PosterStatisticsService
 
     public bool IsRunning => Volatile.Read(ref _running) == 1;
 
+    /// <summary>
+    /// Whether statistics can run for the current environment. Resolving needs the (async, cached)
+    /// environment settings, so these two values are refreshed by <see cref="RefreshAvailabilityAsync"/>
+    /// (and by every <see cref="RunAsync"/>) rather than computed on read; false until first refreshed.
+    /// </summary>
+    public bool IsAvailable { get; private set; }
+
+    public string? UnavailableReason { get; private set; } = "Not checked yet.";
+
+    /// <summary>The last run recorded for the current environment (read from _run.json), or null.</summary>
+    public StatsRunSummary? LastRun => _engine.LoadLastRun(_environment.DataPath);
+
+    public async Task RefreshAvailabilityAsync()
+    {
+        var resolution = StatisticsRootResolver.Resolve(await _settings.GetAsync(), _environment.DataPath);
+        IsAvailable = resolution.DistRoot is not null;
+        UnavailableReason = resolution.NotAvailableReason;
+    }
+
+    /// <summary>
+    /// One presentation's aggregate, read on a background thread. A missing file is null; a corrupt or
+    /// unreadable one is also null (the engine logs it) — this never throws to the UI.
+    /// </summary>
+    public async Task<PresentationStats?> LoadAsync(string sourceTeam, string presentationId)
+    {
+        var dataPath = _environment.DataPath;
+        try
+        {
+            return await Task.Run(() => _engine.Load(dataPath, sourceTeam, presentationId));
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[PosterStatistics] Could not load statistics for {sourceTeam}/{presentationId}: {ex.Message}");
+            return null;
+        }
+    }
+
     public async Task<StatsRunSummary> RunAsync(IProgress<StatsRunProgress>? progress, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
         var dataPath = _environment.DataPath;
 
         var resolution = StatisticsRootResolver.Resolve(await _settings.GetAsync(), dataPath);
+        IsAvailable = resolution.DistRoot is not null;
+        UnavailableReason = resolution.NotAvailableReason;
         if (resolution.DistRoot is null)
             return Summary(now, StatsRunOutcome.NotAvailable, resolution.NotAvailableReason);
 
         if (Interlocked.CompareExchange(ref _running, 1, 0) != 0)
-            return Summary(now, StatsRunOutcome.Failed, "already running in this application");
+            return Summary(now, StatsRunOutcome.Failed, "already running");
 
         try
         {
-            return await _engine.RunAsync(resolution.DistRoot, dataPath, progress, ct);
+            return await Task.Run(() => _engine.RunAsync(resolution.DistRoot, dataPath, progress, ct), CancellationToken.None);
         }
         finally
         {
             Volatile.Write(ref _running, 0);
         }
     }
-
-    public PresentationStats? Load(string teamId, string presentationId) =>
-        _engine.Load(_environment.DataPath, teamId, presentationId);
-
-    public StatsRunSummary? LoadLastRun() => _engine.LoadLastRun(_environment.DataPath);
 
     private static StatsRunSummary Summary(DateTime now, StatsRunOutcome outcome, string? message) =>
         new() { StartedUtc = now, FinishedUtc = now, Outcome = outcome, Message = message };

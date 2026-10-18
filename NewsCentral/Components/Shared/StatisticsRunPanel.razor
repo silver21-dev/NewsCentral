@@ -1,0 +1,43 @@
+@* Poster statistics run panel: phase, files handled so far (the total is unknown, so the bar is
+   indeterminate) and Stop. Separate from the bulk run panel because that one is typed to assignment
+   outcomes. Strings are English for now. TODO(i18n). *@
+@using NewsCentral.Statistics
+
+<div class="statistics-run-panel">
+    <div class="statistics-run-line">
+        <span>@PhaseText()</span>
+        <span class="text-muted">@Done.ToString("N0") file(s) handled</span>
+        @if (Stopping)
+        {
+            <span class="text-muted">Stopping…</span>
+        }
+        else
+        {
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="@(() => OnStop.InvokeAsync())">Stop</button>
+        }
+    </div>
+    <div class="progress statistics-run-bar">
+        <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
+    </div>
+</div>
+
+<style>
+    .statistics-run-panel { padding: 6px 0; font-size: 14px; }
+    .statistics-run-line { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+    .statistics-run-bar { height: 6px; }
+</style>
+
+@code {
+    [Parameter] public StatsPhase? Phase { get; set; }
+    [Parameter] public int Done { get; set; }
+    [Parameter] public bool Stopping { get; set; }
+    [Parameter] public EventCallback OnStop { get; set; }
+
+    private string PhaseText() => Phase switch
+    {
+        StatsPhase.Recover => "Finishing interrupted work…",
+        StatsPhase.Process => "Processing statistics…",
+        StatsPhase.Prune => "Removing old raw files…",
+        _ => "Starting…"
+    };
+}

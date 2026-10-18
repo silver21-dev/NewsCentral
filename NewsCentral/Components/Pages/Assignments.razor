@@ -6,6 +6,7 @@
 @using NewsCentral.Formatting
 @using NewsCentral.Components.Shared
 @using NewsCentral.Ui
+@using NewsCentral.Statistics
 @using Microsoft.Extensions.Localization
 @inject AssignmentService AssignmentService
 @inject PresentationService PresentationService
@@ -16,6 +17,9 @@
 @inject NavigationManager Navigation
 @inject IStringLocalizer<Assignments> Localizer
 @inject NewsCentral.Ui.PosterThumbnailCache ThumbnailCache
+@inject PosterStatisticsService Statistics
+@inject EnvironmentDirectoryService DirectoryService
+@implements IDisposable
 
 <PageTitle>@Localizer["Assignments"]</PageTitle>
 
@@ -273,6 +277,29 @@
                 <h4>☑ Published (@publishedAssignments.Count)</h4>
             </div>
 
+            @* Poster statistics bar. TODO(i18n) *@
+            <div class="statistics-bar">
+                @if (!statsAvailable)
+                {
+                    <span class="statistics-status" title="@Statistics.UnavailableReason">@StatsStatusText()</span>
+                }
+                else if (statsRunning)
+                {
+                    <StatisticsRunPanel Phase="@statsProgress?.Phase" Done="@(statsProgress?.Done ?? 0)"
+                                        Stopping="statsStopping" OnStop="StopStatsRun" />
+                }
+                else
+                {
+                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="StartStatsRunAsync"
+                            disabled="@Statistics.IsRunning">Process statistics</button>
+                    <span class="statistics-status">@StatsStatusText()</span>
+                    <label class="form-check-label">
+                        <input type="checkbox" class="form-check-input" checked="@processOnOpen" @onchange="OnProcessOnOpenChanged" />
+                        Process on open
+                    </label>
+                }
+            </div>
+
             <BulkRunPanel Running="@(isRunning && runSection == "Published")" Done="runDone" Total="runTotal" Verb="@runVerb"
                           Result="@(runSection == "Published" ? runResult : null)" OnStop="StopRun" />
 
@@ -325,6 +352,10 @@
                             <div class="batch-meta">
                                 @vm.Batch.Count assignment(s) &nbsp;·&nbsp; Created @DisplayTime.Local(vm.Batch.CreatedUtc, "yyyy-MM-dd HH:mm")
                             </div>
+                            @if (statsAvailable)
+                            {
+                                <div class="batch-stats" title="@BatchStatsTooltip(vm)">@BatchStatsText(vm)</div>
+                            }
                         </div>
                     </div>
 
@@ -834,6 +865,20 @@
     margin: 0;
     padding-left: 20px;
 }
+.batch-stats {
+    font-size: 13px;
+    color: #6c757d;
+    margin-top: 2px;
+}
+.statistics-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 0;
+    font-size: 14px;
+}
+.statistics-bar .statistics-status { color: #555; }
 </style>
 
 @code {
@@ -1190,6 +1235,151 @@
         public bool IsExpanded { get; set; }
     }
 
+    // ── Poster statistics (M2) ───────────────────────────────────────────────
+    // Independent of the bulk Publish/Delete run state above: a statistics pass touches only the
+    // telemetry folders and the statistics store, so neither blocks the other. TODO(i18n) for all strings.
+
+    private bool statsAvailable;
+    private bool processOnOpen;
+    private bool statsStopping;
+    private bool statsRunning;
+    private StatsRunProgress? statsProgress;
+    private StatsRunSummary? statsLastRun;
+    private CancellationTokenSource? statsCts;
+    private bool disposed;
+    private long lastRenderTicks;
+
+    // One entry per distinct (source team, presentation) in the Published section; a null value means
+    // "loaded, no file". A missing key means "not loaded yet" and renders as an ellipsis.
+    private readonly Dictionary<(string Team, string Pres), PresentationStats?> statsCache = new();
+
+    private sealed class InlineProgress(Action<StatsRunProgress> report) : IProgress<StatsRunProgress>
+    {
+        public void Report(StatsRunProgress value) => report(value);
+    }
+
+    private IEnumerable<(string Team, string Pres)> PublishedStatsKeys() =>
+        publishedAssignments.Select(a => (a.SourceTeam, a.PresentationID)).Distinct();
+
+    private async Task LoadStatsAsync(bool force)
+    {
+        if (!statsAvailable) return;
+        if (force) statsCache.Clear();
+
+        foreach (var key in PublishedStatsKeys().Where(k => !statsCache.ContainsKey(k)).ToList())
+        {
+            var stats = await Statistics.LoadAsync(key.Team, key.Pres);
+            if (disposed) return;
+            statsCache[key] = stats;
+            ThrottledRender();
+        }
+        Render();
+    }
+
+    private DateTime? EarliestPublishedUtc(AssignmentBatchViewModel vm) =>
+        vm.Batch.Assignments.Where(a => a.PublishedDate.HasValue).Select(a => a.PublishedDate).Min();
+
+    private string BatchStatsText(AssignmentBatchViewModel vm)
+    {
+        if (!statsCache.TryGetValue((vm.Batch.Key.SourceTeam, vm.Batch.Key.PresentationID), out var stats))
+            return "…";
+
+        return PosterStatsQuery.Format(PosterStatsQuery.Since(stats, EarliestPublishedUtc(vm)));
+    }
+
+    private string BatchStatsTooltip(AssignmentBatchViewModel vm) =>
+        $"Poster displays (not unique viewers) and Intranet-button clicks since {DisplayTime.Local(EarliestPublishedUtc(vm), "yyyy-MM-dd")}. " +
+        "Counted per presentation across all target teams.";
+
+    private string StatsStatusText()
+    {
+        if (!statsAvailable) return "Statistics are available only for file-share distribution";
+        if (statsLastRun is null) return "Statistics not processed yet";
+
+        var when = DisplayTime.Local(statsLastRun.FinishedUtc, "yyyy-MM-dd HH:mm");
+        return statsLastRun.Outcome switch
+        {
+            StatsRunOutcome.Completed => $"Statistics last processed {when}: Completed, {statsLastRun.Processed:N0} files",
+            StatsRunOutcome.Stopped => $"Statistics last processed {when}: Stopped, run again to continue ({statsLastRun.Processed:N0} files so far)",
+            StatsRunOutcome.Failed => $"Statistics run failed {when}: {statsLastRun.Message}",
+            _ => statsLastRun.Message ?? "Statistics are not available"
+        };
+    }
+
+    private async Task StartStatsRunAsync()
+    {
+        if (!statsAvailable || statsRunning || Statistics.IsRunning) return;
+
+        statsRunning = true;
+        statsStopping = false;
+        statsProgress = null;
+        statsCts = new CancellationTokenSource();
+        var cts = statsCts;
+        StateHasChanged();
+
+        StatsRunSummary result;
+        try
+        {
+            result = await Statistics.RunAsync(new InlineProgress(p => { statsProgress = p; ThrottledRender(); }), cts.Token);
+        }
+        catch (Exception ex)
+        {
+            result = new StatsRunSummary { Outcome = StatsRunOutcome.Failed, Message = ex.Message, FinishedUtc = DateTime.UtcNow };
+        }
+        finally
+        {
+            statsCts = null;
+            cts.Dispose();
+        }
+
+        if (disposed) return;
+
+        statsRunning = false;
+        statsStopping = false;
+        statsLastRun = result;
+        Render();
+
+        if (result.Outcome is StatsRunOutcome.Completed or StatsRunOutcome.Stopped)
+            await LoadStatsAsync(force: true);
+    }
+
+    private void StopStatsRun()
+    {
+        statsStopping = true;
+        try { statsCts?.Cancel(); } catch (ObjectDisposedException) { }
+        Render();
+    }
+
+    private async Task OnProcessOnOpenChanged(ChangeEventArgs e)
+    {
+        processOnOpen = e.Value is true;
+        await DirectoryService.SetProcessStatisticsOnOpenAsync(processOnOpen);
+    }
+
+    // At most about 4 renders per second from the progress callback (pool threads), so a 20,000-file run
+    // cannot flood the render loop. The final state is always rendered with Render().
+    private void ThrottledRender()
+    {
+        var now = Environment.TickCount64;
+        var last = Interlocked.Read(ref lastRenderTicks);
+        if (now - last < 250 || Interlocked.CompareExchange(ref lastRenderTicks, now, last) != last) return;
+        Render();
+    }
+
+    private void Render()
+    {
+        if (disposed) return;
+        _ = InvokeAsync(() => { if (!disposed) StateHasChanged(); });
+    }
+
+    // Leaving the page cancels a running pass. Not awaited: Dispose must stay synchronous, and the
+    // engine's resume makes a stopped pass safe to continue on the next run.
+    public void Dispose()
+    {
+        disposed = true;
+        try { statsCts?.Cancel(); } catch (ObjectDisposedException) { }
+    }
+
     protected override async Task OnInitializedAsync()
     {
         currentUser = AuthService.GetCurrentUser();
@@ -1208,7 +1398,24 @@
             return;
         }
 
+        try
+        {
+            await Statistics.RefreshAvailabilityAsync();
+            statsAvailable = Statistics.IsAvailable;
+            statsLastRun = Statistics.LastRun;
+            processOnOpen = DirectoryService.ProcessStatisticsOnOpen;
+        }
+        catch (Exception ex)
+        {
+            statsAvailable = false;
+            System.Diagnostics.Debug.WriteLine($"Statistics availability check failed: {ex.Message}");
+        }
+
         await LoadDataAsync();
+
+        // Per-operator opt-in; only when there is a Published section to show the result in.
+        if (processOnOpen && statsAvailable && !Statistics.IsRunning && publishedAssignments.Any())
+            _ = StartStatsRunAsync();
     }
 
     private async Task LoadDataAsync()
@@ -1227,6 +1434,10 @@
 
             await BuildThumbnailsAsync();
             BuildAllBatches();
+
+            // Not awaited: the first render must not wait for statistics files; headers show an ellipsis
+            // until their figure arrives.
+            _ = LoadStatsAsync(force: false);
         }
         catch (Exception ex)
         {

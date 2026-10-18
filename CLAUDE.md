@@ -130,6 +130,7 @@ No direct inter-process communication. Coordination is via the shared cache fold
 
 - Never stage `.gitignore` or `NewsViewer/appsettings.json`; stage by explicit path.
 - Build/test: `dotnet build` and `dotnet test` at the repo root; both test suites must pass before a commit.
+- NewsService may be running as a Windows service from `NewsService\bin\Debug`; it locks `NewsCentral.Shared.dll`. If a build fails with MSB3027 "locked by NewsCentral", ask the user to stop the service. Don't build into an alternate output path.
 - Commit with `git commit -F <tempfile>` (not a long inline `-m`); report build and test results before committing.
 
 ---

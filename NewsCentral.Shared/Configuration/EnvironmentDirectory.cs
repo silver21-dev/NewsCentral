@@ -43,6 +43,12 @@ public sealed class UserEnvironmentState
     /// </summary>
     public List<string> HiddenPaths { get; set; } = new();
 
+    /// <summary>
+    /// Per operator, per machine: start a poster-statistics pass automatically when the Assignments page
+    /// has loaded. Default false. Local convenience only; never shared and not an appsettings or registry key.
+    /// </summary>
+    public bool ProcessStatisticsOnOpen { get; set; }
+
     /// <summary>Landing pad for the pre-M4b JSON key — never read directly; see <see cref="UserEnvironmentStateJson.Deserialize"/>.</summary>
     [JsonPropertyName("hiddenPolicyPaths")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
