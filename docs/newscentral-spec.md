@@ -47,9 +47,9 @@
 
 `PosterStatisticsService` (wrapping `PosterStatisticsEngine` in NewsCentral.Shared) turns the flat telemetry inbox on the distribution share into per-presentation view/click counts. There is no server, so the authoring app is the aggregator. No UI yet (M2). Storage layout, definitions and file shapes: `docs/data-model.md` ("Poster statistics").
 
-One run, in order: **guards** (exclusive `telemetry\.lock`, stale after 2 h; `telemetry\owner.json` binds the distribution to one DataPath) → **sort** (stream `uploads\session-*.json`; invalid → `_invalid\`, re-upload of a counted file → deleted, else moved to `{team}\{presentation}\new\`) → **count** (batches of 500 folded into day buckets; each batch is saved with `PendingMove` before its files are moved) → **prune** (13-month raw retention).
+One run, in order: **guards** (exclusive `telemetry\.lock`, stale after 2 h; `telemetry\owner.json` binds the distribution to one DataPath) → **recover** (finish the moves a crashed run had already counted, before reading anything new) → **process** (stream `uploads\session-*.json`, then any legacy M1 `new\` files, in batches of 500: bounded-parallel read and classify, serial stats save with `PendingMove`, move straight to `{team}\{presentation}\`, clear `PendingMove`; invalid → `_invalid\`, re-upload of a counted file → deleted) → **prune** (13-month raw retention). Each file is read once and moved once.
 
-- **Cancellable and resumable.** The sort move is the commit, so stopping loses nothing; a stopped or failed run is simply re-run. `PendingMove` guarantees a crash between "counted" and "moved" never double counts.
+- **Cancellable and resumable.** Cancellation is checked between batches and during the read step; once a batch's stats are saved its moves always complete. A stopped or failed run is simply re-run. `PendingMove` plus the Recover phase guarantee a crash between "counted" and "moved" never double counts.
 - **Not available** for Azure Blob distribution, disabled distribution, or unreadable environment settings (the service returns `NotAvailable` and touches nothing).
 - Moves are plain same-share `File.Move`; a failed move is skipped, never copy+delete. A lost share fails the run, keeping the counts so far.
 - The HMAC is not re-verified (NewsService already discarded invalid records). No new registry or appsettings keys.

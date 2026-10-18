@@ -507,8 +507,7 @@ Aggregated by the authoring app from the telemetry inbox (see "Session Telemetry
 
 ```
 {dist}\uploads\session-*.json                          inbox: read + moved, never written
-{dist}\telemetry\{teamId}\{presentationId}\new\        sorted, not yet counted
-{dist}\telemetry\{teamId}\{presentationId}\            counted raw files
+{dist}\telemetry\{teamId}\{presentationId}\            counted raw files (moved here straight from uploads\)
 {dist}\telemetry\_invalid\                             unparseable / rejected records
 {dist}\telemetry\owner.json                            { dataPath, claimedUtc }
 {dist}\telemetry\.lock                                 run lock { startedUtc }
@@ -520,14 +519,24 @@ Aggregated by the authoring app from the telemetry inbox (see "Session Telemetry
 
 **Keys.** `teamId` in a session record is the **source (authoring) team** of the presentation — NewsViewer writes `assignment.SourceTeamFolderName`, which index generation copies from `assignment.SourceTeam` — **not** the target team whose index the device consumed. `presentationId` is the presentation's single GUID (publishing copies keep the same id). Consequently one presentation published to several target teams aggregates into one `(source team, presentation)` bucket; per-target-team figures are not derivable from the records.
 
-**`PresentationStats`**: `schemaVersion` (1), `teamId`, `presentationId`, `days` (`yyyy-MM-dd` UTC of `SessionStartTime` → `{ views, clicks }`), `pendingMove` (file names counted but not yet moved out of `new\` — crash-recovery guard), `updatedUtc`.
+**`PresentationStats`**: `schemaVersion` (1), `teamId`, `presentationId`, `days` (`yyyy-MM-dd` UTC of `SessionStartTime` → `{ views, clicks }`), `pendingMove` (file names whose counts are saved but whose move to the counted folder is not yet confirmed — the crash-recovery guard), `updatedUtc`.
+
+**Batch protocol** (each batch = up to `StatisticsDefaults.BatchSize` = 500 input files, each read once and moved once):
+1. **Read + classify**, `ReadParallelism` (8) at a time: *Invalid* (unparseable, bad team/presentation id, missing `SessionStartTime`), *Duplicate* (file name already in its counted folder, or seen twice in the batch), *Valid* (team, presentation, UTC day, isView, isClick — a notification is Valid but not a view), or *Skipped* (locked/vanished; left in place for the next run).
+2. **Save stats**, serially, one atomic write per stats file: the deltas plus `pendingMove` = the group's file names. This save is the commit point.
+3. **Move**: Valid files to the counted folder, Invalid files to `_invalid\`, Duplicates deleted. Sequential (`MoveParallelism` = 1; parallel renames into one folder measured ~7× slower on local NTFS). A failed move is logged and the file left in place.
+4. **Clear** `pendingMove` (serially), keeping only names whose move failed.
+
+**Recover phase.** Before any new input is read, every stats file with a non-empty `pendingMove` has its listed files moved (from `uploads\`, or a legacy `new\`) to the counted folder — never re-counted; names already counted or gone are skipped. A move that still fails ends the run Failed *before* reading new input, because that file could otherwise be counted twice. Cancellation is checked between batches and during the read step (only already-read files are kept); once step 2 has begun for a batch, steps 3–4 always complete.
+
+**Legacy `new\`.** M1 staged files in `{team}\{presentation}\new\`. Those are drained as uncounted input after `uploads\` and the emptied `new\` folders are removed.
 
 **Definitions.**
 - **Views** = poster display sessions (every non-notification record).
 - **Clicks** = poster sessions with `CloseReason == "UrlLaunch"` (the Intranet button); each click is also a view.
 - Records with `RecordType == "notification"` are moved but excluded from both counts.
 
-**`StatsRunSummary`** (`_run.json`): `startedUtc`, `finishedUtc`, `outcome` (`Completed`, `Stopped`, `Failed`, `NotAvailable`), `sorted`, `counted`, `invalid`, `duplicatesDropped`, `pruned`, `message`. Written on Completed / Stopped / Failed; a run refused by the lock or owner guard does not overwrite it.
+**`StatsRunSummary`** (`_run.json`): `startedUtc`, `finishedUtc`, `outcome` (`Completed`, `Stopped`, `Failed`, `NotAvailable`), `processed` (input files handled; formerly `sorted`, which is still accepted when reading an old file), `counted` (files that produced a view), `invalid`, `duplicatesDropped`, `pruned`, `recoverMs`, `processMs`, `pruneMs`, `message`. Written on Completed / Stopped / Failed; a run refused by the lock or owner guard does not overwrite it.
 
 **Retention.** Counted raw files and `_invalid\` are deleted after `StatisticsDefaults.RawRetentionMonths` (13) by LastWriteTime — a constant, not a setting. Aggregates are kept.
 
