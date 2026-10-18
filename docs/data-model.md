@@ -464,7 +464,7 @@ Property names are camelCase on disk (the general cache/telemetry option set bel
 | `Source` | `"notification"` on a poster display opened by expanding a notification; absent otherwise |
 | `ContentKey` | content key (`presentationId\|vN\|imageHash`) of a notification record |
 
-A notification record reuses `SessionStartTime` (shown), `SessionEndTime` (outcome) and `CloseReason` (`Expanded`, `Dismissed` or `TimedOut`), so it is distinguishable **only** by `RecordType`. **Any consumer that counts or reports poster sessions must exclude `RecordType == "notification"`**, otherwise notifications are counted as poster displays and an Expanded notification is counted twice (its notification record plus the poster display record with `Source == "notification"`). Today nothing in the solution aggregates these records: NewsService's `TelemetryUploader` only verifies the HMAC and copies the file unchanged, and the authoring app does not read `uploads\`. See `docs/newsviewer-spec.md` ("Notification records").
+A notification record reuses `SessionStartTime` (shown), `SessionEndTime` (outcome) and `CloseReason` (`Expanded`, `Dismissed` or `TimedOut`), so it is distinguishable **only** by `RecordType`. **Any consumer that counts or reports poster sessions must exclude `RecordType == "notification"`**, otherwise notifications are counted as poster displays and an Expanded notification is counted twice (its notification record plus the poster display record with `Source == "notification"`). NewsService's `TelemetryUploader` only verifies the HMAC and copies the file unchanged; the authoring app aggregates the records (see "Poster statistics" below). See `docs/newsviewer-spec.md` ("Notification records").
 
 **Example — notification record** (`recordType` set; `sessionStartTime` = when the form was shown, `sessionEndTime` = when the outcome was decided, `closeReason` = the outcome). As written by NewsViewer (camelCase property names):
 
@@ -500,6 +500,36 @@ A notification record reuses `SessionStartTime` (shown), `SessionEndTime` (outco
 ```
 
 `Signature` is set by `TelemetryWriter` in NewsViewer immediately before writing the file. `TelemetryUploader` in NewsService verifies it before forwarding to the repository; files with `Invalid` signatures are discarded and logged.
+
+## Poster statistics (authoring app, `{DataPath}\statistics\`)
+
+Aggregated by the authoring app from the telemetry inbox (see "Session Telemetry" above). Nothing is written into `uploads\`; NewsService and NewsViewer are unaffected. Models and engine: `NewsCentral.Shared/Statistics/`.
+
+```
+{dist}\uploads\session-*.json                          inbox: read + moved, never written
+{dist}\telemetry\{teamId}\{presentationId}\new\        sorted, not yet counted
+{dist}\telemetry\{teamId}\{presentationId}\            counted raw files
+{dist}\telemetry\_invalid\                             unparseable / rejected records
+{dist}\telemetry\owner.json                            { dataPath, claimedUtc }
+{dist}\telemetry\.lock                                 run lock { startedUtc }
+{DataPath}\statistics\{teamId}\{presentationId}.json   aggregate (PresentationStats)
+{DataPath}\statistics\_run.json                        last run summary (StatsRunSummary)
+```
+
+`{dist}` is the environment's effective local distribution path (`Distribution.LocalPath`, else `{DataPath}\_distribution`). Raw files stay on the share so every move is a same-volume rename; the aggregates live in the authoring store. All of these are camelCase, indented, unsigned, and outside the signing contract.
+
+**Keys.** `teamId` in a session record is the **source (authoring) team** of the presentation — NewsViewer writes `assignment.SourceTeamFolderName`, which index generation copies from `assignment.SourceTeam` — **not** the target team whose index the device consumed. `presentationId` is the presentation's single GUID (publishing copies keep the same id). Consequently one presentation published to several target teams aggregates into one `(source team, presentation)` bucket; per-target-team figures are not derivable from the records.
+
+**`PresentationStats`**: `schemaVersion` (1), `teamId`, `presentationId`, `days` (`yyyy-MM-dd` UTC of `SessionStartTime` → `{ views, clicks }`), `pendingMove` (file names counted but not yet moved out of `new\` — crash-recovery guard), `updatedUtc`.
+
+**Definitions.**
+- **Views** = poster display sessions (every non-notification record).
+- **Clicks** = poster sessions with `CloseReason == "UrlLaunch"` (the Intranet button); each click is also a view.
+- Records with `RecordType == "notification"` are moved but excluded from both counts.
+
+**`StatsRunSummary`** (`_run.json`): `startedUtc`, `finishedUtc`, `outcome` (`Completed`, `Stopped`, `Failed`, `NotAvailable`), `sorted`, `counted`, `invalid`, `duplicatesDropped`, `pruned`, `message`. Written on Completed / Stopped / Failed; a run refused by the lock or owner guard does not overwrite it.
+
+**Retention.** Counted raw files and `_invalid\` are deleted after `StatisticsDefaults.RawRetentionMonths` (13) by LastWriteTime — a constant, not a setting. Aggregates are kept.
 
 ## Cache Folder Structure
 

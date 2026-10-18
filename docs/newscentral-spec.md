@@ -43,6 +43,17 @@
 - `DistributionMode` in `appsettings.json`: `Local` (file share) or `Azure` (Blob Storage)
 - Authentication to Azure: interactive MSAL with token cache for subsequent non-interactive authentication
 
+## Statistics processing
+
+`PosterStatisticsService` (wrapping `PosterStatisticsEngine` in NewsCentral.Shared) turns the flat telemetry inbox on the distribution share into per-presentation view/click counts. There is no server, so the authoring app is the aggregator. No UI yet (M2). Storage layout, definitions and file shapes: `docs/data-model.md` ("Poster statistics").
+
+One run, in order: **guards** (exclusive `telemetry\.lock`, stale after 2 h; `telemetry\owner.json` binds the distribution to one DataPath) → **sort** (stream `uploads\session-*.json`; invalid → `_invalid\`, re-upload of a counted file → deleted, else moved to `{team}\{presentation}\new\`) → **count** (batches of 500 folded into day buckets; each batch is saved with `PendingMove` before its files are moved) → **prune** (13-month raw retention).
+
+- **Cancellable and resumable.** The sort move is the commit, so stopping loses nothing; a stopped or failed run is simply re-run. `PendingMove` guarantees a crash between "counted" and "moved" never double counts.
+- **Not available** for Azure Blob distribution, disabled distribution, or unreadable environment settings (the service returns `NotAvailable` and touches nothing).
+- Moves are plain same-share `File.Move`; a failed move is skipped, never copy+delete. A lost share fails the run, keeping the counts so far.
+- The HMAC is not re-verified (NewsService already discarded invalid records). No new registry or appsettings keys.
+
 ## Role Model
 
 - `SystemAdmin` — full access across all teams
