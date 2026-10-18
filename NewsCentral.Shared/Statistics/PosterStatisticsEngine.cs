@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -10,31 +11,40 @@ namespace NewsCentral.Statistics;
 /// <summary>
 /// Authoring-app aggregator for poster statistics. Filesystem only — no MAUI, no Blazor.
 /// <para>
-/// Sorts the flat inbox <c>{dist}\uploads\session-*.json</c> (written by NewsViewer, forwarded unchanged by
-/// NewsService) into <c>{dist}\telemetry\{teamId}\{presentationId}\new\</c>, then folds those files into
-/// per-presentation day buckets in <c>{DataPath}\statistics\</c>, then prunes old raw files. Both stages are
-/// cancellable and resumable without double counting: a sort move is the commit for that file, and a count
-/// batch is guarded by <see cref="PresentationStats.PendingMove"/>. The inbox contract is untouched — the
-/// engine only reads and moves files out of <c>uploads\</c>, never writes into it.
+/// Reads each telemetry file once and moves it once: from the flat inbox <c>{dist}\uploads\session-*.json</c>
+/// (written by NewsViewer, forwarded unchanged by NewsService) straight to
+/// <c>{dist}\telemetry\{teamId}\{presentationId}\</c>, folding poster sessions into per-presentation day
+/// buckets in <c>{DataPath}\statistics\</c>. The inbox contract is untouched: the engine only reads files
+/// and moves them out of <c>uploads\</c>, never writes into it.
+/// </para>
+/// <para>
+/// Run order: <b>guards</b> (lock, owner) → <b>recover</b> (finish moves a crashed run had already counted)
+/// → <b>process</b> (batches of <see cref="StatisticsDefaults.BatchSize"/>: bounded-parallel read and
+/// classify, serial stats save with <see cref="PresentationStats.PendingMove"/>, bounded-parallel move,
+/// serial PendingMove clear) → <b>prune</b>. The stats save is the commit point of a batch; recovery runs
+/// to completion before any new input is read, so a file whose stats were saved but whose move did not
+/// happen is moved on the next run and never counted twice. Stats files are only ever written serially.
+/// </para>
+/// <para>
+/// Legacy M1 runs staged files in <c>{team}\{pres}\new\</c>; those are drained as uncounted input and the
+/// emptied <c>new\</c> folders removed.
 /// </para>
 /// <para>
 /// The HMAC is NOT re-verified here: NewsService's TelemetryUploader already discarded records with an
-/// invalid signature before forwarding them to the share.
-/// </para>
-/// <para>
-/// Note on <c>teamId</c>: it is the SOURCE (authoring) team of the presentation, because NewsViewer writes
-/// <c>assignment.SourceTeamFolderName</c> — not the team whose index.json the device consumed.
+/// invalid signature before forwarding them to the share. <c>teamId</c> is the SOURCE (authoring) team,
+/// because NewsViewer writes <c>assignment.SourceTeamFolderName</c>.
 /// </para>
 /// </summary>
 public sealed class PosterStatisticsEngine
 {
-    private const int BatchSize = 500;
     private const int ProgressEvery = 50;
     private const int MaxConsecutiveIoFailures = 20;
     private static readonly TimeSpan LockStaleAfter = TimeSpan.FromHours(2);
 
+    // Must agree with NewsViewer's and NewsService's JsonDefaults (both identical); guarded by a parity test.
     private static readonly JsonSerializerOptions SessionOptions = new()
     {
+        WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() }
@@ -51,6 +61,12 @@ public sealed class PosterStatisticsEngine
     private readonly Func<DateTime> _utcNow;
     private readonly Action<string>? _log;
 
+    /// <summary>Test seam: called with the source path before each counted-file move; false simulates a crash.</summary>
+    internal Func<string, bool>? BeforeMove { get; set; }
+
+    /// <summary>Test seam: the option set the engine reads session files with.</summary>
+    internal static JsonSerializerOptions SessionJsonOptions => SessionOptions;
+
     public PosterStatisticsEngine(Func<DateTime>? utcNow = null, Action<string>? log = null)
     {
         _utcNow = utcNow ?? (() => DateTime.UtcNow);
@@ -60,8 +76,8 @@ public sealed class PosterStatisticsEngine
     // ── Public surface ───────────────────────────────────────────────────────
 
     /// <summary>
-    /// Runs one sort + count + prune pass. Never throws for cancellation (returns Stopped) or for share /
-    /// I/O failures (returns Failed with the counts reached so far). Safe to re-run after either.
+    /// Runs one recover + process + prune pass. Never throws for cancellation (returns Stopped) or for
+    /// share / I/O failures (returns Failed with the counts reached so far). Safe to re-run after either.
     /// </summary>
     public Task<StatsRunSummary> RunAsync(
         string distRoot, string dataPath, IProgress<StatsRunProgress>? progress, CancellationToken ct) =>
@@ -72,7 +88,7 @@ public sealed class PosterStatisticsEngine
         if (!IsValidTeamId(teamId) || !TryNormalizePresentationId(presentationId, out var pres))
             return null;
         try { return ReadStats(StatsPath(dataPath, teamId, pres)); }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
         {
             Log($"Could not read statistics for {teamId}/{pres}: {ex.Message}");
             return null;
@@ -129,7 +145,7 @@ public sealed class PosterStatisticsEngine
             try
             {
                 pass.Execute();
-                summary.Outcome = ct.IsCancellationRequested && pass.Stopped ? StatsRunOutcome.Stopped
+                summary.Outcome = pass.Stopped ? StatsRunOutcome.Stopped
                     : pass.Problems.Count > 0 ? StatsRunOutcome.Failed
                     : StatsRunOutcome.Completed;
             }
@@ -138,6 +154,11 @@ public sealed class PosterStatisticsEngine
                 // The share (or a folder on it) went away mid-run. Counts so far are kept; a re-run resumes.
                 summary.Outcome = StatsRunOutcome.Failed;
                 pass.Problems.Add(ex.Message);
+            }
+            catch (SimulatedCrashException)
+            {
+                summary.Outcome = StatsRunOutcome.Failed;
+                pass.Problems.Add("simulated crash");
             }
 
             summary.Message = pass.BuildMessage();
@@ -229,24 +250,57 @@ public sealed class PosterStatisticsEngine
         }
     }
 
-    // ── The three phases ─────────────────────────────────────────────────────
+    // ── The phases ───────────────────────────────────────────────────────────
+
+    private enum Kind { Valid, Invalid, Duplicate, Skipped, Gone }
+
+    private sealed class Item
+    {
+        public string Path = "";
+        public string Name = "";
+        public Kind Kind;
+        public string Team = "", Pres = "", Day = "", Dest = "";
+        public bool IsView, IsClick;
+        public Exception? Error;
+        public bool MoveOk;
+    }
+
+    private sealed class SimulatedCrashException : Exception;
 
     private sealed class Pass(
         PosterStatisticsEngine e, string distRoot, string telemetry, string dataPath,
         StatsRunSummary summary, IProgress<StatsRunProgress>? progress, CancellationToken ct)
     {
         private readonly string _invalidDir = Path.Combine(telemetry, "_invalid");
+        private readonly Dictionary<string, PresentationStats> _stats = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _corrupt = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _failedDest = new(StringComparer.OrdinalIgnoreCase);
         private int _consecutiveIoFailures;
         private int _skipped;
+        private int _done;
 
         public bool Stopped { get; private set; }
         public List<string> Problems { get; } = new();
 
         public void Execute()
         {
-            Sort();
-            if (!Stopped) Count();
-            if (!Stopped) Prune();
+            var sw = Stopwatch.StartNew();
+            try { Recover(); }
+            finally { summary.RecoverMs = sw.ElapsedMilliseconds; }
+
+            if (!Stopped)
+            {
+                sw.Restart();
+                try { Process(); }
+                finally { summary.ProcessMs = sw.ElapsedMilliseconds; }
+            }
+
+            if (!Stopped)
+            {
+                sw.Restart();
+                try { Prune(); }
+                finally { summary.PruneMs = sw.ElapsedMilliseconds; }
+            }
         }
 
         public string? BuildMessage()
@@ -265,11 +319,8 @@ public sealed class PosterStatisticsEngine
             return true;
         }
 
-        private void Report(StatsPhase phase, int done, int? total, string? item, bool force = false)
-        {
-            if (progress is not null && (force || done % ProgressEvery == 0))
-                progress.Report(new StatsRunProgress(phase, done, total, item));
-        }
+        private void Report(StatsPhase phase, int done, string? item) =>
+            progress?.Report(new StatsRunProgress(phase, done, null, item));
 
         // A single locked/vanished file is skipped; a run of failures, or a share that is gone, aborts.
         private void NoteSkip(string item, Exception ex)
@@ -282,237 +333,326 @@ public sealed class PosterStatisticsEngine
 
         private void NoteOk() => _consecutiveIoFailures = 0;
 
-        // ── 1. Sort ──
+        private string CountedDir(string team, string pres) => Path.Combine(telemetry, team, pres);
 
-        private void Sort()
+        private bool TryGetStats(string team, string pres, out PresentationStats stats)
         {
-            var uploads = Path.Combine(distRoot, "uploads");
-            if (!Directory.Exists(uploads)) return;
-
-            var done = 0;
-            foreach (var path in Directory.EnumerateFiles(uploads, "session-*.json"))
-            {
-                if (CancelRequested()) return;
-                var name = Path.GetFileName(path);
-                SortOne(path, name);
-                Report(StatsPhase.Sort, ++done, null, name);
-            }
-            Report(StatsPhase.Sort, done, null, null, force: true);
-        }
-
-        private void SortOne(string path, string name)
-        {
-            SessionTelemetry? record = null;
-            var bad = false;
+            var key = $"{team}/{pres}";
+            if (_stats.TryGetValue(key, out stats!)) return true;
+            if (_corrupt.Contains(key)) return false;
             try
             {
-                record = JsonSerializer.Deserialize<SessionTelemetry>(File.ReadAllText(path), SessionOptions);
+                stats = ReadStats(e.StatsPath(dataPath, team, pres))
+                        ?? new PresentationStats { TeamId = team, PresentationId = pres };
+                _stats[key] = stats;
+                return true;
             }
-            catch (JsonException) { bad = true; }
-            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return; } // vanished
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { NoteSkip(name, ex); return; }
-
-            string team = string.Empty, pres = string.Empty;
-            if (!bad)
+            catch (Exception ex) when (ex is JsonException or InvalidDataException)
             {
-                bad = record is null
-                      || !IsValidTeamId(record.TeamId)
-                      || !TryNormalizePresentationId(record.PresentationId, out pres)
-                      || record.SessionStartTime == default;
-                team = record?.TeamId ?? string.Empty;
-            }
-
-            try
-            {
-                if (bad)
-                {
-                    Directory.CreateDirectory(_invalidDir);
-                    File.Move(path, Path.Combine(_invalidDir, name), overwrite: true);
-                    summary.Invalid++;
-                }
-                else
-                {
-                    var presDir = Path.Combine(telemetry, team, pres);
-                    if (File.Exists(Path.Combine(presDir, name)))
-                    {
-                        File.Delete(path);                  // re-upload of a counted file
-                        summary.DuplicatesDropped++;
-                    }
-                    else
-                    {
-                        var newDir = Path.Combine(presDir, "new");
-                        Directory.CreateDirectory(newDir);
-                        File.Move(path, Path.Combine(newDir, name), overwrite: true);
-                        summary.Sorted++;
-                    }
-                }
-                NoteOk();
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                NoteSkip(name, ex);   // no copy+delete fallback: a failed move is skipped
+                _corrupt.Add(key);
+                e.Log($"Statistics for {key} are unreadable: {ex.Message}");
+                Problems.Add($"statistics file for {key} is unreadable; its raw files were left in place");
+                stats = null!;
+                return false;
             }
         }
 
-        // ── 2. Count ──
+        // ── 1. Recover ──
 
-        private void Count()
+        // Finishes the moves of files a crashed run had already counted. Must complete before Process reads
+        // anything: such a file may still sit in uploads\ and would otherwise be counted a second time.
+        private void Recover()
         {
-            var targets = new List<(string Team, string Pres, string NewDir)>();
-            var total = 0;
-            foreach (var teamDir in Directory.EnumerateDirectories(telemetry))
+            var statsRoot = Path.Combine(dataPath, "statistics");
+            if (!Directory.Exists(statsRoot)) return;
+
+            var unfinished = 0;
+            foreach (var teamDir in Directory.EnumerateDirectories(statsRoot))
             {
                 var team = Path.GetFileName(teamDir);
-                if (!IsValidTeamId(team)) continue;                       // also skips _invalid
-                foreach (var presDir in Directory.EnumerateDirectories(teamDir))
+                if (!IsValidTeamId(team)) continue;
+
+                foreach (var file in Directory.EnumerateFiles(teamDir, "*.json"))
                 {
-                    var pres = Path.GetFileName(presDir);
+                    if (CancelRequested()) return;
+                    var pres = Path.GetFileNameWithoutExtension(file);
                     if (!TryNormalizePresentationId(pres, out var norm) || norm != pres) continue;
-                    var newDir = Path.Combine(presDir, "new");
-                    if (!Directory.Exists(newDir)) continue;
-                    var n = Directory.EnumerateFiles(newDir).Count();
-                    if (n == 0) continue;
-                    total += n;
-                    targets.Add((team, pres, newDir));
-                }
-            }
+                    if (!TryGetStats(team, pres, out var stats) || stats.PendingMove.Count == 0) continue;
 
-            var done = 0;
-            foreach (var (team, pres, newDir) in targets)
-            {
-                if (CancelRequested()) return;
-                try { CountFolder(team, pres, newDir, ref done, total); }
-                catch (Exception ex) when (ex is JsonException or InvalidDataException)
-                {
-                    e.Log($"Statistics for {team}/{pres} are unreadable: {ex.Message}");
-                    Problems.Add($"statistics file for {team}/{pres} is unreadable; its raw files were left in new\\");
-                }
-                if (Stopped) return;
-            }
-            Report(StatsPhase.Count, done, total, null, force: true);
-        }
-
-        private void CountFolder(string team, string pres, string newDir, ref int done, int total)
-        {
-            var presDir = Path.GetDirectoryName(newDir)!;
-            var statsPath = e.StatsPath(dataPath, team, pres);
-            var stats = ReadStats(statsPath) ?? new PresentationStats { TeamId = team, PresentationId = pres };
-
-            // Crash recovery first: these are already counted — move them, never count them again.
-            if (stats.PendingMove.Count > 0)
-            {
-                var remaining = new List<string>();
-                foreach (var name in stats.PendingMove)
-                {
-                    var src = Path.Combine(newDir, name);
-                    if (!File.Exists(src)) continue;                      // already moved
-                    try { File.Move(src, Path.Combine(presDir, name), overwrite: true); NoteOk(); done++; }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    var counted = CountedDir(team, pres);
+                    var remaining = new List<string>();
+                    foreach (var name in stats.PendingMove)
                     {
-                        NoteSkip(name, ex);
-                        remaining.Add(name);
-                    }
-                }
-                stats.PendingMove = remaining;
-                e.SaveStats(statsPath, stats);
-                if (remaining.Count > 0) return;                          // cannot safely continue this folder
-            }
+                        if (Path.GetFileName(name) != name) continue;                     // never follow a tampered path
+                        var dest = Path.Combine(counted, name);
+                        if (File.Exists(dest)) { _done++; continue; }                      // already counted + moved
 
-            var skipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            while (true)
-            {
-                var names = Directory.EnumerateFiles(newDir)
-                    .Select(p => Path.GetFileName(p))
-                    .Where(n => !skipped.Contains(n))
-                    .Take(BatchSize)
-                    .ToList();
-                if (names.Count == 0) return;
+                        var src = new[] { Path.Combine(distRoot, "uploads", name), Path.Combine(counted, "new", name) }
+                            .FirstOrDefault(File.Exists);
+                        if (src is null) continue;                                         // gone
 
-                var batch = new List<string>(names.Count);
-                foreach (var name in names)
-                {
-                    if (CancelRequested()) break;                          // commit what was read so far
-                    ReadForCount(newDir, name, stats, batch, skipped);
-                    Report(StatsPhase.Count, ++done, total, name);
-                }
-
-                if (batch.Count > 0)
-                {
-                    // The save with PendingMove is the commit point; the moves below always complete.
-                    stats.PendingMove = batch;
-                    e.SaveStats(statsPath, stats);
-
-                    var failed = new List<string>();
-                    foreach (var name in batch)
-                    {
-                        try { File.Move(Path.Combine(newDir, name), Path.Combine(presDir, name), overwrite: true); NoteOk(); }
+                        try
+                        {
+                            Directory.CreateDirectory(counted);
+                            File.Move(src, dest, overwrite: true);
+                            NoteOk();
+                            Report(StatsPhase.Recover, ++_done, name);
+                        }
                         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                         {
-                            failed.Add(name);
-                            _skipped++;
-                            e.Log($"Could not move counted file {name}: {ex.Message}");
+                            remaining.Add(name);
+                            e.Log($"Recovery could not move {name}: {ex.Message}");
                             _consecutiveIoFailures++;
                         }
                     }
-                    stats.PendingMove = failed;
-                    e.SaveStats(statsPath, stats);
 
-                    if (failed.Count > 0)
-                    {
-                        if (!Directory.Exists(distRoot) || _consecutiveIoFailures >= MaxConsecutiveIoFailures)
-                            throw new IOException("lost access to the distribution share while moving counted files");
-                        return;                                           // retried by crash recovery next run
-                    }
+                    stats.PendingMove = remaining;
+                    e.SaveStats(file, stats);
+                    unfinished += remaining.Count;
                 }
+            }
 
-                if (Stopped) return;
+            // Reading new input now could count those files again.
+            if (unfinished > 0)
+                throw new IOException($"recovery could not move {unfinished} already-counted file(s); nothing new was read");
+        }
+
+        // ── 2. Process ──
+
+        private IEnumerable<string> LegacyFiles(HashSet<string> legacyDirs)
+        {
+            foreach (var teamDir in Directory.EnumerateDirectories(telemetry))
+            {
+                if (!IsValidTeamId(Path.GetFileName(teamDir))) continue;                  // also skips _invalid
+                foreach (var presDir in Directory.EnumerateDirectories(teamDir))
+                {
+                    var name = Path.GetFileName(presDir);
+                    if (!TryNormalizePresentationId(name, out var norm) || norm != name) continue;
+                    var newDir = Path.Combine(presDir, "new");
+                    if (!Directory.Exists(newDir)) continue;
+                    legacyDirs.Add(newDir);
+                    foreach (var f in Directory.EnumerateFiles(newDir, "session-*.json")) yield return f;
+                }
             }
         }
 
-        private void ReadForCount(string newDir, string name, PresentationStats stats, List<string> batch, HashSet<string> skipped)
+        private void Process()
         {
-            var path = Path.Combine(newDir, name);
+            var uploads = Path.Combine(distRoot, "uploads");
+            var legacyDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            IEnumerable<string> Inputs()
+            {
+                if (Directory.Exists(uploads))
+                    foreach (var f in Directory.EnumerateFiles(uploads, "session-*.json")) yield return f;
+                foreach (var f in LegacyFiles(legacyDirs)) yield return f;
+            }
+
+            try
+            {
+                foreach (var chunk in Inputs().Chunk(StatisticsDefaults.BatchSize))
+                {
+                    if (CancelRequested()) break;
+                    ProcessBatch(chunk);
+                    if (Stopped) break;
+                }
+            }
+            finally
+            {
+                foreach (var dir in legacyDirs)
+                {
+                    try { Directory.Delete(dir); }                                         // non-recursive: only if empty
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                }
+            }
+        }
+
+        private void ProcessBatch(string[] chunk)
+        {
+            // a. Read + classify, bounded-parallel. A cancel keeps only the files already read.
+            var items = new Item?[chunk.Length];
+            var reads = 0;
+            try
+            {
+                Parallel.ForEachAsync(
+                    Enumerable.Range(0, chunk.Length),
+                    new ParallelOptions { MaxDegreeOfParallelism = StatisticsDefaults.ReadParallelism, CancellationToken = ct },
+                    (i, token) =>
+                    {
+                        token.ThrowIfCancellationRequested();
+                        items[i] = Classify(chunk[i]);
+                        var n = Interlocked.Increment(ref reads);
+                        if (progress is not null && n % ProgressEvery == 0)
+                            Report(StatsPhase.Process, _done + n, items[i]!.Name);
+                        return ValueTask.CompletedTask;
+                    }).GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+                Stopped = true;
+            }
+
+            var read = items.Where(x => x is not null).Select(x => x!).ToList();
+
+            // A name seen twice (e.g. an inbox file and a legacy new\ file) or one whose earlier move failed
+            // is a duplicate: it is counted at most once.
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var it in read.Where(x => x.Kind == Kind.Valid))
+                if (!seen.Add(it.Dest) || _failedDest.Contains(it.Dest))
+                    it.Kind = Kind.Duplicate;
+
+            // b. Save stats (serial, one write per stats file), PendingMove first.
+            var groups = new List<(string Key, PresentationStats Stats, List<string> Baseline, List<Item> Items)>();
+            foreach (var g in read.Where(x => x.Kind == Kind.Valid).GroupBy(x => $"{x.Team}/{x.Pres}"))
+            {
+                var first = g.First();
+                if (!TryGetStats(first.Team, first.Pres, out var stats))
+                {
+                    foreach (var it in g) it.Kind = Kind.Gone;                             // left in place, run ends Failed
+                    continue;
+                }
+
+                var views = 0;
+                foreach (var it in g.Where(x => x.IsView))
+                {
+                    if (!stats.Days.TryGetValue(it.Day, out var counts))
+                        stats.Days[it.Day] = counts = new DayCounts();
+                    counts.Views++;
+                    if (it.IsClick) counts.Clicks++;
+                    views++;
+                }
+
+                // Notification-only groups change no counts, so need no guard: re-processing them is harmless.
+                if (views == 0) continue;
+
+                var baseline = stats.PendingMove.ToList();
+                stats.PendingMove = baseline.Concat(g.Select(x => x.Name)).ToList();
+                e.SaveStats(e.StatsPath(dataPath, first.Team, first.Pres), stats);
+                summary.Counted += views;
+                groups.Add((g.Key, stats, baseline, g.ToList()));
+            }
+
+            // c. Move (MoveParallelism). From here on the batch always completes.
+            var moves = read.Where(x => x.Kind is Kind.Valid or Kind.Invalid or Kind.Duplicate).ToList();
+            Parallel.ForEachAsync(
+                moves,
+                new ParallelOptions { MaxDegreeOfParallelism = StatisticsDefaults.MoveParallelism },
+                (it, _) =>
+                {
+                    try
+                    {
+                        switch (it.Kind)
+                        {
+                            case Kind.Valid:
+                                if (e.BeforeMove is { } hook && !hook(it.Path)) throw new SimulatedCrashException();
+                                Directory.CreateDirectory(Path.GetDirectoryName(it.Dest)!);
+                                File.Move(it.Path, it.Dest, overwrite: true);
+                                break;
+                            case Kind.Invalid:
+                                Directory.CreateDirectory(_invalidDir);
+                                File.Move(it.Path, Path.Combine(_invalidDir, it.Name), overwrite: true);
+                                break;
+                            default:
+                                File.Delete(it.Path);
+                                break;
+                        }
+                        it.MoveOk = true;
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        it.Error = ex;                                                     // left in place
+                    }
+                    return ValueTask.CompletedTask;
+                }).GetAwaiter().GetResult();
+
+            // d. Clear PendingMove for what moved; a failed move stays listed for the next run's recovery.
+            foreach (var (_, stats, baseline, groupItems) in groups)
+            {
+                stats.PendingMove = baseline.Concat(groupItems.Where(x => !x.MoveOk).Select(x => x.Name)).ToList();
+                var first = groupItems[0];
+                e.SaveStats(e.StatsPath(dataPath, first.Team, first.Pres), stats);
+            }
+
+            foreach (var it in moves)
+            {
+                if (it.MoveOk)
+                {
+                    _done++;
+                    summary.Processed++;
+                    if (it.Kind == Kind.Invalid) summary.Invalid++;
+                    else if (it.Kind == Kind.Duplicate) summary.DuplicatesDropped++;
+                }
+                else if (it.Kind == Kind.Valid)
+                {
+                    _failedDest.Add(it.Dest);
+                }
+            }
+
+            // Failure accounting last, so a share-loss abort never precedes the saves above.
+            foreach (var it in read)
+            {
+                if (it.Kind == Kind.Skipped || (it.Kind != Kind.Gone && !it.MoveOk))
+                    NoteSkip(it.Name, it.Error ?? new IOException("not moved"));
+                else if (it.Kind != Kind.Gone)
+                    NoteOk();
+            }
+
+            Report(StatsPhase.Process, _done, null);
+        }
+
+        // Synchronous reads on the bounded set of pool threads: async file I/O costs more than it saves for
+        // many tiny files, and over SMB the 8-way concurrency is what hides the latency.
+        private Item Classify(string path)
+        {
+            var item = new Item { Path = path, Name = System.IO.Path.GetFileName(path) };
+
             SessionTelemetry? record;
             try
             {
-                record = JsonSerializer.Deserialize<SessionTelemetry>(File.ReadAllText(path), SessionOptions);
+                var json = File.ReadAllText(path);
+                record = JsonSerializer.Deserialize<SessionTelemetry>(json, SessionOptions);
             }
-            catch (JsonException) { record = null; }
+            catch (JsonException)
+            {
+                item.Kind = Kind.Invalid;
+                return item;
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                item.Kind = Kind.Gone;
+                return item;
+            }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                skipped.Add(name);
-                NoteSkip(name, ex);
-                return;
+                item.Kind = Kind.Skipped;
+                item.Error = ex;
+                return item;
             }
 
-            if (record is null || record.SessionStartTime == default)
+            if (record is null
+                || !IsValidTeamId(record.TeamId)
+                || !TryNormalizePresentationId(record.PresentationId, out var pres)
+                || record.SessionStartTime == default)
             {
-                try
-                {
-                    Directory.CreateDirectory(_invalidDir);
-                    File.Move(path, Path.Combine(_invalidDir, name), overwrite: true);
-                    summary.Invalid++;
-                    NoteOk();
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    skipped.Add(name);
-                    NoteSkip(name, ex);
-                }
-                return;
+                item.Kind = Kind.Invalid;
+                return item;
             }
 
-            batch.Add(name);                                               // notifications are moved, just not counted
-            if (string.Equals(record.RecordType, SessionTelemetry.NotificationRecordType, StringComparison.Ordinal))
-                return;
+            item.Team = record.TeamId;
+            item.Pres = pres;
+            item.Dest = System.IO.Path.Combine(CountedDir(item.Team, pres), item.Name);
 
-            var day = DayKey(record.SessionStartTime);
-            if (!stats.Days.TryGetValue(day, out var counts))
-                stats.Days[day] = counts = new DayCounts();
-            counts.Views++;
-            if (string.Equals(record.CloseReason, "UrlLaunch", StringComparison.Ordinal))
-                counts.Clicks++;
-            summary.Counted++;
+            if (File.Exists(item.Dest))
+            {
+                item.Kind = Kind.Duplicate;                                                // re-upload of a counted file
+                return item;
+            }
+
+            item.Kind = Kind.Valid;
+            item.Day = DayKey(record.SessionStartTime);
+            item.IsView = !string.Equals(record.RecordType, SessionTelemetry.NotificationRecordType, StringComparison.Ordinal);
+            item.IsClick = item.IsView && string.Equals(record.CloseReason, "UrlLaunch", StringComparison.Ordinal);
+            return item;
         }
 
         // ── 3. Prune ──
@@ -534,7 +674,7 @@ public sealed class PosterStatisticsEngine
                     {
                         if (!TryNormalizePresentationId(Path.GetFileName(presDir), out var norm)
                             || norm != Path.GetFileName(presDir)) continue;
-                        foreach (var f in Directory.EnumerateFiles(presDir)) yield return f;   // parent level only, never new\
+                        foreach (var f in Directory.EnumerateFiles(presDir)) yield return f;   // parent level only
                     }
                 }
             }
@@ -555,7 +695,8 @@ public sealed class PosterStatisticsEngine
                 {
                     NoteSkip(Path.GetFileName(file), ex);
                 }
-                Report(StatsPhase.Prune, ++done, null, null);
+                if (progress is not null && ++done % ProgressEvery == 0)
+                    Report(StatsPhase.Prune, done, null);
             }
         }
     }

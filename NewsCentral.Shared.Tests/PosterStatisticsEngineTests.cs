@@ -103,14 +103,13 @@ public sealed class PosterStatisticsEngineTests : IDisposable
         var s = await Run();
 
         Assert.Equal(StatsRunOutcome.Completed, s.Outcome);
-        Assert.Equal(4, s.Sorted);
+        Assert.Equal(4, s.Processed);
         Assert.Equal(3, s.Counted);
         var day = Assert.Single(Stats().Days);
         Assert.Equal(3, day.Value.Views);
         Assert.Equal(1, day.Value.Clicks);
         Assert.Equal(4, Files(PresDir()));                       // notification moved with the rest
         Assert.Equal(0, Files(Uploads));
-        Assert.Equal(0, Files(Path.Combine(PresDir(), "new")));
         Assert.NotNull(_engine.LoadLastRun(_data));
     }
 
@@ -143,7 +142,7 @@ public sealed class PosterStatisticsEngineTests : IDisposable
         var s = await Run();
 
         Assert.Equal(StatsRunOutcome.Completed, s.Outcome);
-        Assert.Equal(0, s.Sorted + s.Counted);
+        Assert.Equal(0, s.Processed + s.Counted);
         Assert.Equal(bytes, File.ReadAllBytes(path));
         Assert.Equal(stamp, File.GetLastWriteTimeUtc(path));
     }
@@ -190,10 +189,9 @@ public sealed class PosterStatisticsEngineTests : IDisposable
     [Fact]
     public async Task PendingMove_IsMovedNotRecounted()
     {
-        var newDir = Path.Combine(PresDir(), "new");
-        var f1 = Path.GetFileName(Write(newDir, Poster(Day1)));
-        var f2 = Path.GetFileName(Write(newDir, Poster(Day1)));
-        Write(newDir, Poster(Day1));                               // genuinely new, not pending
+        var f1 = Path.GetFileName(Write(Uploads, Poster(Day1)));
+        var f2 = Path.GetFileName(Write(Uploads, Poster(Day1)));
+        Write(Uploads, Poster(Day1));                              // genuinely new, not pending
 
         var seeded = new PresentationStats { TeamId = Team, PresentationId = Pres, PendingMove = [f1, f2] };
         seeded.Days["2026-10-10"] = new DayCounts { Views = 2 };
@@ -208,23 +206,157 @@ public sealed class PosterStatisticsEngineTests : IDisposable
         Assert.Equal(3, Stats().Days["2026-10-10"].Views);         // 2 seeded + 1 new, pending pair not doubled
         Assert.Empty(Stats().PendingMove);
         Assert.Equal(3, Files(PresDir()));
-        Assert.Equal(0, Files(newDir));
+        Assert.Equal(0, Files(Uploads));
     }
 
-    // ── 7 ──
+    // ── M1.1: crash between save and move ──
 
     [Fact]
-    public async Task CancelInSort_IsLossless_AndResumeReachesExactTotals()
+    public async Task CrashBetweenSaveAndMove_RecoversWithoutDoubleCounting()
+    {
+        SeedInbox(30);
+        _engine.BeforeMove = _ => false;
+
+        var crashed = await Run();
+
+        Assert.Equal(StatsRunOutcome.Failed, crashed.Outcome);
+        var mid = Stats();
+        Assert.Equal(30, mid.Days.Values.Sum(d => d.Views));
+        Assert.Equal(30, mid.PendingMove.Count);
+        Assert.Equal(30, Files(Uploads));
+        Assert.Equal(0, Files(PresDir()));
+
+        _engine.BeforeMove = null;
+        var recovered = await Run();
+
+        Assert.Equal(StatsRunOutcome.Completed, recovered.Outcome);
+        Assert.Equal(0, recovered.Counted);
+        var end = Stats();
+        Assert.Equal(30, end.Days.Values.Sum(d => d.Views));
+        Assert.Empty(end.PendingMove);
+        Assert.Equal(0, Files(Uploads));
+        Assert.Equal(30, Files(PresDir()));
+    }
+
+    // ── M1.1: parallel correctness ──
+
+    private static readonly string[] Teams = ["cz-its", "de-prod", "pl-hq"];
+
+    private static (List<SessionTelemetry> Records, Dictionary<(string, string, string), (int V, int C)> Expected) BuildMixed()
+    {
+        var rnd = new Random(42);
+        var pres = Enumerable.Range(0, 20)
+            .Select(i => new Guid(i + 1, 0, 0, new byte[8]).ToString("D")).ToArray();
+        var records = new List<SessionTelemetry>();
+        var expected = new Dictionary<(string, string, string), (int V, int C)>();
+
+        for (var i = 0; i < 2000; i++)
+        {
+            var p = rnd.Next(pres.Length);
+            var team = Teams[p % Teams.Length];
+            var start = Day1.AddDays(rnd.Next(5)).AddSeconds(rnd.Next(80000) - 40000);
+            var kind = rnd.Next(10);                                // 0 = notification, else poster
+            var reason = new[] { "UserClose", "UrlLaunch", "Timeout" }[rnd.Next(3)];
+            var r = kind == 0
+                ? new SessionTelemetry
+                {
+                    RecordType = SessionTelemetry.NotificationRecordType, ContentKey = "k", TeamId = team,
+                    PresentationId = pres[p], SessionStartTime = start, SessionEndTime = start.AddSeconds(3),
+                    CloseReason = "Expanded"
+                }
+                : Poster(start, reason, team, pres[p]);
+            r.SessionId = Guid.NewGuid().ToString();
+            records.Add(r);
+
+            if (kind == 0) continue;
+            var key = (team, pres[p], start.ToString("yyyy-MM-dd"));
+            expected.TryGetValue(key, out var cur);
+            expected[key] = (cur.V + 1, cur.C + (reason == "UrlLaunch" ? 1 : 0));
+        }
+        return (records, expected);
+    }
+
+    [Fact]
+    public async Task ParallelProcessing_GivesExactPerDayCounts_AcrossThreeFreshRuns()
+    {
+        var (records, expected) = BuildMixed();
+
+        for (var run = 0; run < 3; run++)
+        {
+            var dist = Path.Combine(_sandbox, $"run{run}", "dist");
+            var data = Path.Combine(_sandbox, $"run{run}", "data");
+            Directory.CreateDirectory(data);
+            foreach (var r in records) Write(Path.Combine(dist, "uploads"), r);
+
+            var s = await _engine.RunAsync(dist, data, null, default);
+
+            Assert.Equal(StatsRunOutcome.Completed, s.Outcome);
+            Assert.Equal(2000, s.Processed);
+            var actual = new Dictionary<(string, string, string), (int V, int C)>();
+            foreach (var (team, pres) in expected.Keys.Select(k => (k.Item1, k.Item2)).Distinct())
+            {
+                var st = _engine.Load(data, team, pres)!;
+                Assert.Empty(st.PendingMove);
+                foreach (var (day, c) in st.Days) actual[(team, pres, day)] = (c.Views, c.Clicks);
+            }
+            Assert.Equal(expected.OrderBy(k => k.Key).ToList(), actual.OrderBy(k => k.Key).ToList());
+            Assert.Empty(Directory.GetFiles(Path.Combine(dist, "uploads")));
+        }
+    }
+
+    // ── M1.1: legacy new\ drain ──
+
+    [Fact]
+    public async Task LegacyNewFolder_IsDrainedAsUncountedInput_AndRemoved()
+    {
+        var newDir = Path.Combine(PresDir(), "new");
+        for (var i = 0; i < 5; i++) Write(newDir, Poster(Day1.AddMinutes(i)));
+        for (var i = 0; i < 3; i++) Write(Uploads, Poster(Day1.AddMinutes(10 + i)));
+
+        var s = await Run();
+
+        Assert.Equal(StatsRunOutcome.Completed, s.Outcome);
+        Assert.Equal(8, s.Counted);
+        Assert.Equal(8, Stats().Days.Values.Sum(d => d.Views));
+        Assert.Equal(8, Files(PresDir()));
+        Assert.False(Directory.Exists(newDir));
+        Assert.Equal(0, Files(Uploads));
+    }
+
+    [Fact]
+    public async Task LegacyNewFile_ThatIsAlreadyCounted_IsDeletedNotRecounted()
+    {
+        var rec = Poster(Day1);
+        Write(Uploads, rec);
+        await Run();
+
+        var newDir = Path.Combine(PresDir(), "new");
+        Write(newDir, rec);                                        // same name as the counted file
+        var s = await Run();
+
+        Assert.Equal(1, s.DuplicatesDropped);
+        Assert.Equal(1, Stats().Days.Values.Sum(d => d.Views));
+        Assert.False(Directory.Exists(newDir));
+        Assert.Equal(1, Files(PresDir()));
+    }
+
+    // ── M1.1: cancel mid-read ──
+
+    [Fact]
+    public async Task CancelMidRead_LosesNothing_AndResumeReachesExactTotals()
     {
         SeedInbox(2000);
         using var cts = new CancellationTokenSource();
-        var progress = new SyncProgress(p => { if (p.Phase == StatsPhase.Sort && p.Done >= 300) cts.Cancel(); });
+        var progress = new SyncProgress(p => { if (p.Phase == StatsPhase.Process && p.Done >= 300) cts.Cancel(); });
 
         var sw = Stopwatch.StartNew();
         var first = await Run(progress, cts.Token);
         Assert.Equal(StatsRunOutcome.Stopped, first.Outcome);
-        Assert.Equal(2000, Files(Uploads) + Files(Path.Combine(PresDir(), "new")) + Files(PresDir()));
+        Assert.Equal(2000, Files(Uploads) + Files(PresDir()));
         Assert.True(Files(Uploads) > 0);
+        var partial = Stats();
+        Assert.Empty(partial.PendingMove);
+        Assert.Equal(Files(PresDir()), partial.Days.Values.Sum(d => d.Views));
 
         var second = await Run();
         sw.Stop();
@@ -232,34 +364,23 @@ public sealed class PosterStatisticsEngineTests : IDisposable
         Assert.Equal(StatsRunOutcome.Completed, second.Outcome);
         Assert.Equal(2000, Stats().Days.Values.Sum(d => d.Views));
         Assert.Equal(2000, Files(PresDir()));
-        _output.WriteLine($"2000 files sorted+counted across a cancel/resume in {sw.ElapsedMilliseconds} ms " +
-                          $"(~{2000 * 1000.0 / Math.Max(1, sw.ElapsedMilliseconds):F0} files/s)");
+        Assert.Equal(0, Files(Uploads));
+        _output.WriteLine($"TIMING 2000 files across a cancel/resume: {sw.ElapsedMilliseconds} ms " +
+                          $"(~{2000 * 1000.0 / Math.Max(1, sw.ElapsedMilliseconds):F0} files/s); " +
+                          $"resume run RecoverMs={second.RecoverMs} ProcessMs={second.ProcessMs} PruneMs={second.PruneMs}");
     }
 
-    // ── 8 ──
-
     [Fact]
-    public async Task CancelInCount_ResumesToExactTotals()
+    public void OldRunJson_WithSortedField_StillLoads()
     {
-        SeedInbox(2000);
-        using var cts = new CancellationTokenSource();
-        var progress = new SyncProgress(p => { if (p.Phase == StatsPhase.Count && p.Done >= 300) cts.Cancel(); });
+        Directory.CreateDirectory(Path.Combine(_data, "statistics"));
+        File.WriteAllText(Path.Combine(_data, "statistics", "_run.json"),
+            """{ "startedUtc": "2026-10-10T00:00:00Z", "outcome": "Completed", "sorted": 7, "counted": 5 }""");
 
-        var first = await Run(progress, cts.Token);
+        var run = _engine.LoadLastRun(_data)!;
 
-        Assert.Equal(StatsRunOutcome.Stopped, first.Outcome);
-        var partial = Stats();
-        Assert.Empty(partial.PendingMove);
-        var counted = partial.Days.Values.Sum(d => d.Views);
-        Assert.InRange(counted, 1, 1999);
-        Assert.Equal(counted, Files(PresDir()));                   // every counted file was moved
-        Assert.Equal(2000 - counted, Files(Path.Combine(PresDir(), "new")));
-
-        var second = await Run();
-
-        Assert.Equal(StatsRunOutcome.Completed, second.Outcome);
-        Assert.Equal(2000, Stats().Days.Values.Sum(d => d.Views));
-        Assert.Equal(2000, Files(PresDir()));
+        Assert.Equal(7, run.Processed);
+        Assert.Equal(5, run.Counted);
     }
 
     private void SeedInbox(int n)
