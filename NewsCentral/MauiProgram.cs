@@ -216,6 +216,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<ScheduleService>();
         builder.Services.AddSingleton<AssignmentService>();
         builder.Services.AddSingleton<PublishingService>();
+        builder.Services.AddSingleton<PosterStatisticsService>();
 
         // UI-2.2: cached poster thumbnails — PosterThumbnailCache lives in NewsCentral.Shared
         // (platform-neutral); the scaler and the ILogger bridge are this app's own.
