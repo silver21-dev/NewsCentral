@@ -177,6 +177,11 @@ public static class ConfigManifests
                 "true | false (registry: REG_SZ; DWORD also works for this boolean). Shows the UPN Login " +
                 "button on the login page (sign-in with the Windows user's UPN) — no sign-in happens " +
                 "automatically; the key name is historical"),
+            Key("Authentication:EnableLocalAccounts", "false", @"Authentication\EnableLocalAccounts", RegistryValueType.Dword,
+                ControlKind.Toggle, OverridableState.Overridable,
+                "true | false (registry: DWORD 0/1). Local username/password accounts are opt-in; false hides " +
+                "the Login button and Username/Password fields and the authentication service refuses local " +
+                "logon (enforced server-side)"),
             Key("Authentication:UseMockUPN", "false", @"Authentication\UseMockUPN", RegistryValueType.RegSz,
                 ControlKind.Toggle, OverridableState.Overridable,
                 "true | false (registry: REG_SZ); Debug builds only — ignored in Release"),

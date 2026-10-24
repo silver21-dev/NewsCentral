@@ -60,5 +60,10 @@ public class AppConfiguration
     public string AzureBlobClientId    => _configuration["AzureBlob:ClientId"]    ?? string.Empty;
     public string AzureBlobAccountName => _configuration["AzureBlob:AccountName"] ?? string.Empty;
 
+    // Local (username/password) accounts are opt-in. REG_DWORD 0/1 reaches here as "False"/"True",
+    // which bool.TryParse accepts; absent or unparseable is false.
+    public bool EnableLocalAccounts =>
+        bool.TryParse(_configuration["Authentication:EnableLocalAccounts"], out var b) && b;
+
     public string HmacSecretKey => _configuration["Hmac:SecretKey"] ?? string.Empty;
 }

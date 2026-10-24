@@ -198,6 +198,7 @@ Hive: `…\NewsCentral\NewsCentral\`. **No bindable POCO** — every value is an
 |---|---|---|---|---|---|---|---|
 | `Company` | `Contoso` | — | — | PATH | text | | build-time constant `SolutionConstants.Company` (single `Directory.Build.props` value, same for all components); defines hive path; not in appsettings |
 | `DataPath` | `""` | `DataPath` | S | OV | path | | authoring data root |
+| `Authentication:EnableLocalAccounts` | `false` | `Authentication\EnableLocalAccounts` | S | OV | toggle | | `true \| false` (registry: DWORD 0/1); local username/password logon is opt-in — false omits the Login button and Username/Password fields and `LoginAsync` refuses (enforced server-side) |
 | `Authentication:EnableAutoLogin` | `true` | `Authentication\EnableAutoLogin` | S | OV | toggle | | `true \| false` (registry: REG_SZ; DWORD also works for this boolean); shows the UPN Login button on the login page — no sign-in happens automatically; the key name is historical |
 | `Authentication:UseMockUPN` | `false` | `Authentication\UseMockUPN` | S | OV | toggle | | `true \| false` (registry: REG_SZ); Debug builds only — ignored in Release |
 | `Authentication:MockUPN` | `""` | `Authentication\MockUPN` | S | OV | text | | UPN string; Debug builds only — ignored in Release |

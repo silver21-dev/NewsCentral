@@ -39,26 +39,32 @@
             }
         }
 
-        <div class="form-group">
-            <label>@Localizer["Username"]:</label>
-            <input type="text" @bind="username" class="form-control"
-                   placeholder="@Localizer["Username"]" />
-        </div>
+        @if (showLocalLogin)
+        {
+            <div class="form-group">
+                <label>@Localizer["Username"]:</label>
+                <input type="text" @bind="username" class="form-control"
+                       placeholder="@Localizer["Username"]" />
+            </div>
 
-        <div class="form-group">
-            <label>@Localizer["Password"]:</label>
-            <input type="password" @bind="password" class="form-control"
-                   placeholder="@Localizer["Password"]" />
-        </div>
+            <div class="form-group">
+                <label>@Localizer["Password"]:</label>
+                <input type="password" @bind="password" class="form-control"
+                       placeholder="@Localizer["Password"]" />
+            </div>
+        }
 
         @if (!string.IsNullOrEmpty(errorMessage))
         {
             <div class="alert alert-danger">@errorMessage</div>
         }
 
-        <button @onclick="HandleLogin" class="btn btn-primary" disabled="@IsLoginDisabled">
-            @((isLoggingIn || isInitializing) ? Localizer["LoadingPleaseWait"] : Localizer["Login"])
-        </button>
+        @if (showLocalLogin)
+        {
+            <button @onclick="HandleLogin" class="btn btn-primary" disabled="@IsLoginDisabled">
+                @((isLoggingIn || isInitializing) ? Localizer["LoadingPleaseWait"] : Localizer["Login"])
+            </button>
+        }
 
         @if (showUpnButton)
         {
@@ -235,6 +241,9 @@
     // UPN Login button — visible only when Authentication:EnableAutoLogin is true. Detection runs
     // once at page load; the button never logs anyone in without a click.
     private bool showUpnButton = false;
+
+    // Local logon form — in the markup only when Authentication:EnableLocalAccounts is true.
+    private bool showLocalLogin = false;
     private bool upnDetected = false;
     private string? detectedUpn;
 
@@ -271,6 +280,7 @@
     {
         currentEnvironment = EnvironmentDirectory.Current;
 
+        showLocalLogin = AuthService.IsLocalLoginEnabled;
         showUpnButton = WindowsIdentityService.IsAutoLoginEnabled();
 
         if (showUpnButton)

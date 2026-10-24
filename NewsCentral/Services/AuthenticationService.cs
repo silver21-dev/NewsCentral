@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using NewsCentral.Configuration;
 using NewsCentral.Models;
 using NewsCentral.Repositories;
 
@@ -26,19 +29,34 @@ public class AuthenticationService
     private readonly JsonFileRepository<UsersCollection> _userRepo;
     private readonly WindowsIdentityService _windowsIdentityService;
     private readonly UiLanguageService _uiLanguageService;
+    private readonly AppConfiguration _appConfiguration;
+    private readonly ILogger<AuthenticationService> _logger;
     private User? _currentUser;
 
     public event Action? OnAuthenticationStateChanged;
 
-    public AuthenticationService(IStorageService storage, WindowsIdentityService windowsIdentityService, UiLanguageService uiLanguageService)
+    public AuthenticationService(IStorageService storage, WindowsIdentityService windowsIdentityService, UiLanguageService uiLanguageService,
+        IConfiguration configuration, ILogger<AuthenticationService> logger)
     {
+        _appConfiguration = new AppConfiguration(configuration);
+        _logger = logger;
         _userRepo = new JsonFileRepository<UsersCollection>(storage, "config", "");
         _windowsIdentityService = windowsIdentityService;
         _uiLanguageService = uiLanguageService;
     }
 
+    /// <summary>True when Authentication:EnableLocalAccounts is on; Login.razor renders the local logon form only then.</summary>
+    public bool IsLocalLoginEnabled => _appConfiguration.EnableLocalAccounts;
+
     public async Task<User?> LoginAsync(string username, string password)
     {
+        // Enforced here, not only in the UI: a disabled setting refuses even if the page is bypassed.
+        if (!IsLocalLoginEnabled)
+        {
+            _logger.LogWarning("Local account login refused: Authentication:EnableLocalAccounts is false.");
+            return null;
+        }
+
         System.Diagnostics.Debug.WriteLine($"=== LoginAsync: {username} ===");
 
         try

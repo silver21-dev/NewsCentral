@@ -126,6 +126,10 @@ HKLM\Software\[Company]\NewsCentral\NewsCentral\
 │       EnableAutoLogin   REG_SZ    "true" or "false" (DWORD also works for this boolean); shows the
 │                                   UPN Login button on the login page — no sign-in happens
 │                                   automatically; the key name is historical; default true
+│       EnableLocalAccounts DWORD   (0/1; default 0/false — local username/password accounts are opt-in;
+│                                   false omits the Login button and Username/Password fields from the
+│                                   login page and AuthenticationService.LoginAsync refuses local logon
+│                                   with a Warning log — enforced server-side, not only in the UI)
 │       UseMockUPN        DWORD     (Debug builds only — ignored in Release; not for registry deployment)
 │       MockUPN           REG_SZ    (Debug builds only — ignored in Release; not for registry deployment)
 ├── Storage\
@@ -197,6 +201,7 @@ HKLM\Software\[Company]\NewsCentral\NewsTester\
   "DataPath": "C:\\Download\\NewsCentral",
   "Authentication": {
     "EnableAutoLogin": true,
+    "EnableLocalAccounts": false,
     "UseMockUPN": true,
     "MockUPN": "user@company.com"
   },

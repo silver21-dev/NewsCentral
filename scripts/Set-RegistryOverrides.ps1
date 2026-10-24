@@ -14,7 +14,8 @@
 #  NOT WRITTEN by this script (write by hand or by GPO):
 #    NewsCentral component keys (DataPath, Storage\, ...) —
 #      EXCEPT Environments\ (-EnvironmentInstances) and AllowUserEnvironments
-#      (-AllowUserEnvironments), the policy environment catalog surface (M3b)
+#      (-AllowUserEnvironments), the policy environment catalog surface (M3b), and
+#      Authentication\EnableLocalAccounts (-EnableLocalAccounts)
 #    NewsTester component keys (reserved; not yet defined)
 #
 #  WARNING — numeric values must NEVER be written as -Type DWord.
@@ -124,8 +125,8 @@
     Only NewsService and NewsViewer accept the parameters added for the fleet registry surface
     (Signing, Entra, Delivery, Display, Ui, Telemetry, Logging, AzureBlob:UseWinHttpProxy) — binding
     any of them against NewsCentral or NewsTester is a terminating error. Conversely,
-    -EnvironmentInstances and -AllowUserEnvironments (the policy environment catalog, M3b) are
-    valid ONLY for NewsCentral — binding either against NewsService, NewsViewer, or NewsTester is
+    -EnvironmentInstances and -AllowUserEnvironments (the policy environment catalog, M3b) and
+    -EnableLocalAccounts are valid ONLY for NewsCentral — binding either against NewsService, NewsViewer, or NewsTester is
     also a terminating error.
 
 .PARAMETER Teams
@@ -336,6 +337,11 @@
     name IS its identity (never derived, unlike an Entra group-team instance label). Authoritatively
     replaces every subkey under Environments\ — an environment omitted from this hashtable when the
     parameter is bound is removed from the catalog. NewsCentral only.
+
+.PARAMETER EnableLocalAccounts
+    Whether local (username/password) accounts may log on to NewsCentral. Authentication\EnableLocalAccounts,
+    DWORD 0/1. Default false when absent: false hides the Login button and Username/Password fields and the
+    authentication service refuses local logon. NewsCentral only.
 
 .PARAMETER AllowUserEnvironments
     Group Policy toggle: whether operators may add their own environments in addition to the policy
@@ -563,7 +569,10 @@ param(
 
     # ── Policy environment catalog (NewsCentral only) ─────────────────────────────
     [hashtable] $EnvironmentInstances,
-    [Nullable[bool]] $AllowUserEnvironments
+    [Nullable[bool]] $AllowUserEnvironments,
+
+    # ── Authentication (NewsCentral only) ─────────────────────────────────────────
+    [Nullable[bool]] $EnableLocalAccounts
 )
 
 Set-StrictMode -Version Latest
@@ -636,7 +645,7 @@ else {
 
 # -EnvironmentInstances / -AllowUserEnvironments are valid ONLY for -ComponentName NewsCentral —
 # rejected for NewsService, NewsViewer, and (unlike the fleet parameters above) NewsTester too.
-$newsCentralOnlyParams = @("EnvironmentInstances", "AllowUserEnvironments")
+$newsCentralOnlyParams = @("EnvironmentInstances", "AllowUserEnvironments", "EnableLocalAccounts")
 if ($ComponentName -ne "NewsCentral") {
     $offendingNc = $newsCentralOnlyParams | Where-Object { $PSBoundParameters.ContainsKey($_) }
     if ($offendingNc) {
@@ -1070,6 +1079,12 @@ if ($PSBoundParameters.ContainsKey("EnvironmentInstances")) {
 if ($PSBoundParameters.ContainsKey("AllowUserEnvironments")) {
     $dword = if ($AllowUserEnvironments) { 1 } else { 0 }
     Set-RegValue -Path $base -Name "AllowUserEnvironments" -Value $dword -Type DWord
+}
+
+# ── Authentication\EnableLocalAccounts (NewsCentral only — see gating above) ─────────────────
+if ($PSBoundParameters.ContainsKey("EnableLocalAccounts")) {
+    $dword = if ($EnableLocalAccounts) { 1 } else { 0 }
+    Set-RegValue -Path "$base\Authentication" -Name "EnableLocalAccounts" -Value $dword -Type DWord
 }
 
 # ── teams\ — replace entire subkey so the list stays authoritative ────────────
