@@ -16,8 +16,10 @@ namespace NewsService.Tests;
 public sealed class ContentChangedNotifierTests : IDisposable
 {
     private const string Team = "cz-its";
-    private const string ImagePath = "cz-its/img.png";
+    private const string ImagePath = "cz-its/images/generated/img.png";
     private static readonly byte[] ImageBytes = [1, 2, 3, 4];
+    private static readonly string ImageHash =
+        "sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(ImageBytes)).ToLowerInvariant();
 
     private readonly string _root =
         Path.Combine(Path.GetTempPath(), "nsvc-notify-" + Guid.NewGuid().ToString("N"));
@@ -54,7 +56,7 @@ public sealed class ContentChangedNotifierTests : IDisposable
         if (withImage)
             index.PublishedAssignments.Add(new PublishedAssignmentIndex
             {
-                Content = new ContentInfo { ImagePath = ImagePath, ImageHash = "img-hash" }
+                Content = new ContentInfo { ImagePath = ImagePath, ImageHash = ImageHash }
             });
         return JsonSerializer.Serialize(index, JsonDefaults.Options);
     }

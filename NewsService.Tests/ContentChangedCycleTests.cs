@@ -45,7 +45,7 @@ public sealed class ContentChangedCycleTests : IDisposable
         if (image is not null)
             index.PublishedAssignments.Add(new PublishedAssignmentIndex
             {
-                Content = new ContentInfo { ImagePath = $"{team}/{image}", ImageHash = Hash([1]) }
+                Content = new ContentInfo { ImagePath = $"{team}/images/generated/{image}", ImageHash = Hash([1]) }
             });
         return JsonSerializer.Serialize(index, JsonDefaults.Options);
     }

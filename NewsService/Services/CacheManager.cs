@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using NewsCentral.Security;
 
 namespace NewsService.Services;
 
@@ -106,6 +107,28 @@ public sealed class CacheManager
     }
 
     public bool FileExists(string relativePath) => File.Exists(Resolve(relativePath));
+
+    /// <summary>
+    /// Containment check for a validated image path: the resolved cache path must lie inside
+    /// <c>{cacheRoot}\{team}\</c>.
+    /// </summary>
+    public bool TryValidateImagePath(string teamFolder, string imagePath, out string reason) =>
+        ImagePathValidator.TryResolveContained(
+            Resolve(teamFolder), imagePath[(teamFolder.Length + 1)..], out _, out reason);
+
+    /// <summary>SHA-256 of the cached file, or null when it is absent or unreadable.</summary>
+    public async Task<byte[]?> ComputeHashAsync(string relativePath)
+    {
+        try
+        {
+            await using var stream = File.OpenRead(Resolve(relativePath));
+            return await SHA256.HashDataAsync(stream);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     // ── Uploads folder ───────────────────────────────────────────────────────
 

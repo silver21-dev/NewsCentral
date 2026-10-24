@@ -261,6 +261,14 @@ public sealed class SyncService(
             return false;
         }
 
+        // Path hardening: one bad ImagePath rejects the WHOLE index (before anything is read, written
+        // or published), even when IndexHash is unchanged — a tampered path must not ride on a stale hash.
+        if (!TryValidateImagePaths(teamFolder, remoteIndex, out var pathFailure))
+        {
+            logger.LogError("Team {Team}: index rejected — {Reason}; previous cached state kept", teamFolder, pathFailure);
+            return false;
+        }
+
         var cachedIndex  = await cache.ReadJsonAsync<TeamIndexFile>($"{teamFolder}/index.json");
         var indexChanged = cachedIndex?.IndexHash != remoteIndex.IndexHash;
 
@@ -298,7 +306,7 @@ public sealed class SyncService(
         foreach (var assignment in remoteIndex.PublishedAssignments)
         {
             ct.ThrowIfCancellationRequested();
-            if (!await SyncImageAsync(teamFolder, assignment, ct))
+            if (!await SyncImageAsync(teamFolder, assignment, retryOfIncomplete ? LogLevel.Debug : LogLevel.Error, ct))
                 missing.Add(assignment.Content.ImagePath);
         }
 
@@ -334,17 +342,26 @@ public sealed class SyncService(
     {
         try
         {
+            // The cached index may predate path validation: never build a path from an unvalidated entry.
+            if (!TryValidateImagePaths(teamFolder, cachedIndex, out var pathFailure))
+            {
+                logger.LogError("Team {Team}: cached index skipped by self-heal — {Reason}", teamFolder, pathFailure);
+                return;
+            }
+
             var missing = cachedIndex.PublishedAssignments
-                .Where(a => !string.IsNullOrEmpty(a.Content.ImagePath) && !cache.FileExists(a.Content.ImagePath))
+                .Where(a => !cache.FileExists(a.Content.ImagePath))
                 .ToList();
             if (missing.Count == 0) return;
 
+            var repeat = _unhealableHash.TryGetValue(teamFolder, out var known) && known == cachedIndex.IndexHash;
             var restored = new List<string>();
             var failed   = new List<string>();
             foreach (var assignment in missing)
             {
                 ct.ThrowIfCancellationRequested();
-                (await SyncImageAsync(teamFolder, assignment, ct) ? restored : failed).Add(assignment.Content.ImagePath);
+                (await SyncImageAsync(teamFolder, assignment, repeat ? LogLevel.Debug : LogLevel.Error, ct)
+                    ? restored : failed).Add(assignment.Content.ImagePath);
             }
 
             if (restored.Count > 0)
@@ -373,16 +390,52 @@ public sealed class SyncService(
             "Team {Team}: cache self-heal could not restore: {Detail}", teamFolder, detail);
     }
 
-    /// <summary>True when the image is cached and current (or the assignment has none); false when it could not be downloaded or cached.</summary>
-    private async Task<bool> SyncImageAsync(
-        string teamFolder, PublishedAssignmentIndex assignment, CancellationToken ct)
+    /// <summary>
+    /// Validates every entry's <c>ImagePath</c> (shape, then containment for the cache path and the
+    /// repository source — share path or blob name). Names the first offending entry in
+    /// <paramref name="failure"/>; any failure means the whole index must be rejected.
+    /// </summary>
+    private bool TryValidateImagePaths(string teamFolder, TeamIndexFile index, out string failure)
     {
-        if (string.IsNullOrEmpty(assignment.Content.ImagePath)) return true;
+        foreach (var a in index.PublishedAssignments)
+        {
+            var path = a.Content.ImagePath;
+            var entry = $"assignment {a.AssignmentId} (presentation {a.PresentationId}) ImagePath '{path}'";
 
+            var shape = ImagePathValidator.Validate(path, teamFolder);
+            if (!shape.IsValid) { failure = $"{entry}: {shape.Reason}"; return false; }
+
+            if (!cache.TryValidateImagePath(teamFolder, path, out var cacheReason))
+            { failure = $"{entry}: cache path {cacheReason}"; return false; }
+
+            if (!repository.TryValidateImagePath(teamFolder, path, out var sourceReason))
+            { failure = $"{entry}: source path {sourceReason}"; return false; }
+        }
+
+        failure = string.Empty;
+        return true;
+    }
+
+    /// <summary>
+    /// True when the image is cached and verified; false when it could not be verified, downloaded or
+    /// cached. A cached file is a hit only if its SHA-256 equals <c>ImageHash</c>; a download is written
+    /// only after its SHA-256 matches, so a missing hash or a mismatch leaves the previous file untouched.
+    /// <paramref name="rejectLevel"/> is Error on first sight and Debug for repeats of the same IndexHash.
+    /// </summary>
+    private async Task<bool> SyncImageAsync(
+        string teamFolder, PublishedAssignmentIndex assignment, LogLevel rejectLevel, CancellationToken ct)
+    {
         var relativePath = assignment.Content.ImagePath;
-        var storedHash   = cache.ReadStoredHash(relativePath);
 
-        if (storedHash == assignment.Content.ImageHash && cache.FileExists(relativePath))
+        if (!ImageHashVerifier.TryParse(assignment.Content.ImageHash, out var expected, out var hashProblem))
+        {
+            logger.Log(rejectLevel, "Team {Team}: image {Path} rejected — {Reason}; previous cached file kept",
+                teamFolder, relativePath, hashProblem);
+            return false;
+        }
+
+        var cachedHash = cache.FileExists(relativePath) ? await cache.ComputeHashAsync(relativePath) : null;
+        if (cachedHash is not null && ImageHashVerifier.DigestMatches(cachedHash, expected))
         {
             logger.LogDebug("Image up-to-date: {Path}", relativePath);
             return true;
@@ -395,6 +448,14 @@ public sealed class SyncService(
             {
                 // Reported once per failing IndexHash by SyncTeamAsync, not per cycle.
                 logger.LogDebug("Image not found in repository: {Path}", relativePath);
+                return false;
+            }
+
+            if (!ImageHashVerifier.Matches(bytes, expected))
+            {
+                logger.Log(rejectLevel,
+                    "Team {Team}: image {Path} rejected — downloaded bytes do not match ImageHash; previous cached file kept",
+                    teamFolder, relativePath);
                 return false;
             }
 

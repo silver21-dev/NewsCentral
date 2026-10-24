@@ -1,3 +1,5 @@
+using NewsCentral.Security;
+
 namespace NewsService.Services;
 
 /// <summary>
@@ -32,6 +34,10 @@ public sealed class LocalShareRepositoryReader : IRepositoryReader
 
     private string Resolve(string relativePath) =>
         Path.Combine(_sharePath, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+    public bool TryValidateImagePath(string teamFolder, string imagePath, out string reason) =>
+        ImagePathValidator.TryResolveContained(
+            Path.Combine(_sharePath, teamFolder), imagePath[(teamFolder.Length + 1)..], out _, out reason);
 
     public async Task<string?> ReadTextAsync(string relativePath, CancellationToken ct = default)
     {

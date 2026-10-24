@@ -47,7 +47,7 @@ public sealed class SyncCompletenessTests : IDisposable
         foreach (var img in images)
             index.PublishedAssignments.Add(new PublishedAssignmentIndex
             {
-                Content = new ContentInfo { ImagePath = $"{Team}/{img}", ImageHash = Hash(img == "a.png" ? [1] : [2]) }
+                Content = new ContentInfo { ImagePath = $"{Team}/images/generated/{img}", ImageHash = Hash(img == "a.png" ? [1] : [2]) }
             });
         return JsonSerializer.Serialize(index, JsonDefaults.Options);
     }
@@ -90,7 +90,7 @@ public sealed class SyncCompletenessTests : IDisposable
 
         Assert.Equal(new[] { "b.png" }, repo.Downloads);   // a.png not downloaded again
         Assert.Equal("new", await CachedHash(cache));
-        Assert.True(cache.FileExists($"{Team}/b.png"));
+        Assert.True(cache.FileExists($"{Team}/images/generated/b.png"));
     }
 
     [Fact]

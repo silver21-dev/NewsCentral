@@ -50,7 +50,7 @@ public sealed class CacheSelfHealTests : IDisposable
         foreach (var img in images)
             index.PublishedAssignments.Add(new PublishedAssignmentIndex
             {
-                Content = new ContentInfo { ImagePath = $"{team}/{img}", ImageHash = Hash([1]) }
+                Content = new ContentInfo { ImagePath = $"{team}/images/generated/{img}", ImageHash = Hash([1]) }
             });
         return JsonSerializer.Serialize(index, JsonDefaults.Options);
     }
@@ -68,7 +68,7 @@ public sealed class CacheSelfHealTests : IDisposable
         repo.Downloads.Clear(); log.Entries.Clear(); n.Calls = 0;
     }
 
-    private string CachePath(string img) => Path.Combine(_root, Team, img);
+    private string CachePath(string img) => Path.Combine(_root, Team, "images", "generated", img);
 
     [Fact]
     public async Task AllImagesPresent_NoFetch_NoWarning_NoNotify()

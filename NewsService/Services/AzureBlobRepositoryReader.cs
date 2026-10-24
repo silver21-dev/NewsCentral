@@ -1,5 +1,6 @@
 using Azure;
 using Azure.Storage.Blobs;
+using NewsCentral.Security;
 using NewsService.Configuration;
 
 namespace NewsService.Services;
@@ -44,6 +45,13 @@ public sealed class AzureBlobRepositoryReader : IRepositoryReader
         _logger.LogInformation(
             "Azure Blob reader initialised — account={Account}, container={Container}, authMode={Mode}",
             config.AccountName, config.ContainerName, config.AuthMode);
+    }
+
+    public bool TryValidateImagePath(string teamFolder, string imagePath, out string reason)
+    {
+        var ok = ImagePathValidator.IsBlobNameUnderTeam(imagePath, teamFolder);
+        reason = ok ? "ok" : $"blob name '{imagePath}' does not start with '{teamFolder}/'";
+        return ok;
     }
 
     public async Task<string?> ReadTextAsync(string relativePath, CancellationToken ct = default)

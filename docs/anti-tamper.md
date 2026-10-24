@@ -47,10 +47,10 @@ exactly (see §6).
 **Image hash.** `BuildContentInfoAsync` streams each image through SHA-256 and stores
 `sha256:{hex}` in `content.imageHash`. Because that field lives inside the signed index, tampering
 with either the recorded hash or the index is caught by the signature; tampering with the cached
-image file alone is caught by NewsViewer's display-time re-hash. NewsService's sync loop compares
-the stored sidecar hash against `content.imageHash` for **change detection** (decide whether to
-re-download) — it does not perform a separate display-time image integrity check; that check is
-NewsViewer's.
+image file alone is caught by NewsViewer's display-time re-hash. NewsService's sync loop hashes every
+download in memory and writes it only when it matches `content.imageHash`, and treats a cached file
+as current only when its own SHA-256 matches (§8); it does not perform a display-time check — that
+is NewsViewer's.
 
 ## 3. Configuration & registry
 
@@ -308,3 +308,50 @@ the registry values directly via `Microsoft.Win32.Registry`, exactly as `SetLock
 against this implementation; it is evidence against a different delivery mechanism (WMI Bridge /
 MDM) that this codebase does not use. This note exists so nobody later "fixes" working, verified
 code on the strength of an unrelated report.
+
+## 8. Image path and image hash hardening (NewsService)
+
+NewsService runs as LocalSystem and builds cache, file-share and blob paths from the `ImagePath` of a
+downloaded `index.json`. Signing alone does not protect that (`RequireSignedIndex` defaults to
+`false`), so the path and the image bytes are validated independently of the signature.
+
+**Path rule** (`ImagePathValidator` in `NewsCentral.Shared`; non-throwing, returns a reason for the log).
+The only accepted shape is exactly what `PresentationService` emits:
+
+    {team}/images/{original|generated}/{name}.png|.jpg
+
+- `/` is the only separator; any `\` is rejected. Exactly four segments.
+- `{team}` equals (OrdinalIgnoreCase) the team folder of the index being processed; `images`, the
+  subfolder and the extension (`.png` / `.jpg`) are matched OrdinalIgnoreCase. `a.png.exe` is rejected.
+- Rejected: empty / whitespace; rooted, UNC and device paths; `.` or `..` or empty segments; `:` anywhere
+  (drive letters, alternate data streams); `Path.GetInvalidFileNameChars()`; segments ending in a dot or
+  space; an empty file stem; reserved device names (`CON`, `NUL`, `COM1`, …). An empty `ImagePath` is
+  rejected too (every assignment has an image).
+
+**Containment** (after the shape check): `Path.GetFullPath` of `{root}\{team}\` + the relative part must
+start with `{root}\{team}\` (OrdinalIgnoreCase), for the cache (`CacheManager.TryValidateImagePath`) and for
+the file-share source (`LocalShareRepositoryReader`). For Azure Blob the name handed to the blob client is
+the validated `ImagePath` itself and must start with `{team}/` (`AzureBlobRepositoryReader`).
+
+**Hash rule.** `ImageHash` is `sha256:{hex}` (`IndexGenerationService`); hex case is ignored and the bare
+hex form is accepted. Each image is downloaded fully into memory, hashed, and written to the cache only
+on a match (`ImageHashVerifier`). A cached file counts as up to date only if its own SHA-256 matches —
+the `.hash` sidecar is still written but is no longer trusted.
+
+**Rejection behaviour**
+
+| Condition | Result |
+|---|---|
+| Any entry fails the path or containment check | The **whole index** is rejected, before anything is read or written — also when `IndexHash` is unchanged. Error naming the assignment and the reason. Cached index, images and display surfaces are untouched. |
+| `ImageHash` missing, empty or malformed | That image is rejected (Error) and never downloaded; its previous cached file is kept. Other images still sync. |
+| Downloaded bytes do not match `ImageHash` | That image is rejected (Error); nothing is written; the previous file is kept. |
+
+A rejected image counts as a missing image: the new `index.json` is **not** written (index last,
+`docs/newsservice-spec.md`), so the previous index stays in effect and the sync is retried next cycle.
+The Error is logged once per failing `IndexHash` and drops to Debug on repeats. Cache self-heal (unchanged
+index) validates the cached index's paths before fetching anything.
+
+**Not covered.** Display-surface selection reads the already-cached index; images it publishes are
+re-hashed against `ImageHash` by `ImagePublisher` (§7). NewsViewer builds the cached image path from
+`ImagePath` at `PresentationSelector.cs:54` and still verifies the hash at display time; it was
+deliberately left unchanged.

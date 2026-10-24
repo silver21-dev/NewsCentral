@@ -15,4 +15,16 @@ public interface IRepositoryReader
 
     Task<string?> ReadTextAsync(string relativePath, CancellationToken ct = default);
     Task<byte[]?> ReadBytesAsync(string relativePath, CancellationToken ct = default);
+
+    /// <summary>
+    /// Source-specific containment check for an image path that already passed
+    /// <c>ImagePathValidator.Validate</c>: the file-share reader requires the resolved path to stay inside
+    /// <c>{share}\{team}\</c>, the blob reader that the blob name starts with <c>{team}/</c>. Called before
+    /// any read; the default accepts (readers with no path semantics).
+    /// </summary>
+    bool TryValidateImagePath(string teamFolder, string imagePath, out string reason)
+    {
+        reason = "ok";
+        return true;
+    }
 }
