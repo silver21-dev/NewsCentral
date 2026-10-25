@@ -363,3 +363,10 @@ file and tampered content; repeats at Debug), deleted together with its `.hash` 
 through the S01a verified path. If the re-download fails verification or the source is unreachable the slot
 stays empty and is retried next cycle; an absent file is restored the same way. A heal raises no
 `ContentChanged` event.
+
+**Offline re-validation (S01b).** Display-surface selection reads the cached index of every team without a
+fresh download when the source is unreachable (or a downloaded index was rejected). That cached index is
+re-validated with the same whole-index `ImagePath` rules as a download, because a cache written before
+S01a was never checked. If any team's cached index fails, neither lock screen nor wallpaper is touched:
+no publish, no sweep, no write, no clear — the previously published state stays. Error naming team and
+entry once per distinct failure, then Debug.

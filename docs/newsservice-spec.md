@@ -38,6 +38,8 @@ Executed by `Worker` on every interval tick:
 
 **Step 2 — Display surfaces (lock screen, then wallpaper)**
 
+**Cached-index re-validation.** Display-surface selection reads the *cached* `index.json` of every team, including when the repository is unreachable or a downloaded index was rejected. That cached index goes through the same whole-index `ImagePath` validation as a download (`docs/anti-tamper.md` §8) — it may predate path validation. If any team's cached index fails, **neither surface is touched**: nothing is published, swept, written or cleared, so the previously published state stays in place. One `Error` is logged naming the team and entry, then Debug for repeats of the same failure.
+
 NewsService manages **two** display surfaces through PersonalizationCSP — the logon/lock screen and, since the wallpaper-ownership migration from NewsViewer, the desktop wallpaper. `Delivery:LockScreenEnabled` and `Delivery:WallpaperEnabled` (bool, default `true` each) independently gate their own surface **entirely**: when a toggle is `false`, nothing for that surface is read, published, swept, written, or cleared that cycle — logged once at Debug. **Neither is a revert** — see "Enable toggles" below.
 
 When at least one surface is enabled:

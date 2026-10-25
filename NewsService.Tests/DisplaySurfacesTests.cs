@@ -51,7 +51,7 @@ public sealed class DisplaySurfacesTests : IDisposable
             .Build();
 
         var sut = new SyncService(
-            repository: null!, cache: cache, lockScreen: fake, imagePublisher: publisher,
+            repository: new UnreachableRepository(), cache: cache, lockScreen: fake, imagePublisher: publisher,
             telemetry: null!, entra: null!, configuration: config, logger: log, contentChanged: new NullContentChangedNotifier());
 
         return (sut, fake, log);
@@ -223,6 +223,98 @@ public sealed class DisplaySurfacesTests : IDisposable
         Assert.Single(fake.WallpaperSetCalls);   // wallpaper still applied despite the lock-screen throw
         Assert.Contains(log.Entries,
             e => e.Level == LogLevel.Error && e.Message.Contains("Lock screen apply failed"));
+    }
+
+    // ── Cached index re-validation (source unreachable) ───────────────────────
+
+    [Fact]
+    public async Task CachedIndexWithTraversalPath_SourceUnreachable_NothingPublishedSweptOrCleared_ErrorOnceThenDebug()
+    {
+        var (sut, fake, log) = NewSut();
+        var cache = new CacheManager(_cacheRoot, JsonDefaults.Options);
+        var (lockPath, lockHash) = await WriteImageAsync(cache, "lock.jpg", "lock-bytes"u8.ToArray());
+        var (wallPath, wallHash) = await WriteImageAsync(cache, "wall.jpg", "wall-bytes"u8.ToArray());
+        Directory.CreateDirectory(_publishRoot);
+        var stale = Path.Combine(_publishRoot, "lockscreen-stale0000000000.jpg");   // a sweep would delete this
+        await File.WriteAllTextAsync(stale, "previous");
+        fake.Current = Path.Combine(_publishRoot, "lockscreen-current000000000.jpg");
+
+        await WriteTeamIndexAsync(cache, new TeamIndexFile
+        {
+            TeamFolderName = Team,
+            IndexHash = "h1",
+            PublishedAssignments =
+            [
+                NewAssignment("pres-lock", lockPath, lockHash, isLogonScreen: true, isWallpaper: false),
+                NewAssignment("pres-wall", "cz-its/images/../../../Windows/Temp/x.jpg", wallHash, isLogonScreen: false, isWallpaper: true),
+            ]
+        });
+
+        await sut.ApplyDisplaySurfacesAsync([Team]);
+
+        Assert.Empty(fake.SetCalls);
+        Assert.Empty(fake.WallpaperSetCalls);
+        Assert.Empty(fake.ClearCalls);
+        Assert.Empty(fake.WallpaperClearCalls);
+        Assert.True(File.Exists(stale));                                     // no sweep
+        Assert.Single(Directory.GetFiles(_publishRoot));                     // nothing published
+        var error = Assert.Single(log.Entries, e => e.Level == LogLevel.Error);
+        Assert.Contains(Team, error.Message);
+        Assert.Contains("pres-wall", error.Message);
+
+        log.Entries.Clear();
+        await sut.ApplyDisplaySurfacesAsync([Team]);                         // same failure next cycle
+        Assert.DoesNotContain(log.Entries, e => e.Level >= LogLevel.Warning);
+        Assert.Contains(log.Entries, e => e.Level == LogLevel.Debug && e.Message.Contains("cached index rejected"));
+    }
+
+    [Fact]
+    public async Task CachedIndexWithBadPath_OneTeamOfTwo_NoSurfaceTouchedForEitherTeam()
+    {
+        var (sut, fake, _) = NewSut();
+        var cache = new CacheManager(_cacheRoot, JsonDefaults.Options);
+        var (lockPath, lockHash) = await WriteImageAsync(cache, "lock.jpg", "lock-bytes"u8.ToArray());
+        await WriteTeamIndexAsync(cache, new TeamIndexFile
+        {
+            TeamFolderName = Team,
+            PublishedAssignments = [NewAssignment("pres-lock", lockPath, lockHash, isLogonScreen: true, isWallpaper: false)]
+        });
+        await cache.WriteJsonAsync("other/index.json", new TeamIndexFile
+        {
+            TeamFolderName = "other",
+            PublishedAssignments = [NewAssignment("pres-bad", @"\\localhost\C$\x.jpg", lockHash, isLogonScreen: true, isWallpaper: false)]
+        });
+
+        await sut.ApplyDisplaySurfacesAsync([Team, "other"]);
+
+        Assert.Empty(fake.SetCalls);
+        Assert.Empty(fake.ClearCalls);
+    }
+
+    [Fact]
+    public async Task ValidCachedIndex_SourceUnreachable_AppliesAsBefore()
+    {
+        var (sut, fake, log) = NewSut();   // UnreachableRepository: IsAvailable is false
+        var cache = new CacheManager(_cacheRoot, JsonDefaults.Options);
+        var (lockPath, lockHash) = await WriteImageAsync(cache, "lock.jpg", "lock-bytes"u8.ToArray());
+        await WriteTeamIndexAsync(cache, new TeamIndexFile
+        {
+            TeamFolderName = Team,
+            PublishedAssignments = [NewAssignment("pres-lock", lockPath, lockHash, isLogonScreen: true, isWallpaper: false)]
+        });
+
+        await sut.ApplyDisplaySurfacesAsync([Team]);
+
+        Assert.Single(fake.SetCalls);
+        Assert.DoesNotContain(log.Entries, e => e.Level >= LogLevel.Warning);
+    }
+
+    private sealed class UnreachableRepository : IRepositoryReader
+    {
+        public bool IsAvailable => false;
+        public string SyncSource => "Share";
+        public Task<string?> ReadTextAsync(string relativePath, CancellationToken ct = default) => Task.FromResult<string?>(null);
+        public Task<byte[]?> ReadBytesAsync(string relativePath, CancellationToken ct = default) => Task.FromResult<byte[]?>(null);
     }
 
     // ── Test double ───────────────────────────────────────────────────────────

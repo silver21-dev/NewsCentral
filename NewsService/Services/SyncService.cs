@@ -565,6 +565,7 @@ public sealed class SyncService(
     internal async Task ApplyDisplaySurfacesAsync(IReadOnlyList<string> teams)
     {
         var assignments = await CollectAssignmentsAsync(teams);
+        if (assignments is null) return;   // a cached index failed validation: nothing published, swept or cleared
 
         try { await ApplyLockScreenAsync(teams, assignments); }
         catch (Exception ex) { logger.LogError(ex, "Lock screen apply failed for this cycle"); }
@@ -575,19 +576,43 @@ public sealed class SyncService(
 
     /// <summary>
     /// Reads every team's cached index once and flattens all published assignments into one list
-    /// — the single enumeration pass both display-surface winners are picked from.
+    /// — the single enumeration pass both display-surface winners are picked from. The cached index is
+    /// used here without a fresh download (source unreachable, or a downloaded index rejected), so it is
+    /// re-validated like a downloaded one (it may predate path validation). Returns null when any team's
+    /// cached index fails: the caller then leaves the display surfaces entirely alone (no publish, sweep,
+    /// write or clear) so the previously published state stays in place.
     /// </summary>
-    private async Task<List<PublishedAssignmentIndex>> CollectAssignmentsAsync(IReadOnlyList<string> teams)
+    private async Task<List<PublishedAssignmentIndex>?> CollectAssignmentsAsync(IReadOnlyList<string> teams)
     {
         var all = new List<PublishedAssignmentIndex>();
+        var valid = true;
         foreach (var teamFolder in teams)
         {
             var index = await cache.ReadJsonAsync<TeamIndexFile>($"{teamFolder}/index.json");
             if (index?.PublishedAssignments is null) continue;
+
+            if (!TryValidateImagePaths(teamFolder, index, out var failure))
+            {
+                // Security outcome: Error the first time this index/reason is seen, Debug on repeats.
+                var key = $"{index.IndexHash}|{failure}";
+                var repeat = _invalidCachedIndex.TryGetValue(teamFolder, out var known) && known == key;
+                _invalidCachedIndex[teamFolder] = key;
+                logger.Log(repeat ? LogLevel.Debug : LogLevel.Error,
+                    "Team {Team}: cached index rejected for display — {Reason}; display surfaces left untouched",
+                    teamFolder, failure);
+                valid = false;
+                continue;
+            }
+
+            _invalidCachedIndex.Remove(teamFolder);
             all.AddRange(index.PublishedAssignments);
         }
-        return all;
+        return valid ? all : null;
     }
+
+    // Per team: "{IndexHash}|{reason}" of the cached index last rejected for display, so the Error is
+    // logged once per distinct failure and repeats drop to Debug. Cleared when the cached index is valid.
+    private readonly Dictionary<string, string> _invalidCachedIndex = new(StringComparer.OrdinalIgnoreCase);
 
     // internal (not private) so tests can exercise the LockScreenEnabled=false early-out, and
     // the surface standalone, without standing up the full RunCycleAsync dependency graph.
@@ -603,14 +628,16 @@ public sealed class SyncService(
             return;
         }
 
+        // Standalone calls collect (and validate) here, before anything is swept.
+        var all = assignments ?? await CollectAssignmentsAsync(teams);
+        if (all is null) return;
+
         // Stale-file cleanup from the PREVIOUS cycle's publish — never the cycle that just
         // published a file, since Windows may still hold it open from the apply that just ran.
         var livePath = lockScreen.GetCurrentLockScreenPath();
         imagePublisher.SweepExcept(livePath is null ? null : Path.GetFileName(livePath), "lockscreen");
 
-        var winner = ActiveAssignmentSelector.PickNewestActive(
-            assignments ?? await CollectAssignmentsAsync(teams), DateTime.Now,
-            a => a.DisplayTypes.IsLogonScreen);
+        var winner = ActiveAssignmentSelector.PickNewestActive(all, DateTime.Now, a => a.DisplayTypes.IsLogonScreen);
 
         ApplySurface(winner, "Delivery:DefaultLockScreenPath", "lockscreen", "Lock screen",
             lockScreen.GetCurrentLockScreenPath, lockScreen.SetLockScreen, lockScreen.ClearLockScreen);
@@ -627,12 +654,13 @@ public sealed class SyncService(
             return;
         }
 
+        var all = assignments ?? await CollectAssignmentsAsync(teams);
+        if (all is null) return;
+
         var livePath = lockScreen.GetCurrentWallpaperPath();
         imagePublisher.SweepExcept(livePath is null ? null : Path.GetFileName(livePath), "wallpaper");
 
-        var winner = ActiveAssignmentSelector.PickNewestActive(
-            assignments ?? await CollectAssignmentsAsync(teams), DateTime.Now,
-            a => a.DisplayTypes.IsWallpaper);
+        var winner = ActiveAssignmentSelector.PickNewestActive(all, DateTime.Now, a => a.DisplayTypes.IsWallpaper);
 
         ApplySurface(winner, "Delivery:DefaultWallpaperPath", "wallpaper", "Wallpaper",
             lockScreen.GetCurrentWallpaperPath, lockScreen.SetWallpaper, lockScreen.ClearWallpaper);
