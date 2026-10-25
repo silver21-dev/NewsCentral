@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using NewsCentral.Audit;
 using NewsCentral.Configuration;
 using NewsCentral.Models;
 using NewsCentral.Repositories;
@@ -36,8 +37,12 @@ public class AuthenticationService
 
     public event Action? OnAuthenticationStateChanged;
 
+    private readonly IAuditLog _audit;
+    private readonly AuditContext _auditContext;
+
     public AuthenticationService(IStorageService storage, WindowsIdentityService windowsIdentityService, UiLanguageService uiLanguageService,
-        IConfiguration configuration, ILogger<AuthenticationService> logger, UserPreferenceStore preferences)
+        IConfiguration configuration, ILogger<AuthenticationService> logger, UserPreferenceStore preferences,
+        IAuditLog? audit = null, AuditContext? auditContext = null)
     {
         _appConfiguration = new AppConfiguration(configuration);
         _logger = logger;
@@ -45,6 +50,17 @@ public class AuthenticationService
         _windowsIdentityService = windowsIdentityService;
         _uiLanguageService = uiLanguageService;
         _preferences = preferences;
+        _audit = audit ?? NullAuditLog.Instance;
+        _auditContext = auditContext ?? new AuditContext();
+    }
+
+    private Task AuditLoginFailedAsync(string? attemptedUser, string reason) =>
+        _audit.RecordAsync(new AuditRecord(AuditEvents.LoginFailed, null, AuditOutcome.Failure, reason, AttemptedUser: attemptedUser ?? "(none)"));
+
+    private async Task AuditLoginSucceededAsync(User user)
+    {
+        _auditContext.AppUser = user.Username;
+        await _audit.RecordAsync(new AuditRecord(AuditEvents.LoginSucceeded, user.UserID));
     }
 
     /// <summary>
@@ -104,6 +120,7 @@ public class AuthenticationService
         if (!IsLocalLoginEnabled)
         {
             _logger.LogWarning("Local account login refused: Authentication:EnableLocalAccounts is false.");
+            await AuditLoginFailedAsync(username, "local accounts are disabled");
             return null;
         }
 
@@ -131,6 +148,7 @@ public class AuthenticationService
                 System.Diagnostics.Debug.WriteLine($"Login failed: User '{username}' not found or inactive");
                 var availableUsers = string.Join(", ", usersCollection.Users.Select(u => $"{u.Username} (Active: {u.IsActive})"));
                 System.Diagnostics.Debug.WriteLine($"Available users: {availableUsers}");
+                await AuditLoginFailedAsync(username, "unknown or inactive user");
                 return null;
             }
 
@@ -139,6 +157,7 @@ public class AuthenticationService
             if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
             {
                 System.Diagnostics.Debug.WriteLine($"Login failed: Invalid password for user '{username}'");
+                await AuditLoginFailedAsync(username, "invalid password");
                 return null;
             }
 
@@ -150,12 +169,14 @@ public class AuthenticationService
             ApplyUserLanguage(user);
             System.Diagnostics.Debug.WriteLine($"Login successful: {user.Username} (IsSystemAdmin: {user.IsSystemAdmin})");
 
+            await AuditLoginSucceededAsync(user);
             OnAuthenticationStateChanged?.Invoke();
 
             return user;
         }
         catch (Exception ex)
         {
+            await AuditLoginFailedAsync(username, $"error: {ex.GetType().Name}");
             System.Diagnostics.Debug.WriteLine($"Login error: {ex.Message}");
             System.Diagnostics.Debug.WriteLine($"Stack trace: {ex.StackTrace}");
             throw;
@@ -173,6 +194,7 @@ public class AuthenticationService
         if (!_windowsIdentityService.IsAutoLoginEnabled())
         {
             System.Diagnostics.Debug.WriteLine("UPN login is disabled");
+            await AuditLoginFailedAsync(null, "UPN login is disabled");
             return new UpnLoginResult(UpnLoginOutcome.Disabled);
         }
 
@@ -181,6 +203,7 @@ public class AuthenticationService
         if (string.IsNullOrEmpty(upn))
         {
             System.Diagnostics.Debug.WriteLine("Could not detect UPN");
+            await AuditLoginFailedAsync(null, "UPN could not be detected");
             return new UpnLoginResult(UpnLoginOutcome.UpnNotDetected);
         }
 
@@ -191,6 +214,7 @@ public class AuthenticationService
         if (usersCollection == null)
         {
             System.Diagnostics.Debug.WriteLine("No users collection found in system");
+            await AuditLoginFailedAsync(upn, "no users collection");
             return new UpnLoginResult(UpnLoginOutcome.NoAccountForUpn, Upn: upn);
         }
 
@@ -206,6 +230,7 @@ public class AuthenticationService
             _currentUser = user;
             ApplyUserLanguage(user);
 
+            await AuditLoginSucceededAsync(user);
             OnAuthenticationStateChanged?.Invoke();
 
             System.Diagnostics.Debug.WriteLine($"✓ UPN login successful: {user.Username}");
@@ -213,11 +238,17 @@ public class AuthenticationService
         }
 
         System.Diagnostics.Debug.WriteLine($"No active user found with UPN: {upn}");
+        await AuditLoginFailedAsync(upn, "no active user with this UPN");
         return new UpnLoginResult(UpnLoginOutcome.NoAccountForUpn, Upn: upn);
     }
 
     public void Logout()
     {
+        // Recorded for the user being signed out; the actor is fixed here because the write completes asynchronously.
+        if (_currentUser != null)
+            _ = _audit.RecordAsync(new AuditRecord(AuditEvents.Logout, _currentUser.UserID, AppUser: _currentUser.Username));
+
+        _auditContext.AppUser = null;
         _currentUser = null;
         _uiLanguageService.Apply(null);
         OnAuthenticationStateChanged?.Invoke();

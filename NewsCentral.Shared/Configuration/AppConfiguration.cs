@@ -65,5 +65,13 @@ public class AppConfiguration
     public bool EnableLocalAccounts =>
         bool.TryParse(_configuration["Authentication:EnableLocalAccounts"], out var b) && b;
 
+    /// <summary>
+    /// Policy override for auditing: the registry value Audit\Enabled (REG_DWORD 0/1, which arrives as
+    /// "False"/"True"). Null when absent or unparseable, in which case the environment's own setting applies.
+    /// Deliberately not defaulted in appsettings.json: "present" is what makes the UI toggle read "set by policy".
+    /// </summary>
+    public bool? AuditEnabledOverride =>
+        bool.TryParse(_configuration["Audit:Enabled"], out var b) ? b : null;
+
     public string HmacSecretKey => _configuration["Hmac:SecretKey"] ?? string.Empty;
 }

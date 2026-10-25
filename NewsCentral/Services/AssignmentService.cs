@@ -1,3 +1,4 @@
+using NewsCentral.Audit;
 using NewsCentral.Models;
 using NewsCentral.Repositories;
 
@@ -9,17 +10,20 @@ public class AssignmentService
     private readonly AuthenticationService _authService;
     private readonly TeamService _teamService;
     private readonly IndexGenerationService _indexGenerationService;
+    private readonly IAuditLog _audit;
 
     public AssignmentService(
         IStorageService storage,
         AuthenticationService authService,
         TeamService teamService,
-        IndexGenerationService indexGenerationService)
+        IndexGenerationService indexGenerationService,
+        IAuditLog? audit = null)
     {
         _storage                 = storage;
         _authService             = authService;
         _teamService             = teamService;
         _indexGenerationService  = indexGenerationService;
+        _audit                   = audit ?? NullAuditLog.Instance;
     }
 
     // ── Queries ──────────────────────────────────────────────────────────────
@@ -235,7 +239,11 @@ public class AssignmentService
     /// If the assignment was published, regenerates the target team's index
     /// (which also pushes the updated index.json to blob distribution).
     /// </summary>
-    public async Task DeleteAssignmentAsync(string sourceTeamFolderName, string assignmentId)
+    public Task DeleteAssignmentAsync(string sourceTeamFolderName, string assignmentId) =>
+        _audit.RunAsync(AuditEvents.AssignmentDeleted, assignmentId,
+            () => DeleteAssignmentCoreAsync(sourceTeamFolderName, assignmentId), detail: $"team={sourceTeamFolderName}");
+
+    private async Task DeleteAssignmentCoreAsync(string sourceTeamFolderName, string assignmentId)
     {
         var currentUser = _authService.GetCurrentUser()
             ?? throw new UnauthorizedAccessException("Not authenticated");

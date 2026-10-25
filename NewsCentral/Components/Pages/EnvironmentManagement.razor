@@ -5,6 +5,7 @@
 @using NewsCentral.Configuration
 @using NewsCentral.Configuration.FleetExport
 @using NewsCentral.Security
+@using NewsCentral.Audit
 @using NewsCentral.Services
 @using NewsCentral.Components.Shared
 @inject AuthenticationService AuthService
@@ -171,6 +172,32 @@
                         Currently: @EnvironmentSettingsResolver.EffectiveSecurePath(BuildFormSettings(), EnvironmentContext.DataPath).
                         Changing this does not move existing keys. Folder permissions are set by the provisioning script, not by this app.
                     </small>
+                </div>
+
+                @* TODO(i18n). Audit toggle: the policy registry value Audit Enabled, when present, locks it. *@
+                <div class="mb-3">
+                    <label class="form-label">Audit path</label>
+                    <input class="form-control" @bind="formAuditPath" @bind:after="MarkDirty"
+                           placeholder="(defaults to DataPath\audit if left blank)" />
+                    <small class="text-muted">
+                        Currently: @AuditSettingsResolver.EffectiveAuditPath(BuildFormSettings(), EnvironmentContext.DataPath).
+                    </small>
+                </div>
+
+                <div class="mb-3 form-check">
+                    @if (AppConfig.AuditEnabledOverride.HasValue)
+                    {
+                        <input type="checkbox" class="form-check-input" checked="@AppConfig.AuditEnabledOverride.Value" disabled />
+                        <label class="form-check-label">
+                            Audit log enabled
+                            <small class="text-muted ms-2"><i class="bi bi-lock me-1"></i>set by policy</small>
+                        </label>
+                    }
+                    else
+                    {
+                        <input type="checkbox" class="form-check-input" id="auditEnabled" @bind="formAuditEnabled" @bind:after="MarkDirty" />
+                        <label class="form-check-label" for="auditEnabled">Audit log enabled</label>
+                    }
                 </div>
 
                 <div class="mb-3 form-check">
@@ -536,6 +563,8 @@
     private string formMode = "Local";
     private string? formLocalPath;
     private string? formSecurePath;
+    private string? formAuditPath;
+    private bool formAuditEnabled = true;
     private string? formAzureTenantId;
     private string? formAzureClientId;
     private string? formAzureAccountName;
@@ -700,6 +729,8 @@
         formMode = baseSettings.Distribution.Mode;
         formLocalPath = baseSettings.Distribution.LocalPath;
         formSecurePath = baseSettings.SecurePath;
+        formAuditPath = baseSettings.AuditPath;
+        formAuditEnabled = baseSettings.Audit.Enabled;
         formAzureTenantId = baseSettings.Distribution.AzureBlob.TenantId;
         formAzureClientId = baseSettings.Distribution.AzureBlob.ClientId;
         formAzureAccountName = baseSettings.Distribution.AzureBlob.AccountName;
@@ -725,6 +756,8 @@
         SchemaVersion = EnvironmentSettingsResolver.CurrentSchemaVersion,
         DisplayName = string.IsNullOrWhiteSpace(formDisplayName) ? null : formDisplayName,
         SecurePath = string.IsNullOrWhiteSpace(formSecurePath) ? null : formSecurePath.Trim(),
+        AuditPath = string.IsNullOrWhiteSpace(formAuditPath) ? null : formAuditPath.Trim(),
+        Audit = new AuditSettingsSection { Enabled = formAuditEnabled },
         Distribution = new DistributionSettings
         {
             Enabled = formDistributionEnabled,

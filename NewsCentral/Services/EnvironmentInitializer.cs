@@ -1,3 +1,4 @@
+using NewsCentral.Audit;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using NewsCentral.Configuration;
@@ -48,6 +49,7 @@ public sealed record InitializeResult(
 public sealed class EnvironmentInitializer
 {
     private readonly EnvironmentDirectoryService _environmentDirectory;
+    private readonly IAuditLog _audit;
 
     // Matches JsonFileRepository&lt;UsersCollection&gt;'s own options exactly (PascalCase, indented,
     // enum-as-string) — AuthenticationService/UserService read config/users.json through that
@@ -58,9 +60,10 @@ public sealed class EnvironmentInitializer
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public EnvironmentInitializer(EnvironmentDirectoryService environmentDirectory)
+    public EnvironmentInitializer(EnvironmentDirectoryService environmentDirectory, IAuditLog? audit = null)
     {
         _environmentDirectory = environmentDirectory;
+        _audit = audit ?? NullAuditLog.Instance;
     }
 
     /// <summary>
@@ -98,6 +101,29 @@ public sealed class EnvironmentInitializer
     /// <paramref name="addToDirectory"/> is true — the wizard's own Display name field.
     /// </param>
     public async Task<InitializeResult> InitializeAsync(
+        string targetPath,
+        bool createRootIfMissing,
+        EnvironmentSettings distributionSettings,
+        string adminUsername,
+        string adminDisplayName,
+        string? adminUpn,
+        string adminPassword,
+        string modifiedBy,
+        bool addToDirectory,
+        string? addDisplayName)
+    {
+        var result = await InitializeCoreAsync(targetPath, createRootIfMissing, distributionSettings, adminUsername,
+            adminDisplayName, adminUpn, adminPassword, modifiedBy, addToDirectory, addDisplayName);
+
+        // Only the new administrator's username is recorded - never the password.
+        await _audit.RecordAsync(new AuditRecord(
+            AuditEvents.EnvironmentInitialized, targetPath,
+            result.Outcome == InitializeOutcome.Success ? AuditOutcome.Success : AuditOutcome.Failure,
+            result.Outcome == InitializeOutcome.Success ? $"admin={adminUsername}" : result.Outcome.ToString()));
+        return result;
+    }
+
+    private async Task<InitializeResult> InitializeCoreAsync(
         string targetPath,
         bool createRootIfMissing,
         EnvironmentSettings distributionSettings,

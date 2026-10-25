@@ -1,3 +1,4 @@
+using NewsCentral.Audit;
 using NewsCentral.Models;
 using NewsCentral.Publishing;
 using NewsCentral.Repositories;
@@ -16,6 +17,7 @@ public class PublishingService
     private readonly AuthenticationService _authService;
     private readonly IndexGenerationService _indexGenerationService;
     private readonly TeamService _teamService;
+    private readonly IAuditLog _audit;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -31,7 +33,8 @@ public class PublishingService
         PresentationService presentationService,
         ScheduleService scheduleService,
         IndexGenerationService indexGenerationService,
-        TeamService teamService)
+        TeamService teamService,
+        IAuditLog? audit = null)
     {
         _storage                = storage;
         _blobDistribution       = blobDistribution;
@@ -41,11 +44,21 @@ public class PublishingService
         _scheduleService        = scheduleService;
         _indexGenerationService = indexGenerationService;
         _teamService            = teamService;
+        _audit                  = audit ?? NullAuditLog.Instance;
     }
 
     // ── Publish ──────────────────────────────────────────────────────────────
 
-    public async Task<PublishResult> PublishAssignmentAsync(
+    public Task<PublishResult> PublishAssignmentAsync(
+        string sourceTeamFolderName,
+        string assignmentId) =>
+        _audit.RunAsync(AuditEvents.AssignmentPublished, assignmentId,
+            () => PublishAssignmentCoreAsync(sourceTeamFolderName, assignmentId),
+            isSuccess: r => r.Success,
+            detail: $"team={sourceTeamFolderName}",
+            detailFrom: r => r.Success ? $"team={sourceTeamFolderName}" : $"team={sourceTeamFolderName}; {r.ErrorMessage}");
+
+    private async Task<PublishResult> PublishAssignmentCoreAsync(
         string sourceTeamFolderName,
         string assignmentId)
     {

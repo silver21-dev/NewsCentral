@@ -182,6 +182,11 @@ public static class ConfigManifests
                 "true | false (registry: DWORD 0/1). Local username/password accounts are opt-in; false hides " +
                 "the Login button and Username/Password fields and the authentication service refuses local " +
                 "logon (enforced server-side)"),
+            Key("Audit:Enabled", "true", @"Audit\Enabled", RegistryValueType.Dword,
+                ControlKind.Toggle, OverridableState.Overridable,
+                "true | false (registry: DWORD 0/1). Policy override for the audit log: when present it wins over " +
+                "the environment's own Audit setting and the Environment Management toggle is shown locked " +
+                "(\"set by policy\"). Absent = the environment setting applies (default on)"),
             Key("Authentication:UseMockUPN", "false", @"Authentication\UseMockUPN", RegistryValueType.RegSz,
                 ControlKind.Toggle, OverridableState.Overridable,
                 "true | false (registry: REG_SZ); Debug builds only — ignored in Release"),

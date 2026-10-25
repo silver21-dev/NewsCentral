@@ -3,6 +3,7 @@
 @using NewsCentral.Models
 @using NewsCentral.Configuration
 @using NewsCentral.Security
+@using NewsCentral.Audit
 @using NewsCentral.Components.Shared
 @using Microsoft.Extensions.Logging
 @inject AuthenticationService AuthService
@@ -12,6 +13,7 @@
 @inject EnvironmentContext EnvironmentContext
 @inject DistributionStatusTracker DistributionStatus
 @inject TeamKeyService KeyService
+@inject IAuditLog AuditLog
 @inject NavigationManager Navigation
 @inject ILogger<MainLayout> Logger
 @implements IDisposable
@@ -107,6 +109,15 @@
             }
         }
 
+        @* Shown to everyone, until a later write succeeds. Auditing never blocks an action; this only says that
+           actions are currently not being recorded. TODO(i18n). *@
+        @if (AuditLog.WriteFailing)
+        {
+            <div class="alert alert-danger mx-4 mt-2 mb-0">
+                <i class="bi bi-exclamation-octagon me-2"></i>Audit log not writable — actions are not being recorded
+            </div>
+        }
+
         <article class="content px-4">
             @* UI-2.2 — catches an unhandled rendering exception (e.g. a page that tries to embed
                too much content in one render batch) so the user gets a recoverable message
@@ -155,6 +166,7 @@
         EnvironmentSettingsService.SettingsChanged += HandleEnvironmentSettingsChanged;
         DistributionStatus.Changed += HandleDistributionStatusChanged;
         KeyService.IssuesChanged += HandleDistributionStatusChanged;
+        AuditLog.StatusChanged += HandleDistributionStatusChanged;
         Navigation.LocationChanged += HandleLocationChanged;
         await RefreshAsync();
     }
@@ -303,6 +315,7 @@
         EnvironmentSettingsService.SettingsChanged -= HandleEnvironmentSettingsChanged;
         DistributionStatus.Changed -= HandleDistributionStatusChanged;
         KeyService.IssuesChanged -= HandleDistributionStatusChanged;
+        AuditLog.StatusChanged -= HandleDistributionStatusChanged;
         Navigation.LocationChanged -= HandleLocationChanged;
     }
 }

@@ -24,9 +24,24 @@ public sealed class EnvironmentSettings
     /// </summary>
     public string? SecurePath { get; set; }
 
+    /// <summary>
+    /// Root of the append-only audit log (<c>{AuditPath}\{yyyy-MM}\...jsonl</c>). Null or empty = <c>{DataPath}\audit</c>.
+    /// ACLs are applied by scripts/Set-AuthoringAcl.ps1, never by the app.
+    /// </summary>
+    public string? AuditPath { get; set; }
+
+    /// <summary>Audit switches. The registry value Audit\Enabled overrides <see cref="AuditSettingsSection.Enabled"/>.</summary>
+    public AuditSettingsSection Audit { get; set; } = new();
+
     public string? ModifiedBy { get; set; }
 
     public DateTime? ModifiedUtc { get; set; }
+}
+
+public sealed class AuditSettingsSection
+{
+    /// <summary>Default true: auditing is on unless an administrator (or policy) turns it off.</summary>
+    public bool Enabled { get; set; } = true;
 }
 
 public sealed class DistributionSettings

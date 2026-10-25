@@ -1,3 +1,4 @@
+using NewsCentral.Audit;
 using NewsCentral.Models;
 using NewsCentral.Repositories;
 
@@ -19,11 +20,13 @@ public class UserService
     private readonly IStorageService _storage;
     private readonly JsonFileRepository<UsersCollection> _userRepo;
     private readonly AuthenticationService _authService;
+    private readonly IAuditLog _audit;
 
-    public UserService(IStorageService storage, AuthenticationService authService)
+    public UserService(IStorageService storage, AuthenticationService authService, IAuditLog? audit = null)
     {
         _storage     = storage;
         _authService = authService;
+        _audit       = audit ?? NullAuditLog.Instance;
 
         // Primary JsonFileRepository constructor — no [Obsolete] warning
         _userRepo = new JsonFileRepository<UsersCollection>(_storage, "config", "");
@@ -64,7 +67,11 @@ public class UserService
 
     // ── UPN helpers ───────────────────────────────────────────────────────────
 
-    public async Task UpdateUserUPNAsync(string userId, string? upn)
+    public Task UpdateUserUPNAsync(string userId, string? upn) =>
+        _audit.RunAsync(AuditEvents.UserUpnChanged, userId, () => UpdateUserUPNCoreAsync(userId, upn),
+            detail: string.IsNullOrWhiteSpace(upn) ? "UPN cleared" : "UPN set");
+
+    private async Task UpdateUserUPNCoreAsync(string userId, string? upn)
     {
         var usersCollection = await _userRepo.GetByIdAsync("users")
             ?? throw new InvalidOperationException("Users collection not found");
@@ -91,9 +98,12 @@ public class UserService
 
             if (newUser != null)
             {
-                newUser.UPN = upn.Trim();
-                usersCollection!.LastModified = DateTime.UtcNow;
-                await _userRepo.UpdateAsync(usersCollection);
+                await _audit.RunAsync(AuditEvents.UserUpnChanged, newUser.UserID, async () =>
+                {
+                    newUser.UPN = upn.Trim();
+                    usersCollection!.LastModified = DateTime.UtcNow;
+                    await _userRepo.UpdateAsync(usersCollection);
+                }, detail: "UPN set");
             }
         }
     }
@@ -108,9 +118,17 @@ public class UserService
 
     // ── CRUD ─────────────────────────────────────────────────────────────────
 
-    public async Task<User> CreateUserAsync(
+    public Task<User> CreateUserAsync(
         string username, string email, string displayName,
-        string password, bool isSystemAdmin = false)
+        string password, bool isSystemAdmin = false) =>
+        _audit.RunAsync(AuditEvents.UserCreated, null,
+            () => CreateUserCoreAsync(username, email, displayName, password, isSystemAdmin),
+            targetFrom: u => u.UserID,
+            detail: $"username={username}; systemAdmin={isSystemAdmin}");
+
+    private async Task<User> CreateUserCoreAsync(
+        string username, string email, string displayName,
+        string password, bool isSystemAdmin)
     {
         var currentUser = _authService.GetCurrentUser();
         if (currentUser == null || (!currentUser.IsSystemAdmin && !IsTeamAdminOfAnyTeam(currentUser)))
@@ -147,7 +165,13 @@ public class UserService
         return user;
     }
 
-    public async Task<User> UpdateUserAsync(
+    public Task<User> UpdateUserAsync(
+        string userId, string email, string displayName, bool isActive) =>
+        _audit.RunAsync(AuditEvents.UserUpdated, userId,
+            () => UpdateUserCoreAsync(userId, email, displayName, isActive),
+            detail: $"active={isActive}");
+
+    private async Task<User> UpdateUserCoreAsync(
         string userId, string email, string displayName, bool isActive)
     {
         var currentUser = _authService.GetCurrentUser();
@@ -174,7 +198,12 @@ public class UserService
         return user;
     }
 
-    public async Task<bool> ChangePasswordAsync(string userId, string newPassword)
+    // The password itself is never recorded - only that it changed.
+    public Task<bool> ChangePasswordAsync(string userId, string newPassword) =>
+        _audit.RunAsync(AuditEvents.PasswordChanged, userId, () => ChangePasswordCoreAsync(userId, newPassword),
+            isSuccess: ok => ok, detail: null, detailFrom: ok => ok ? null : "user not found");
+
+    private async Task<bool> ChangePasswordCoreAsync(string userId, string newPassword)
     {
         var currentUser = _authService.GetCurrentUser()
             ?? throw new UnauthorizedAccessException("Not authenticated");
@@ -204,7 +233,11 @@ public class UserService
         return true;
     }
 
-    public async Task<bool> DeleteUserAsync(string userId)
+    public Task<bool> DeleteUserAsync(string userId) =>
+        _audit.RunAsync(AuditEvents.UserDeleted, userId, () => DeleteUserCoreAsync(userId),
+            isSuccess: ok => ok, detailFrom: ok => ok ? null : "user not found");
+
+    private async Task<bool> DeleteUserCoreAsync(string userId)
     {
         var currentUser = _authService.GetCurrentUser();
         if (currentUser == null || !currentUser.IsSystemAdmin)
@@ -228,7 +261,13 @@ public class UserService
 
     // ── Team role management ──────────────────────────────────────────────────
 
-    public async Task<bool> AssignUserToTeamAsync(
+    public Task<bool> AssignUserToTeamAsync(
+        string userId, string teamId, string teamFolderName, List<string> roles) =>
+        _audit.RunAsync(AuditEvents.UserTeamAssigned, userId,
+            () => AssignUserToTeamCoreAsync(userId, teamId, teamFolderName, roles),
+            isSuccess: ok => ok, detail: $"team={teamFolderName}; roles={string.Join(",", roles)}");
+
+    private async Task<bool> AssignUserToTeamCoreAsync(
         string userId, string teamId, string teamFolderName, List<string> roles)
     {
         var currentUser = _authService.GetCurrentUser();
@@ -259,7 +298,11 @@ public class UserService
         return true;
     }
 
-    public async Task<bool> RemoveUserFromTeamAsync(string userId, string teamId)
+    public Task<bool> RemoveUserFromTeamAsync(string userId, string teamId) =>
+        _audit.RunAsync(AuditEvents.UserTeamRemoved, userId, () => RemoveUserFromTeamCoreAsync(userId, teamId),
+            isSuccess: ok => ok, detail: $"teamId={teamId}");
+
+    private async Task<bool> RemoveUserFromTeamCoreAsync(string userId, string teamId)
     {
         var currentUser = _authService.GetCurrentUser();
         if (currentUser == null || !CurrentUserAdministersTeam(currentUser, teamId))
@@ -285,7 +328,12 @@ public class UserService
         return true;
     }
 
-    public async Task<bool> UpdateTeamRolesAsync(
+    public Task<bool> UpdateTeamRolesAsync(
+        string userId, string teamId, List<string> roles) =>
+        _audit.RunAsync(AuditEvents.UserRolesChanged, userId, () => UpdateTeamRolesCoreAsync(userId, teamId, roles),
+            isSuccess: ok => ok, detail: $"teamId={teamId}; roles={string.Join(",", roles)}");
+
+    private async Task<bool> UpdateTeamRolesCoreAsync(
         string userId, string teamId, List<string> roles)
     {
         var currentUser = _authService.GetCurrentUser()

@@ -2,6 +2,7 @@
 
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using NewsCentral.Audit;
 using NewsCentral.Configuration;
 using NewsCentral.Localization;
 using NewsCentral.Security;
@@ -204,6 +205,14 @@ public static class MauiProgram
         // reads this instead of AppConfiguration directly; see EnvironmentSettingsService.cs.
         builder.Services.AddSingleton<EnvironmentSettingsService>();
 
+        // Audit log (append-only JSON lines). The settings are resolved lazily on every event, so there is no
+        // construction cycle with EnvironmentSettingsService (which records its own changes through this log).
+        builder.Services.AddSingleton<AuditContext>();
+        builder.Services.AddSingleton<IAuditLog>(sp => new AuditLog(
+            () => sp.GetRequiredService<EnvironmentSettingsService>().GetAuditSettingsAsync(),
+            sp.GetRequiredService<AuditContext>(),
+            log: message => System.Diagnostics.Debug.WriteLine($"[Audit] {message}")));
+
         // Team signing keys live in the per-environment secure store (SecurePath), not under DataPath. The
         // root is re-resolved on every call so an environment switch or a settings save takes effect at once.
         builder.Services.AddSingleton(sp =>
@@ -219,7 +228,8 @@ public static class MauiProgram
                         ? new SecureRootResult(null, effective.Error ?? "environment settings unavailable")
                         : new SecureRootResult(
                             EnvironmentSettingsResolver.EffectiveSecurePath(effective.Settings, environment.DataPath), null);
-                });
+                },
+                audit: sp.GetRequiredService<IAuditLog>());
         });
 
         // Environment picker / switch / add / remove / hide (M4a) — needs TeamContextService,

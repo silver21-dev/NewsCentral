@@ -1,3 +1,4 @@
+using NewsCentral.Audit;
 using NewsCentral.Models;
 
 namespace NewsCentral.Security;
@@ -17,6 +18,7 @@ public sealed class TeamKeyService
     private readonly Func<string> _dataPath;
     private readonly Func<Task<SecureRootResult>> _resolveSecureRoot;
     private readonly Func<string, ISecureStorage> _storageFactory;
+    private readonly IAuditLog _audit;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly HashSet<string> _attempted = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _legacyInUse = new(StringComparer.OrdinalIgnoreCase);
@@ -25,11 +27,13 @@ public sealed class TeamKeyService
     public TeamKeyService(
         Func<string> dataPath,
         Func<Task<SecureRootResult>> resolveSecureRoot,
-        Func<string, ISecureStorage>? storageFactory = null)
+        Func<string, ISecureStorage>? storageFactory = null,
+        IAuditLog? audit = null)
     {
         _dataPath = dataPath;
         _resolveSecureRoot = resolveSecureRoot;
         _storageFactory = storageFactory ?? (root => new LocalSecureStorage(root));
+        _audit = audit ?? NullAuditLog.Instance;
     }
 
     /// <summary>Raised after each migration attempt that found something to migrate (not for NothingToMigrate).</summary>
@@ -93,18 +97,35 @@ public sealed class TeamKeyService
     /// </summary>
     public async Task SaveAsync(string teamFolderName, TeamSigningKeys keys)
     {
+        // KeyGenerated when the team had no key, KeyRotated when it replaces one. Only the public-key
+        // fingerprint is recorded - never any key material.
         var existing = await LoadAsync(teamFolderName);
-        if (existing.Outcome == KeyLoadOutcome.Unreadable)
-            throw new InvalidOperationException(
-                $"The existing signing key for {teamFolderName} is not readable ({existing.Reason}); it was not replaced.");
+        var rotating = existing.Outcome == KeyLoadOutcome.Loaded && !string.IsNullOrEmpty(existing.Keys?.PublicKey);
+        var eventName = rotating ? AuditEvents.KeyRotated : AuditEvents.KeyGenerated;
+        var fingerprint = TeamKeyStore.Fingerprint(keys);
+        var detail = $"fingerprint={fingerprint ?? "none"}";
 
-        var resolved = await _resolveSecureRoot();
-        if (resolved.Root is null)
-            throw new InvalidOperationException($"The secure path is unavailable ({resolved.Error ?? "unknown"}).");
+        try
+        {
+            if (existing.Outcome == KeyLoadOutcome.Unreadable)
+                throw new InvalidOperationException(
+                    $"The existing signing key for {teamFolderName} is not readable ({existing.Reason}); it was not replaced.");
 
-        await new TeamKeyStore(_storageFactory(resolved.Root)).SaveAsync(teamFolderName, keys);
+            var resolved = await _resolveSecureRoot();
+            if (resolved.Root is null)
+                throw new InvalidOperationException($"The secure path is unavailable ({resolved.Error ?? "unknown"}).");
 
-        lock (_legacyInUse) _legacyInUse.Remove(Id(_dataPath(), resolved.Root, teamFolderName));
+            await new TeamKeyStore(_storageFactory(resolved.Root)).SaveAsync(teamFolderName, keys);
+
+            lock (_legacyInUse) _legacyInUse.Remove(Id(_dataPath(), resolved.Root, teamFolderName));
+        }
+        catch (Exception ex)
+        {
+            await _audit.RecordAsync(new AuditRecord(eventName, teamFolderName, AuditOutcome.Failure, AuditLogExtensions.Describe(ex)));
+            throw;
+        }
+
+        await _audit.RecordAsync(new AuditRecord(eventName, teamFolderName, AuditOutcome.Success, detail));
     }
 
     /// <summary>Migrates every team now (system administrator login). Always attempts, even if tried before.</summary>
@@ -122,7 +143,7 @@ public sealed class TeamKeyService
                     $"secure path unavailable ({resolved.Error ?? "unknown"})", null);
                 if (File.Exists(TeamKeyMigrator.LegacyPath(dataPath, team)))
                 {
-                    Record(Id(dataPath, "?", team), failed);
+                    await RecordAsync(Id(dataPath, "?", team), failed);
                     results.Add(failed);
                 }
                 continue;
@@ -133,7 +154,7 @@ public sealed class TeamKeyService
             try
             {
                 var result = await TeamKeyMigrator.MigrateAsync(dataPath, team, storage);
-                Record(Id(dataPath, resolved.Root, team), result);
+                await RecordAsync(Id(dataPath, resolved.Root, team), result);
                 results.Add(result);
             }
             finally { _gate.Release(); }
@@ -150,12 +171,12 @@ public sealed class TeamKeyService
             lock (_attempted)
                 if (_attempted.Contains(id)) return;
 
-            Record(id, await TeamKeyMigrator.MigrateAsync(dataPath, team, storage));
+            await RecordAsync(id, await TeamKeyMigrator.MigrateAsync(dataPath, team, storage));
         }
         finally { _gate.Release(); }
     }
 
-    private void Record(string id, KeyMigrationResult result)
+    private async Task RecordAsync(string id, KeyMigrationResult result)
     {
         lock (_attempted) _attempted.Add(id);
 
@@ -180,7 +201,16 @@ public sealed class TeamKeyService
         }
 
         if (result.Status != KeyMigrationStatus.NothingToMigrate)
+        {
             MigrationCompleted?.Invoke(result);
+
+            // Fingerprint only. A failed or conflicting migration is recorded as a failure with its reason.
+            var ok = result.Status == KeyMigrationStatus.Migrated;
+            var detail = result.Fingerprint is null ? null : $"fingerprint={result.Fingerprint}";
+            if (!ok) detail = $"{result.Status}: {result.Detail}" + (detail is null ? "" : $"; {detail}");
+            await _audit.RecordAsync(new AuditRecord(
+                AuditEvents.KeyMigrated, result.Team, ok ? AuditOutcome.Success : AuditOutcome.Failure, detail));
+        }
         if (changed)
             IssuesChanged?.Invoke();
     }

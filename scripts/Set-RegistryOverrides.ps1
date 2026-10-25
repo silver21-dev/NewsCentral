@@ -15,7 +15,8 @@
 #    NewsCentral component keys (DataPath, Storage\, ...) —
 #      EXCEPT Environments\ (-EnvironmentInstances) and AllowUserEnvironments
 #      (-AllowUserEnvironments), the policy environment catalog surface (M3b), and
-#      Authentication\EnableLocalAccounts (-EnableLocalAccounts)
+#      Authentication\EnableLocalAccounts (-EnableLocalAccounts), and
+#      Audit\Enabled (-AuditEnabled)
 #    NewsTester component keys (reserved; not yet defined)
 #
 #  WARNING — numeric values must NEVER be written as -Type DWord.
@@ -126,7 +127,7 @@
     (Signing, Entra, Delivery, Display, Ui, Telemetry, Logging, AzureBlob:UseWinHttpProxy) — binding
     any of them against NewsCentral or NewsTester is a terminating error. Conversely,
     -EnvironmentInstances and -AllowUserEnvironments (the policy environment catalog, M3b) and
-    -EnableLocalAccounts are valid ONLY for NewsCentral — binding either against NewsService, NewsViewer, or NewsTester is
+    -EnableLocalAccounts and -AuditEnabled are valid ONLY for NewsCentral — binding any of them against NewsService, NewsViewer, or NewsTester is
     also a terminating error.
 
 .PARAMETER Teams
@@ -342,6 +343,11 @@
     Whether local (username/password) accounts may log on to NewsCentral. Authentication\EnableLocalAccounts,
     DWORD 0/1. Default false when absent: false hides the Login button and Username/Password fields and the
     authentication service refuses local logon. NewsCentral only.
+
+.PARAMETER AuditEnabled
+    Policy override for the NewsCentral audit log. Audit\Enabled, DWORD 0/1. When present it wins over the
+    environment's own audit setting and the Environment Management toggle is shown locked ("set by policy").
+    Absent = the environment setting applies (default on). NewsCentral only.
 
 .PARAMETER AllowUserEnvironments
     Group Policy toggle: whether operators may add their own environments in addition to the policy
@@ -572,7 +578,10 @@ param(
     [Nullable[bool]] $AllowUserEnvironments,
 
     # ── Authentication (NewsCentral only) ─────────────────────────────────────────
-    [Nullable[bool]] $EnableLocalAccounts
+    [Nullable[bool]] $EnableLocalAccounts,
+
+    # ── Audit (NewsCentral only) ──────────────────────────────────────────────────
+    [Nullable[bool]] $AuditEnabled
 )
 
 Set-StrictMode -Version Latest
@@ -645,7 +654,7 @@ else {
 
 # -EnvironmentInstances / -AllowUserEnvironments are valid ONLY for -ComponentName NewsCentral —
 # rejected for NewsService, NewsViewer, and (unlike the fleet parameters above) NewsTester too.
-$newsCentralOnlyParams = @("EnvironmentInstances", "AllowUserEnvironments", "EnableLocalAccounts")
+$newsCentralOnlyParams = @("EnvironmentInstances", "AllowUserEnvironments", "EnableLocalAccounts", "AuditEnabled")
 if ($ComponentName -ne "NewsCentral") {
     $offendingNc = $newsCentralOnlyParams | Where-Object { $PSBoundParameters.ContainsKey($_) }
     if ($offendingNc) {
@@ -1085,6 +1094,12 @@ if ($PSBoundParameters.ContainsKey("AllowUserEnvironments")) {
 if ($PSBoundParameters.ContainsKey("EnableLocalAccounts")) {
     $dword = if ($EnableLocalAccounts) { 1 } else { 0 }
     Set-RegValue -Path "$base\Authentication" -Name "EnableLocalAccounts" -Value $dword -Type DWord
+}
+
+# ── Audit\Enabled (NewsCentral only — see gating above) ───────────────────────────────────────
+if ($PSBoundParameters.ContainsKey("AuditEnabled")) {
+    $dword = if ($AuditEnabled) { 1 } else { 0 }
+    Set-RegValue -Path "$base\Audit" -Name "Enabled" -Value $dword -Type DWord
 }
 
 # ── teams\ — replace entire subkey so the list stays authoritative ────────────

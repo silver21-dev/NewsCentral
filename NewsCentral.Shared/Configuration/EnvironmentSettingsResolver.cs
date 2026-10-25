@@ -139,6 +139,9 @@ public static class EnvironmentSettingsResolver
         if (!string.IsNullOrWhiteSpace(settings.SecurePath) && !Path.IsPathRooted(settings.SecurePath))
             errors.Add("SecurePath must be an absolute path (or left blank for {DataPath}\\secure).");
 
+        if (!string.IsNullOrWhiteSpace(settings.AuditPath) && !Path.IsPathRooted(settings.AuditPath))
+            errors.Add("AuditPath must be an absolute path (or left blank for {DataPath}\\audit).");
+
         if (settings.Distribution.Enabled)
         {
             var mode = settings.Distribution.Mode;
@@ -220,6 +223,8 @@ public static class EnvironmentSettingsResolver
             SchemaVersion = baseSettings.SchemaVersion,
             DisplayName = baseSettings.DisplayName,
             SecurePath = baseSettings.SecurePath,
+            AuditPath = baseSettings.AuditPath,
+            Audit = new AuditSettingsSection { Enabled = baseSettings.Audit.Enabled },
             Distribution = new DistributionSettings
             {
                 Enabled = baseSettings.Distribution.Enabled,
@@ -314,6 +319,8 @@ public static class EnvironmentSettingsResolver
             SchemaVersion = form.SchemaVersion,
             DisplayName = form.DisplayName,
             SecurePath = form.SecurePath,
+            AuditPath = form.AuditPath,
+            Audit = new AuditSettingsSection { Enabled = form.Audit.Enabled },
             Distribution = new DistributionSettings
             {
                 Enabled = form.Distribution.Enabled,

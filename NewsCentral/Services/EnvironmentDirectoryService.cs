@@ -1,3 +1,4 @@
+using NewsCentral.Audit;
 using System.Text.Json;
 using NewsCentral.Configuration;
 
@@ -50,6 +51,7 @@ public sealed class EnvironmentDirectoryService
     private readonly TeamContextService _teamContext;
     private readonly IStorageService _storage;
     private readonly EnvironmentSettingsService _settingsService;
+    private readonly IAuditLog _audit;
 
     private UserEnvironmentState? _cachedState;
 
@@ -65,7 +67,8 @@ public sealed class EnvironmentDirectoryService
         AuthenticationService authService,
         TeamContextService teamContext,
         IStorageService storage,
-        EnvironmentSettingsService settingsService)
+        EnvironmentSettingsService settingsService,
+        IAuditLog? audit = null)
     {
         _catalog = catalog;
         _config = config;
@@ -75,6 +78,7 @@ public sealed class EnvironmentDirectoryService
         _teamContext = teamContext;
         _storage = storage;
         _settingsService = settingsService;
+        _audit = audit ?? NullAuditLog.Instance;
 
         // M5a.1: the fingerprint in the shared directory now follows EVERY settings save, not just
         // ones made through this page's own direct call (removed) — covers the MainLayout banner's
@@ -218,7 +222,13 @@ public sealed class EnvironmentDirectoryService
     /// existed — a Shared entry is still created, just without a fingerprint until its first save.
     /// Ignored for a User entry, which never carries a fingerprint at all.
     /// </param>
-    public async Task<AddResult> AddAsync(string path, string? displayName, string? distributionFingerprint = null)
+    public Task<AddResult> AddAsync(string path, string? displayName, string? distributionFingerprint = null) =>
+        _audit.RunAsync(AuditEvents.EnvironmentAdded, path,
+            () => AddCoreAsync(path, displayName, distributionFingerprint),
+            isSuccess: r => r.Outcome is AddOutcome.Added or AddOutcome.AddedNotInitialized,
+            detailFrom: r => r.Outcome.ToString());
+
+    private async Task<AddResult> AddCoreAsync(string path, string? displayName, string? distributionFingerprint)
     {
         if (!CanAdd)
             return new AddResult(AddOutcome.RejectedNotAllowed, "Adding environments is not available.");
@@ -282,7 +292,11 @@ public sealed class EnvironmentDirectoryService
     /// change) when the caller is not a System Administrator, or when <paramref name="dataPath"/> is
     /// the current environment.
     /// </summary>
-    public async Task<bool> RemoveAsync(string dataPath)
+    public Task<bool> RemoveAsync(string dataPath) =>
+        _audit.RunAsync(AuditEvents.EnvironmentDeleted, dataPath, () => RemoveCoreAsync(dataPath),
+            isSuccess: ok => ok, detailFrom: ok => ok ? "removed from the environment list" : "not removed");
+
+    private async Task<bool> RemoveCoreAsync(string dataPath)
     {
         if (!_authService.IsSystemAdmin())
             return false;

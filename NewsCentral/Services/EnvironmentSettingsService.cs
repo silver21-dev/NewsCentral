@@ -1,4 +1,5 @@
 using System.Text.Json;
+using NewsCentral.Audit;
 using NewsCentral.Configuration;
 
 namespace NewsCentral.Services;
@@ -31,6 +32,7 @@ public sealed class EnvironmentSettingsService
     private readonly AppConfiguration _config;
     private readonly AuthenticationService _authService;
     private readonly EnvironmentCatalog _catalog;
+    private readonly IAuditLog _audit;
 
     // volatile, no lock: a concurrent first GetAsync() may resolve from disk twice, same
     // acceptable race as DistributionServiceRouter's inner-service build.
@@ -43,13 +45,15 @@ public sealed class EnvironmentSettingsService
         EnvironmentContext environment,
         AppConfiguration config,
         AuthenticationService authService,
-        EnvironmentCatalog catalog)
+        EnvironmentCatalog catalog,
+        IAuditLog? audit = null)
     {
         _storage = storage;
         _environment = environment;
         _config = config;
         _authService = authService;
         _catalog = catalog;
+        _audit = audit ?? NullAuditLog.Instance;
         _environment.Changed += OnEnvironmentChanged;
     }
 
@@ -161,6 +165,21 @@ public sealed class EnvironmentSettingsService
     /// </summary>
     public async Task SaveAsync(EnvironmentSettings settings)
     {
+        try
+        {
+            await SaveCoreAsync(settings);
+        }
+        catch (Exception ex)
+        {
+            await _audit.RecordAsync(new AuditRecord(
+                AuditEvents.EnvironmentSettingsChanged, "environment.json", AuditOutcome.Failure,
+                AuditLogExtensions.Describe(ex)));
+            throw;
+        }
+    }
+
+    private async Task SaveCoreAsync(EnvironmentSettings settings)
+    {
         if (!_authService.IsSystemAdmin())
             throw new UnauthorizedAccessException("Only a System Administrator can change environment settings.");
 
@@ -174,21 +193,48 @@ public sealed class EnvironmentSettingsService
 
         var json = JsonSerializer.Serialize(settings, EnvironmentSettingsJson.Options);
 
-        try
-        {
-            await _storage.WriteTextAsync(TempRelativePath, json);
-            await _storage.MoveFileAsync(TempRelativePath, RelativePath);
-        }
-        catch
-        {
-            // Best effort: a leftover .tmp file is harmless but untidy; never let its own deletion
-            // failure mask the original write/move failure.
-            try { await _storage.DeleteFileAsync(TempRelativePath); } catch { /* best effort */ }
-            throw;
-        }
+        // Audit on/off: AuditDisabled is written BEFORE the setting takes effect and AuditEnabled AFTER it does
+        // (AuditToggle). The effective value includes the policy override, which the editor cannot change.
+        var before = await GetAsync();
+        var wasEnabled = AuditSettingsResolver.Resolve(before.Settings, _environment.DataPath, _config.AuditEnabledOverride).Enabled;
+        var willBeEnabled = AuditSettingsResolver.Resolve(settings, _environment.DataPath, _config.AuditEnabledOverride).Enabled;
+        var changed = EnvironmentSettingsDiff.ChangedFields(before.StoredSettings ?? before.Settings, settings);
 
-        _cache = null;
+        await AuditToggle.ApplyAsync(_audit, wasEnabled, willBeEnabled, async () =>
+        {
+            try
+            {
+                await _storage.WriteTextAsync(TempRelativePath, json);
+                await _storage.MoveFileAsync(TempRelativePath, RelativePath);
+            }
+            catch
+            {
+                // Best effort: a leftover .tmp file is harmless but untidy; never let its own deletion
+                // failure mask the original write/move failure.
+                try { await _storage.DeleteFileAsync(TempRelativePath); } catch { /* best effort */ }
+                throw;
+            }
+
+            _cache = null;
+        });
+
         SettingsChanged?.Invoke();
+
+        await _audit.RecordAsync(new AuditRecord(
+            AuditEvents.EnvironmentSettingsChanged, "environment.json", AuditOutcome.Success,
+            changed.Count == 0 ? "no field changes" : "changed: " + string.Join(", ", changed)));
+    }
+
+    /// <summary>
+    /// Effective audit settings for this environment (policy registry value over the environment's own), never throws.
+    /// Settings that cannot be resolved (invalid / unreachable environment.json) fall back to the defaults, so audit
+    /// stays on rather than silently turning off.
+    /// </summary>
+    public async Task<AuditSettings> GetAuditSettingsAsync()
+    {
+        EnvironmentSettings? settings = null;
+        try { settings = (await GetAsync()).Settings; } catch { /* defaults below */ }
+        return AuditSettingsResolver.Resolve(settings, _environment.DataPath, _config.AuditEnabledOverride);
     }
 
     /// <summary>

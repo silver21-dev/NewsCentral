@@ -1,3 +1,4 @@
+using NewsCentral.Audit;
 using NewsCentral.Models;
 using NewsCentral.Publishing;
 using NewsCentral.Repositories;
@@ -11,19 +12,22 @@ public class PresentationService
     private readonly AuthenticationService _authService;
     private readonly PosterGenerationService _posterService;
     private readonly IndexGenerationService _indexGenerationService;
+    private readonly IAuditLog _audit;
 
     public PresentationService(
         IStorageService storage,
         IBlobDistributionService blobDistribution,
         AuthenticationService authService,
         PosterGenerationService posterService,
-        IndexGenerationService indexGenerationService)
+        IndexGenerationService indexGenerationService,
+        IAuditLog? audit = null)
     {
         _storage                = storage;
         _blobDistribution       = blobDistribution;
         _authService            = authService;
         _posterService          = posterService;
         _indexGenerationService = indexGenerationService;
+        _audit                  = audit ?? NullAuditLog.Instance;
     }
 
     // ── Queries ──────────────────────────────────────────────────────────────
@@ -50,7 +54,19 @@ public class PresentationService
 
     // ── Create ───────────────────────────────────────────────────────────────
 
-    public async Task<Presentation> CreatePresentationAsync(
+    public Task<Presentation> CreatePresentationAsync(
+        string teamId,
+        string teamFolderName,
+        string name,
+        string description,
+        string moreUrl,
+        byte[] imageData,
+        string originalImageName) =>
+        _audit.RunAsync(AuditEvents.PresentationCreated, null,
+            () => CreatePresentationCoreAsync(teamId, teamFolderName, name, description, moreUrl, imageData, originalImageName),
+            targetFrom: p => p.PresentationID, detail: $"team={teamFolderName}");
+
+    private async Task<Presentation> CreatePresentationCoreAsync(
         string teamId,
         string teamFolderName,
         string name,
@@ -118,7 +134,17 @@ public class PresentationService
     /// missing/unreadable); reusing <see cref="CreatePresentationAsync"/> performs the cross-team image
     /// copy into the target team's storage and enforces ContentAuthor/SystemAdmin on the target team.
     /// </summary>
-    public async Task<Presentation> DuplicatePresentationAsync(
+    public Task<Presentation> DuplicatePresentationAsync(
+        string sourceTeamFolder,
+        string presentationId,
+        string targetTeamId,
+        string targetTeamFolder) =>
+        _audit.RunAsync(AuditEvents.PresentationDuplicated, presentationId,
+            () => DuplicatePresentationCoreAsync(sourceTeamFolder, presentationId, targetTeamId, targetTeamFolder),
+            detail: $"from={sourceTeamFolder}; to={targetTeamFolder}",
+            detailFrom: p => $"from={sourceTeamFolder}; to={targetTeamFolder}; copy={p.PresentationID}");
+
+    private async Task<Presentation> DuplicatePresentationCoreAsync(
         string sourceTeamFolder,
         string presentationId,
         string targetTeamId,
@@ -146,7 +172,7 @@ public class PresentationService
             : source.ImageOriginalName;
 
         // Seed ONLY name + moreUrl + original picture; description omitted; no poster/assignment.
-        return await CreatePresentationAsync(
+        return await CreatePresentationCoreAsync(
             targetTeamId,
             targetTeamFolder,
             name: source.Name,
@@ -158,7 +184,17 @@ public class PresentationService
 
     // ── Update ───────────────────────────────────────────────────────────────
 
-    public async Task<Presentation> UpdatePresentationAsync(
+    public Task<Presentation> UpdatePresentationAsync(
+        string teamFolderName,
+        string presentationId,
+        string name,
+        string description,
+        string moreUrl) =>
+        _audit.RunAsync(AuditEvents.PresentationUpdated, presentationId,
+            () => UpdatePresentationCoreAsync(teamFolderName, presentationId, name, description, moreUrl),
+            detail: $"team={teamFolderName}");
+
+    private async Task<Presentation> UpdatePresentationCoreAsync(
         string teamFolderName,
         string presentationId,
         string name,
@@ -186,7 +222,17 @@ public class PresentationService
         return result;
     }
 
-    public async Task<Presentation> UpdatePresentationWithPosterAsync(
+    public Task<Presentation> UpdatePresentationWithPosterAsync(
+        string teamFolderName,
+        string presentationId,
+        bool isNewsOfWeek,
+        bool isWallpaper,
+        bool isLogonScreen) =>
+        _audit.RunAsync(AuditEvents.PresentationUpdated, presentationId,
+            () => UpdatePresentationWithPosterCoreAsync(teamFolderName, presentationId, isNewsOfWeek, isWallpaper, isLogonScreen),
+            detail: $"team={teamFolderName}; poster/display types");
+
+    private async Task<Presentation> UpdatePresentationWithPosterCoreAsync(
         string teamFolderName,
         string presentationId,
         bool isNewsOfWeek,
@@ -233,7 +279,7 @@ public class PresentationService
     /// Promotes original to generated/ for any presentation that still has
     /// GeneratedImagePath empty (created before the always-populate fix).
     /// </summary>
-    public async Task<Presentation> UpdatePresentationFullAsync(
+    public Task<Presentation> UpdatePresentationFullAsync(
         string teamFolderName,
         string presentationId,
         string name,
@@ -243,7 +289,23 @@ public class PresentationService
         bool isWallpaper,
         bool isLogonScreen,
         bool useVirtualDesktop = false,
-        string virtualDesktopBackgroundColor = "#000000")
+        string virtualDesktopBackgroundColor = "#000000") =>
+        _audit.RunAsync(AuditEvents.PresentationUpdated, presentationId,
+            () => UpdatePresentationFullCoreAsync(teamFolderName, presentationId, name, description, moreUrl,
+                isNewsOfWeek, isWallpaper, isLogonScreen, useVirtualDesktop, virtualDesktopBackgroundColor),
+            detail: $"team={teamFolderName}");
+
+    private async Task<Presentation> UpdatePresentationFullCoreAsync(
+        string teamFolderName,
+        string presentationId,
+        string name,
+        string description,
+        string moreUrl,
+        bool isNewsOfWeek,
+        bool isWallpaper,
+        bool isLogonScreen,
+        bool useVirtualDesktop,
+        string virtualDesktopBackgroundColor)
     {
         var currentUser = _authService.GetCurrentUser()
             ?? throw new UnauthorizedAccessException("Not authenticated");
@@ -293,7 +355,12 @@ public class PresentationService
 
     // ── Delete ───────────────────────────────────────────────────────────────
 
-    public async Task<bool> DeletePresentationAsync(string teamFolderName, string presentationId)
+    public Task<bool> DeletePresentationAsync(string teamFolderName, string presentationId) =>
+        _audit.RunAsync(AuditEvents.PresentationDeleted, presentationId,
+            () => DeletePresentationCoreAsync(teamFolderName, presentationId),
+            isSuccess: ok => ok, detail: $"team={teamFolderName}", detailFrom: ok => ok ? $"team={teamFolderName}" : "not found");
+
+    private async Task<bool> DeletePresentationCoreAsync(string teamFolderName, string presentationId)
     {
         var currentUser = _authService.GetCurrentUser()
             ?? throw new UnauthorizedAccessException("Not authenticated");
