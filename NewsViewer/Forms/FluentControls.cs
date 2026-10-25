@@ -206,6 +206,12 @@ internal sealed class RoundedButton : Button
         Cursor = Cursors.Hand;
     }
 
+    protected override void OnEnabledChanged(EventArgs e)
+    {
+        Cursor = Enabled ? Cursors.Hand : Cursors.Default;   // a grayed-out button does not invite a click
+        base.OnEnabledChanged(e);
+    }
+
     protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
     protected override void OnMouseLeave(EventArgs e) { _hover = false; _press = false; Invalidate(); base.OnMouseLeave(e); }
     protected override void OnMouseDown(MouseEventArgs e) { _press = true; Invalidate(); base.OnMouseDown(e); }
@@ -217,25 +223,34 @@ internal sealed class RoundedButton : Button
         var rect = new Rectangle(0, 0, Width - 1, Height - 1);
         using var path = Theme.RoundedRect(rect, Radius);
         Color fill, bord;
-        var text = Enabled ? ForeColor : Theme.TextSecondary;   // disabled buttons read as dimmed
+        // A disabled button ignores hover and press, and its label is blended toward the button's own fill, so it
+        // reads as grayed out on the theme and on any configured frame colour alike.
+        var hover = Enabled && _hover;
+        var press = Enabled && _press;
+        Color text = ForeColor;
         if (IsPrimary)
         {
             var accent = Theme.Accent;
-            fill = _press ? Shade(accent, -0.12f) : _hover ? Shade(accent, 0.12f) : accent;
+            fill = press ? Shade(accent, -0.12f) : hover ? Shade(accent, 0.12f) : accent;
             bord = fill;
             text = Color.White;
         }
         else
         {
-            fill = _press ? PressColor : _hover ? HoverColor : NormalColor;
-            bord = _press ? PressBorderColor : _hover ? HoverBorderColor : BorderColor;
+            fill = press ? PressColor : hover ? HoverColor : NormalColor;
+            bord = press ? PressBorderColor : hover ? HoverBorderColor : BorderColor;
         }
+        if (!Enabled) text = Blend(text, fill, 0.55f);
         using (var b = new SolidBrush(fill)) e.Graphics.FillPath(b, path);
         using (var p = new Pen(bord)) e.Graphics.DrawPath(p, path);
         var flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak;
         if (RightToLeft == RightToLeft.Yes) flags |= TextFormatFlags.RightToLeft;   // keeps punctuation such as the status dot on the correct side
         TextRenderer.DrawText(e.Graphics, Text, Font, rect, text, flags);
     }
+
+    // Fraction of the way from a toward b.
+    private static Color Blend(Color a, Color b, float amount) =>
+        Color.FromArgb(a.R + (int)((b.R - a.R) * amount), a.G + (int)((b.G - a.G) * amount), a.B + (int)((b.B - a.B) * amount));
 
     // Positive amount blends toward white, negative toward black (fraction of the distance).
     private static Color Shade(Color c, float amount) => amount >= 0

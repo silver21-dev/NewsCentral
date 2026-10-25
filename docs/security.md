@@ -130,6 +130,10 @@ This symmetry was incomplete in practice until each tier's pre-Entra bootstrap g
 
 Session telemetry (`session-*.json`) remains on HMAC-SHA256 throughout all phases.
 
+## Poster "More information" link (S04, October 2026 security improvements)
+
+The poster's **More information** button used to launch `Content.MoreInfoUrl` from the index through the shell with no checks, so an index author (or anyone who can tamper with an unsigned index) could make users open any scheme or handler: `file:`, `ms-settings:`, custom protocol handlers, UNC paths. Control: the button is enabled only for an absolute `https` URL without user information whose host equals a domain in `Ui\AllowedDomains` or is a subdomain of one (a bare suffix match is never used, so `evilcontoso.com` does not match `contoso.com`; hosts are compared in punycode, so a homoglyph host is refused). An empty or absent setting disables the button for every link. The click re-validates and launches the parsed URL. Refusals are logged to `launch.log` (`MoreInfoUrlRejected`, host and reason, never the URL). The signature on the index protects the link only where signing is required; this control also covers unsigned teams. Details: `docs/newsviewer-spec.md`.
+
 ## Authoring-tier hardening (S02, October 2026 security improvements)
 
 The authoring tier's trust boundary used to be "anyone with write access to DataPath": the same folder held every

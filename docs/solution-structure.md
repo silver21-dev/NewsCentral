@@ -84,6 +84,7 @@ NewsCentral.Shared\
 │   ├── LaunchDecision.cs          pure NewsViewer launch decision: LaunchInputs, ILaunchProbes (IsRemoteSession / IsSessionVisible / HasShell / IdleTime / IsBusy), LaunchDecider.Decide (the ordered rule table), UseVirtualDesktop + ShouldAssertWallpaperStyle, ContentKeys, RemoteDetection, FullScreenHeuristic, ProbeMath, LaunchLogTrimmer
 │   └── NotificationLogic.cs       NotificationCountdown (60 s, hover/lock pause, first outcome wins), NotificationPlacement (bottom-right/left, DIP scaling), LaunchLogLine (the launch.log line format)
 └── Ui\
+    ├── MoreInfoUrlPolicy.cs       MoreInfoUrlPolicy, MoreInfoDecision — whether the poster's More information link may open (https + Ui:AllowedDomains); pure
     └── FramePalette.cs            Rgb, ChromePalette, FramePaletteBuilder — poster frame/text colours (Ui:FrameColor / Ui:FrameTextColor) derived from the theme; pure, no System.Drawing
     (the other files in Ui\ — thumbnail cache, selection and bulk-operation helpers — belong to the authoring app)
 ```

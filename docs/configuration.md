@@ -103,6 +103,7 @@ HKLM\Software\[Company]\NewsCentral\NewsViewer\
 │       NotifyNewContent   REG_DWORD   (0/1; default 1 - show a "News arrived!" notification when new content arrives after today's poster was shown; 0 = silent exit as before)
 │       FrameColor   REG_SZ   (#RRGGBB; default empty = theme - colour of the poster window side panel, title bar and outer border; invalid = theme, noted in launch.log)
 │       FrameTextColor   REG_SZ   (#RRGGBB; default empty = automatic black/white by contrast once FrameColor is set; ignored without FrameColor)
+│       AllowedDomains   REG_SZ   (domains the poster's More information link may open, ';'-separated; default empty = the button is disabled for every link)
 ├── Hmac\
 │       SecretKey   REG_SZ
 ├── Signing\
@@ -406,7 +407,8 @@ default** when absent; as a documentation snippet (not part of any shipped file)
     "ShowDeliveredImages": false,
     "NotifyNewContent": true,
     "FrameColor": "",
-    "FrameTextColor": ""
+    "FrameTextColor": "",
+    "AllowedDomains": ""
   }
 }
 ```
@@ -417,6 +419,8 @@ the tree above and `Set-RegistryOverrides.ps1` — and each key is described bel
 `Active` (NewsViewer) — per-machine master switch. `bool`, default `true` (registry `Active` DWORD `0`/`1` at the hive root; absent = `true`, so an unprovisioned machine is never silently disabled). Evaluated first in `Main()`, before every other startup guard. `false` exits at startup with no action taken: no poster is shown, no wallpaper style re-assert runs, `viewerstate.json` is not written, no telemetry session file is written, and no dialog is shown. The current wallpaper style is deliberately left as-is — deactivation is not a revert. (The wallpaper *image* is NewsService's concern and is unaffected by NewsViewer's `Active` switch in either direction.)
 
 `Display:ShowInRemoteSessions` (NewsViewer) — `bool`, default `true` (registry `Display\ShowInRemoteSessions` DWORD 0/1; genuine boolean, so DWORD is correct). When `true`, posters and notifications are shown in remote sessions (RDP, Citrix, VMware Horizon). `false` restores the previous behavior: NewsViewer exits silently, logged as `reason=RemoteSession` in `launch.log`. `--manual` ignores it. Independently of this value, the HKCU wallpaper style re-assert never runs in a remote session, and a poster that wants a Virtual Desktop is shown on the standard desktop there. See `docs/newsviewer-spec.md` ("Remote sessions").
+
+`Ui:AllowedDomains` (NewsViewer) - `string`, default empty (registry `Ui\AllowedDomains`, **REG_SZ**; text). Domains the poster's **More information** button may open, separated by `;` (`,` also works), e.g. `contoso.com;intranet.contoso.net`. Per entry: whitespace trimmed, a leading `*.` or `.` and a trailing `.` removed, converted to punycode, lower-cased; entries containing `/ : @ ? #`, whitespace or a stray `*` are ignored and noted once per run in `launch.log` (`AllowedDomainsInvalidEntry`). Only `https` links without user information qualify, and the host must equal an entry or be a subdomain of it (`contoso.com` allows `intranet.contoso.com`, not `evilcontoso.com`). **Default empty = the button is disabled for every link**, so deliver it with (or before) the NewsViewer build that enforces it. Rules, log reasons and tooltip: `docs/newsviewer-spec.md`.
 
 `Ui:FrameColor` / `Ui:FrameTextColor` (NewsViewer) — `string`, default empty (registry `Ui\FrameColor` / `Ui\FrameTextColor`, **REG_SZ** `#RRGGBB`; these are text, so REG_SZ is the right type). `FrameColor` brands the poster window's side panel, title bar and outer border fleet-wide; empty = the theme. `FrameTextColor` is the text colour on those surfaces; empty = black or white by contrast once `FrameColor` is set (ignored without it). An invalid value falls back (invalid `FrameColor` → the whole theme; invalid `FrameTextColor` → automatic contrast) and is noted in `launch.log`. The "News arrived!" notification form and the Online pill follow it too (the pill keeps its green/red status dot); the Close button and the accent colours are not affected. Surfaces, derivation rules and examples: `docs/newsviewer-spec.md` ("Poster frame colours"); set with `Set-RegistryOverrides.ps1 -FrameColor '#1E3A5F' [-FrameTextColor '#FFD700']` (an empty string removes the value).
 

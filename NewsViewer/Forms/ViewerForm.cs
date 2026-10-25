@@ -58,6 +58,9 @@ public sealed class ViewerForm : Form
     private readonly bool _writeTelemetry;
     // "notification" when opened from the "News arrived!" form; carried onto the session record.
     private readonly string? _source;
+    // Ui:AllowedDomains, already parsed. The "More information" link is checked against it twice: when the button is
+    // built (enabled or not, tooltip) and again on click.
+    private readonly IReadOnlyList<string> _allowedDomains;
 
     // Optional delivered-image preview (Ui:ShowDeliveredImages). A null resolver means the feature is
     // off: no buttons are created and the form is exactly the pre-feature layout.
@@ -79,8 +82,10 @@ public sealed class ViewerForm : Form
         DeliveredImageResolver? deliveredImages = null,
         bool startCountdownStopped = false,
         bool writeTelemetry = true,
-        string? source = null)
+        string? source = null,
+        IReadOnlyList<string>? allowedDomains = null)
     {
+        _allowedDomains = allowedDomains ?? Array.Empty<string>();
         _recordShown = recordShown;
         _writeTelemetry = writeTelemetry;
         _source = source;
@@ -240,6 +245,17 @@ public sealed class ViewerForm : Form
             Location = new Point(PanelMargin, 136)
         };
         StyleSecondaryButton(btnMoreInfo);
+        // Only an https link on an allowed domain is offered; anything else leaves the button grayed out (no
+        // tooltip). An enabled button shows the exact URL it will open.
+        var moreInfo = MoreInfoUrlPolicy.Evaluate(_assignment.Content.MoreInfoUrl, _allowedDomains);
+        btnMoreInfo.Enabled = moreInfo.IsAllowed;
+        if (moreInfo.IsAllowed)
+        {
+            // The tooltip takes its reading order from the control it is attached to; a URL must stay left-to-right
+            // under an RTL UI. The button's label has no punctuation, so it paints the same either way.
+            if (rtl) btnMoreInfo.RightToLeft = RightToLeft.No;
+            _toolTip.SetToolTip(btnMoreInfo, moreInfo.LaunchUrl);
+        }
         btnMoreInfo.Click += OnMoreInfoClicked;
         _pnlSide.Controls.Add(btnMoreInfo);
 
@@ -623,12 +639,13 @@ public sealed class ViewerForm : Form
 
     private void OnMoreInfoClicked(object? sender, EventArgs e)
     {
-        var url = _assignment.Content.MoreInfoUrl;
-        if (!string.IsNullOrWhiteSpace(url))
-        {
-            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-            catch { }
-        }
+        // Re-checked here as well: a rejected link never launches, closes the poster or counts as a click.
+        var decision = MoreInfoUrlPolicy.Evaluate(_assignment.Content.MoreInfoUrl, _allowedDomains);
+        if (!decision.IsAllowed) return;
+
+        // The parsed, normalised URL - not the raw string from the index.
+        try { Process.Start(new ProcessStartInfo(decision.LaunchUrl!) { UseShellExecute = true }); }
+        catch { }
         _closeReason = "UrlLaunch";
         Close();
     }

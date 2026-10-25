@@ -170,7 +170,35 @@ trigger strip have been removed); 16px outer margins, 12px between items. Top to
 GDI+ has no SemiBold `FontStyle`, so Bold is the nearest weight), the **status pill** (centered; rounded
 surface chip showing `● Online` / `● Offline` in the theme's OnlineFg/OfflineFg), **Close** —
 the accent-filled primary action (`RoundedButton.IsPrimary`), **More information** — a
-ghost/surface secondary button (opens `Content.MoreInfoUrl`), and the auto-close card.
+ghost/surface secondary button (opens `Content.MoreInfoUrl` only when the link passes the rules below), and the auto-close card.
+
+#### More information button - Ui\AllowedDomains
+
+The link is attacker-influenced data (the index author, or anyone who can tamper with an unsigned index), and it used
+to be launched with the shell and no checks, so any scheme worked: `file:`, `ms-settings:`, custom protocol
+handlers, UNC paths. Now the button is **enabled only when** the link is an absolute `https` URL without user
+information whose host is allowed by `Ui\AllowedDomains` (REG_SZ; `;` or `,` separated; whitespace trimmed;
+case-insensitive; a leading `*.` or `.` and a trailing `.` on an entry are ignored; entries and hosts are compared
+in punycode form). **Matching is exact or by subdomain, never a bare suffix:** with `contoso.com` the hosts
+`contoso.com` and `intranet.contoso.com` match, `evilcontoso.com` and `contoso.com.evil.com` do not;
+`https://contoso.com@evil.com` is refused because of the user information; a Unicode look-alike (a Cyrillic letter in
+`contoso`) converts to a different punycode host and is refused. Empty or absent `AllowedDomains` (the default)
+means the button is grayed out for every link.
+
+- The decision is made when the form is built (the button is created disabled, with no tooltip) and **again on
+  click**: a refused link does not launch, does not close the poster and is not a click (no `UrlLaunch` close reason).
+- An enabled button has a tooltip showing the exact URL it will open (the parsed, normalised form, which is also what is
+  launched). It stays left-to-right under an RTL UI.
+- A disabled button ignores hover and press and its label is dimmed toward its fill, on the theme and on a configured
+  frame colour alike.
+- `launch.log`: one line per displayed poster whose link is refused for any reason except a missing link:
+  `decision=Warning | reason=MoreInfoUrlRejected | note=presentation=<id>; host=<host or ->; why=<reason>` with
+  `why` one of `NoAllowedDomains`, `NotAbsolute`, `SchemeNotHttps`, `UserInfoPresent`, `HostNotAllowed`.
+  The URL itself is never logged (it may carry query tokens). A poster without a link logs nothing (`NoUrl`).
+  Entries of the setting that cannot be used (containing `/ : @ ? #`, whitespace or a stray `*`) are ignored and noted
+  once per run: `decision=Warning | reason=AllowedDomainsInvalidEntry | note=ignored=<n>; entries=<list>`.
+- Set it with `Set-RegistryOverrides.ps1 -Company "<Company>" -ComponentName NewsViewer -AllowedDomains 'contoso.com;intranet.contoso.net'`
+  (an empty string removes it). Policy: `MoreInfoUrlPolicy` in `NewsCentral.Shared/Ui`.
 
 ### Auto-close card
 

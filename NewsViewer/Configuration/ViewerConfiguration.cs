@@ -55,6 +55,15 @@ public class UiSection
     /// invalid value alone falls back to the automatic colour (<c>FrameTextColorInvalid</c>).
     /// </summary>
     public string? FrameTextColor { get; set; }
+
+    /// <summary>
+    /// Registry <c>Ui\AllowedDomains</c> (REG_SZ). Domains, separated by <c>;</c> (or <c>,</c>), that the poster's
+    /// "More information" link may open: https only, and the host must equal an entry or be a subdomain of it.
+    /// Empty/absent (the default) = the button is disabled for every link. Parsed by
+    /// <c>MoreInfoUrlPolicy.ParseAllowedDomains</c>; unusable entries are ignored and noted once per run in the
+    /// launch log (<c>AllowedDomainsInvalidEntry</c>).
+    /// </summary>
+    public string? AllowedDomains { get; set; }
 }
 
 public class DisplaySection

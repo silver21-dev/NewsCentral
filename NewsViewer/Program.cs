@@ -201,6 +201,11 @@ static class Program
         var launchNote = new[] { vdFallbackNote, frameNote }.Where(s => !string.IsNullOrEmpty(s)).ToArray() is { Length: > 0 } noteParts
             ? string.Join(",", noteParts) : null;
 
+        // Ui:AllowedDomains for the poster's "More information" button (https + allowed domain only). Parsed once;
+        // entries that cannot be used are noted once per run, when the first poster is built.
+        var moreInfoDomains = MoreInfoUrlPolicy.ParseAllowedDomains(config.Ui.AllowedDomains);
+        bool allowedDomainsReported = false;
+
         Directory.CreateDirectory(userStatePath);
 
         var hmac        = new HmacService(config.Hmac);        // telemetry only — unchanged
@@ -271,6 +276,20 @@ static class Program
         ViewerForm BuildViewer(PublishedAssignmentIndex item, string itemImage, bool recordShown, bool countdownStopped,
             bool writeTelemetry, string? source)
         {
+            if (!allowedDomainsReported && moreInfoDomains.InvalidEntries.Count > 0)
+            {
+                allowedDomainsReported = true;
+                launchLog.Append(triggerName, "Warning", "AllowedDomainsInvalidEntry", null,
+                    note: $"ignored={moreInfoDomains.InvalidEntries.Count}; entries={string.Join(",", moreInfoDomains.InvalidEntries)}");
+            }
+
+            // One line per display when the link is not offered (never for a poster without a link, never the URL
+            // itself: it may carry query tokens).
+            var moreInfo = MoreInfoUrlPolicy.Evaluate(item.Content.MoreInfoUrl, moreInfoDomains.Domains);
+            if (moreInfo.ShouldLog)
+                launchLog.Append(triggerName, "Warning", "MoreInfoUrlRejected", null,
+                    note: $"presentation={item.PresentationId}; host={moreInfo.Host ?? "-"}; why={moreInfo.Reason}");
+
             var isOnline = ReadOnlineStatus(config.CacheRootPath);
 
             // Optional delivered wallpaper / lock screen buttons (Ui:ShowDeliveredImages, default off). Null = the
@@ -286,7 +305,8 @@ static class Program
 
             return new ViewerForm(item, itemImage, telemetry, viewerState, isOnline, effectiveDuration,
                 recordShown: recordShown, deliveredImages: delivered,
-                startCountdownStopped: countdownStopped, writeTelemetry: writeTelemetry, source: source);
+                startCountdownStopped: countdownStopped, writeTelemetry: writeTelemetry, source: source,
+                allowedDomains: moreInfoDomains.Domains);
         }
 
         // Shows the standard poster form for `item` (on a Virtual Desktop when the assignment asks for one).

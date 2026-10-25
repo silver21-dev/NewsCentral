@@ -100,6 +100,7 @@
     │       NotifyNewContent        DWORD    (0 = no "News arrived!" notification; default 1)
     │       FrameColor              REG_SZ   (#RRGGBB colour of the poster side panel, title bar and border; empty/absent = theme)
     │       FrameTextColor          REG_SZ   (#RRGGBB text colour on those surfaces; empty/absent = automatic black/white)
+    │       AllowedDomains          REG_SZ   (domains the poster's More information link may open, ";"-separated; empty/absent = button disabled)
     ├── Delivery\
     │       WallpaperStyle              REG_SZ   (style only — the image is NewsService/CSP-owned)
     │       WallpaperBackgroundColor    REG_SZ
@@ -288,6 +289,14 @@
     Text colour on those surfaces, as #RRGGBB (Ui\FrameTextColor, REG_SZ). An empty string removes the
     value: with a FrameColor set the text is then black or white by contrast, otherwise the theme's.
     Ignored while no FrameColor is set. NewsViewer only. Example: -FrameTextColor '#FFD700'
+
+.PARAMETER AllowedDomains
+    Domains the NewsViewer poster's "More information" button may open (Ui\AllowedDomains, REG_SZ), separated by
+    ';' (',' also works). Only https links qualify, and the link's host must equal an entry or be a subdomain of
+    it (contoso.com allows intranet.contoso.com, never evilcontoso.com). A leading '*.' or '.' on an entry is
+    ignored. Without a value the button is disabled for every link, so deploy this no later than the NewsViewer
+    build that enforces it. An empty string removes the value. NewsViewer only.
+    Example: -AllowedDomains 'contoso.com;intranet.contoso.net'
 
 .PARAMETER ShowInRemoteSessions
     When $false, NewsViewer exits silently (logged as RemoteSession) in remote sessions (RDP, Citrix, Horizon)
@@ -554,6 +563,15 @@ param(
         else { throw "-FrameTextColor must be #RRGGBB (e.g. '#FFD700') or an empty string to remove the value." }
     })]
     [string] $FrameTextColor,
+
+    # ';'- or ','-separated domains, or empty (empty removes the value). Entries with a scheme, path, port, '@',
+    # '?', '#' or inner whitespace would be ignored by NewsViewer, so they are rejected before any write.
+    [ValidateScript({
+        $bad = @($_ -split '[;,]' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' -and $_ -match '[/:@?#*\s]' -and $_ -notmatch '^\*\.[^*/:@?#\s]+$' })
+        if ($bad.Count -eq 0) { $true }
+        else { throw "-AllowedDomains takes bare domains such as 'contoso.com;intranet.contoso.net' (optionally '*.contoso.com'); not usable: $($bad -join ', ')" }
+    })]
+    [string] $AllowedDomains,
     [Nullable[bool]] $ShowInRemoteSessions,
 
     [Nullable[bool]] $Active,
@@ -600,7 +618,7 @@ $newParameterNames = @(
     "DefaultWallpaperPath", "WallpaperStyle", "WallpaperBackgroundColor",
     "LogicalDayStartHour", "Theme", "TelemetryUploadEnabled", "LogLevel", "EventLogLevel",
     "ViewerTasksNewsViewerPath", "ViewerTasksMode", "RegisterEventSource",
-    "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions", "FrameColor", "FrameTextColor"
+    "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions", "FrameColor", "FrameTextColor", "AllowedDomains"
 )
 
 # Full parameter -> allowed-component map for the two fleet components. Covers every
@@ -626,7 +644,7 @@ $componentAllowedParams = @{
         "AzureTenantId", "AzureClientId", "AzureAccountName", "AzureContainerName",
         "AzureAuthMode", "AzureCertificateThumbprint", "AzureClientSecret", "AzureUseWinHttpProxy",
         "BypassDailyGate", "BypassImageIntegrityCheck", "LogicalDayStartHour", "Theme",
-        "WallpaperStyle", "WallpaperBackgroundColor", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions", "FrameColor", "FrameTextColor"
+        "WallpaperStyle", "WallpaperBackgroundColor", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions", "FrameColor", "FrameTextColor", "AllowedDomains"
     )
 }
 
@@ -1014,6 +1032,15 @@ foreach ($frameParam in @(
         else {
             Set-RegValue -Path "$base\Ui" -Name $frameParam.Name -Value $frameParam.Value.ToUpperInvariant() -Type String
         }
+    }
+}
+if ($PSBoundParameters.ContainsKey("AllowedDomains")) {
+    # An empty (or all-blank) value removes it: the More information button is then disabled for every link.
+    if ([string]::IsNullOrWhiteSpace($AllowedDomains)) {
+        Remove-RegValue -Path "$base\Ui" -Name "AllowedDomains"
+    }
+    else {
+        Set-RegValue -Path "$base\Ui" -Name "AllowedDomains" -Value $AllowedDomains.Trim() -Type String
     }
 }
 if ($PSBoundParameters.ContainsKey("NotifyNewContent")) {

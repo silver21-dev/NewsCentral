@@ -440,6 +440,7 @@ HKLM\Software\{Company}\NewsCentral\NewsViewer\
 │       NotifyNewContent         REG_DWORD  0/1 (default 1; "News arrived!" notification on new content)
 │       FrameColor                REG_SZ     #RRGGBB (default empty = theme; poster side panel, title bar and border)
 │       FrameTextColor            REG_SZ     #RRGGBB (default empty = automatic black/white by contrast)
+│       AllowedDomains            REG_SZ     domains the poster's More information link may open, ';'-separated (default empty = button disabled; deploy no later than the NewsViewer build that enforces it)
 │
 ├── Signing\
 │       RequireSignedIndex      REG_SZ   "false"
@@ -452,6 +453,12 @@ HKLM\Software\{Company}\NewsCentral\NewsViewer\
 └── teams\
         {teamFolderName}        REG_SZ   ""
 ```
+
+> ⚠️ **Deliver `Ui\AllowedDomains` no later than the NewsViewer build that enforces it (S04).** That build opens
+> the poster's **More information** link only for an `https` URL on a listed domain (or a subdomain); with the
+> value absent or empty the button is grayed out on every machine, fleet-wide. Example value:
+> `contoso.com;intranet.contoso.net`. Posters whose link is refused leave a `MoreInfoUrlRejected` line in the
+> user's `launch.log` (`docs/newsviewer-spec.md`).
 
 > ⚠️ **The HMAC key must be identical in NewsViewer (signer) and NewsService (verifier).** It covers
 > session telemetry only — index signing is ECDSA. An empty key disables HMAC system-wide and telemetry
