@@ -19,6 +19,7 @@ public class IndexGenerationService
     private readonly IServiceProvider _serviceProvider;
     private readonly AuthenticationService _authService;
     private readonly EcdsaSignatureService _ecdsa;
+    private readonly TeamKeyService _keys;
 
     private const string IndexFileName = "index.json";
 
@@ -27,13 +28,15 @@ public class IndexGenerationService
         IBlobDistributionService blobDistribution,
         IServiceProvider serviceProvider,
         AuthenticationService authService,
-        EcdsaSignatureService ecdsa)
+        EcdsaSignatureService ecdsa,
+        TeamKeyService keys)
     {
         _storage          = storage;
         _blobDistribution = blobDistribution;
         _serviceProvider  = serviceProvider;
         _authService      = authService;
         _ecdsa            = ecdsa;
+        _keys             = keys;
     }
 
     // ── Index path ───────────────────────────────────────────────────────────
@@ -111,10 +114,16 @@ public class IndexGenerationService
         index = JsonSerializer.Deserialize<TeamIndexFile>(
             JsonSerializer.Serialize(index, indexJsonOptions), indexJsonOptions)!;
 
-        var signingKeys = await LoadTeamSigningKeysAsync(teamFolderName);
-        if (!string.IsNullOrEmpty(signingKeys?.PrivateKey))
+        // NotConfigured keeps today's behaviour (unsigned). Unreadable never does: a key that exists but cannot
+        // be read must not silently turn into an unsigned index, so generation fails before anything is written.
+        var decision = SigningKeyGate.Decide(await LoadTeamSigningKeysAsync(teamFolderName));
+        if (decision.Action == SigningAction.Block)
+            throw new SigningKeyUnreadableException(teamFolderName, decision.BlockReason!);
+
+        var signingKeys = decision.Keys;
+        if (decision.Action == SigningAction.Sign && signingKeys != null)
         {
-            index.Signature = _ecdsa.Sign(index, signingKeys.PrivateKey);
+            index.Signature = _ecdsa.Sign(index, signingKeys.PrivateKey!);
             System.Diagnostics.Debug.WriteLine($"✓ index.json signed (ECDSA) for {teamFolderName}");
 
             // Embed the team's CURRENT public key so it travels with the content
@@ -447,6 +456,7 @@ public class IndexGenerationService
             {
                 System.Diagnostics.Debug.WriteLine(
                     $"Error generating index for {team.FolderName}: {ex.Message}");
+                result.Failures.Add($"{team.FolderName}: {ex.Message}");
             }
         }
 
@@ -460,39 +470,30 @@ public class IndexGenerationService
     // ── Signing ──────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Reads team-signing.json from the authoring tier.
-    /// Returns null if the file is absent, unreadable, or empty.
-    /// team-signing.json is intentionally never passed to IBlobDistributionService.
+    /// Loads the team's signing keys from the secure store (SecurePath), migrating them from the old DataPath
+    /// location on first load. The result distinguishes NotConfigured (no file) from Unreadable (access denied,
+    /// IO or parse error, with a reason) - callers must never treat the second as the first.
+    /// The keys are intentionally never passed to IBlobDistributionService.
     /// </summary>
-    public async Task<TeamSigningKeys?> LoadTeamSigningKeysAsync(string teamFolderName)
-    {
-        var path = $"{teamFolderName}/team-signing.json";
-        try
-        {
-            var json = await _storage.ReadTextAsync(path);
-            if (json == null) return null;
-
-            return JsonSerializer.Deserialize<TeamSigningKeys>(
-                json, JsonConfiguration.GetIndexJsonOptions());
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine(
-                $"Failed to load team-signing.json for {teamFolderName}: {ex.Message}");
-            return null;
-        }
-    }
+    public Task<TeamKeyLoadResult> LoadTeamSigningKeysAsync(string teamFolderName) =>
+        _keys.LoadAsync(teamFolderName);
 
     /// <summary>
-    /// Writes team-signing.json to the authoring tier only.
-    /// Must never be called with IBlobDistributionService.
-    /// Serialized with camelCase (GetIndexJsonOptions) so it round-trips with LoadTeamSigningKeysAsync.
+    /// Writes the team's keys to the secure store only. Must never be called with IBlobDistributionService.
+    /// Refuses to replace a key that exists but cannot be read.
     /// </summary>
-    public async Task SaveTeamSigningKeysAsync(string teamFolderName, TeamSigningKeys keys)
+    public Task SaveTeamSigningKeysAsync(string teamFolderName, TeamSigningKeys keys) =>
+        _keys.SaveAsync(teamFolderName, keys);
+
+    /// <summary>
+    /// Pre-flight for publish flows: throws <see cref="SigningKeyUnreadableException"/> when the team's key exists but
+    /// cannot be read, so the flow can stop before it changes anything.
+    /// </summary>
+    public async Task EnsureSigningKeyUsableAsync(string teamFolderName)
     {
-        var path = $"{teamFolderName}/team-signing.json";
-        var json = JsonSerializer.Serialize(keys, JsonConfiguration.GetIndexJsonOptions());
-        await _storage.WriteTextAsync(path, json);
+        var load = await LoadTeamSigningKeysAsync(teamFolderName);
+        if (load.Outcome == KeyLoadOutcome.Unreadable)
+            throw new SigningKeyUnreadableException(teamFolderName, load.Reason ?? "unknown reason");
     }
 
     // ── Hashing ──────────────────────────────────────────────────────────────
@@ -560,4 +561,26 @@ public sealed class RegenerateAllResult
 
     /// <summary>One "{teamFolderName}: {error}" entry per team whose distribution push failed.</summary>
     public List<string> DistributionFailures { get; set; } = new();
+
+    /// <summary>One "{teamFolderName}: {error}" entry per team whose index could not be generated at all
+    /// (for example an unreadable signing key). Nothing was written for these teams.</summary>
+    public List<string> Failures { get; set; } = new();
+}
+
+/// <summary>
+/// The team's signing key exists but could not be read. Index generation refuses rather than publishing
+/// an unsigned index; the message names the team and the reason and is safe to show to the user.
+/// </summary>
+public sealed class SigningKeyUnreadableException : InvalidOperationException
+{
+    public string TeamFolderName { get; }
+    public string Reason { get; }
+
+    public SigningKeyUnreadableException(string teamFolderName, string reason)
+        : base($"The signing key for team '{teamFolderName}' could not be read ({reason}). " +
+               "Nothing was published and the existing index is unchanged. Ask an administrator to restore access to the key.")
+    {
+        TeamFolderName = teamFolderName;
+        Reason = reason;
+    }
 }

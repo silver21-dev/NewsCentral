@@ -14,6 +14,7 @@
 @inject DataSeederService DataSeeder
 @inject EnvironmentDirectoryService EnvironmentDirectory
 @inject EnvironmentSettingsService EnvironmentSettingsService
+@inject NewsCentral.Security.TeamKeyService KeyService
 
 <PageTitle>@Localizer["Login"] - @Localizer["AppTitle"]</PageTitle>
 
@@ -434,6 +435,22 @@
         {
             System.Diagnostics.Debug.WriteLine($"Error loading teams: {teamEx.Message}");
             // Don't fail login if team selection fails
+        }
+
+        // A system administrator's login moves every team's signing key into the secure store (verified copy,
+        // then delete). Failures never block login: they are kept on TeamKeyService.Issues and shown to the
+        // administrator, and the old file stays in use for the session.
+        if (user.IsSystemAdmin)
+        {
+            try
+            {
+                var allTeams = await TeamService.GetAllTeamsAsync();
+                await KeyService.MigrateAllAsync(allTeams.Select(t => t.FolderName));
+            }
+            catch (Exception keyEx)
+            {
+                System.Diagnostics.Debug.WriteLine($"Key migration pass failed: {keyEx.Message}");
+            }
         }
 
         // "Last used" is recorded only after a successful login, never on mere picker selection —

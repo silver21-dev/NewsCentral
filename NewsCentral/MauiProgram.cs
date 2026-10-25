@@ -201,6 +201,24 @@ public static class MauiProgram
         // reads this instead of AppConfiguration directly; see EnvironmentSettingsService.cs.
         builder.Services.AddSingleton<EnvironmentSettingsService>();
 
+        // Team signing keys live in the per-environment secure store (SecurePath), not under DataPath. The
+        // root is re-resolved on every call so an environment switch or a settings save takes effect at once.
+        builder.Services.AddSingleton(sp =>
+        {
+            var environment = sp.GetRequiredService<EnvironmentContext>();
+            var settings = sp.GetRequiredService<EnvironmentSettingsService>();
+            return new TeamKeyService(
+                () => environment.DataPath,
+                async () =>
+                {
+                    var effective = await settings.GetAsync();
+                    return effective.Settings is null
+                        ? new SecureRootResult(null, effective.Error ?? "environment settings unavailable")
+                        : new SecureRootResult(
+                            EnvironmentSettingsResolver.EffectiveSecurePath(effective.Settings, environment.DataPath), null);
+                });
+        });
+
         // Environment picker / switch / add / remove / hide (M4a) — needs TeamContextService,
         // registered a few lines below in "Register other services"; constructor-injection order
         // doesn't matter to the DI container, only presence at resolution time.

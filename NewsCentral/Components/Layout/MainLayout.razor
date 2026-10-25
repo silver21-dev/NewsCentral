@@ -2,6 +2,7 @@
 @using NewsCentral.Services
 @using NewsCentral.Models
 @using NewsCentral.Configuration
+@using NewsCentral.Security
 @using NewsCentral.Components.Shared
 @using Microsoft.Extensions.Logging
 @inject AuthenticationService AuthService
@@ -10,6 +11,7 @@
 @inject EnvironmentSettingsService EnvironmentSettingsService
 @inject EnvironmentContext EnvironmentContext
 @inject DistributionStatusTracker DistributionStatus
+@inject TeamKeyService KeyService
 @inject NavigationManager Navigation
 @inject ILogger<MainLayout> Logger
 @implements IDisposable
@@ -90,6 +92,19 @@
                     <a href="/environment-management">Details</a>
                 </div>
             }
+
+            @* Admin-only: a team signing key that could not be migrated to the secure store (or exists in both
+               places and differs). The old file stays in use meanwhile and is exposed to every author. TODO(i18n). *@
+            if (currentUser.IsSystemAdmin && KeyService.Issues.Count > 0)
+            {
+                <div class="alert alert-danger mx-4 mt-2 mb-0">
+                    <strong>Signing key migration needs attention.</strong>
+                    @foreach (var issue in KeyService.Issues)
+                    {
+                        <div>@issue</div>
+                    }
+                </div>
+            }
         }
 
         <article class="content px-4">
@@ -139,6 +154,7 @@
         TeamContext.OnTeamChanged += HandleTeamChanged;
         EnvironmentSettingsService.SettingsChanged += HandleEnvironmentSettingsChanged;
         DistributionStatus.Changed += HandleDistributionStatusChanged;
+        KeyService.IssuesChanged += HandleDistributionStatusChanged;
         Navigation.LocationChanged += HandleLocationChanged;
         await RefreshAsync();
     }
@@ -286,6 +302,7 @@
         TeamContext.OnTeamChanged -= HandleTeamChanged;
         EnvironmentSettingsService.SettingsChanged -= HandleEnvironmentSettingsChanged;
         DistributionStatus.Changed -= HandleDistributionStatusChanged;
+        KeyService.IssuesChanged -= HandleDistributionStatusChanged;
         Navigation.LocationChanged -= HandleLocationChanged;
     }
 }

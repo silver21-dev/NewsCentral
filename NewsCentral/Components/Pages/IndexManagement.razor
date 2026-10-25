@@ -509,12 +509,13 @@
 
             var result = await IndexService.RegenerateAllIndexesAsync();
 
-            if (result.DistributionFailures.Count > 0)
+            if (result.DistributionFailures.Count > 0 || result.Failures.Count > 0)
             {
-                allDistributionFailures = result.DistributionFailures;
+                allDistributionFailures = result.DistributionFailures
+                    .Concat(result.Failures.Select(f => $"not regenerated - {f}")).ToList();
                 allWarningMessage =
                     $"{Localizer["RegenerationAllSuccess", result.Regenerated, allTeamsInfo.Count]} " +
-                    $"— {result.DistributionFailures.Count} distribution failure(s). Clients will not receive the " +
+                    $"— {allDistributionFailures.Count} failure(s). Clients will not receive the " +
                     "affected teams' content until this is resolved and the indexes are regenerated again.";
             }
             else

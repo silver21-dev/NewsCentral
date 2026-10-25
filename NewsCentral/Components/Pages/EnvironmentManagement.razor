@@ -4,6 +4,7 @@
 @using System.Threading
 @using NewsCentral.Configuration
 @using NewsCentral.Configuration.FleetExport
+@using NewsCentral.Security
 @using NewsCentral.Services
 @using NewsCentral.Components.Shared
 @inject AuthenticationService AuthService
@@ -159,6 +160,17 @@
                     {
                         <input class="form-control" @bind="formDisplayName" @bind:after="MarkDirty" />
                     }
+                </div>
+
+                @* TODO(i18n). SecurePath is not policy-controllable. *@
+                <div class="mb-3">
+                    <label class="form-label">Secure path (team signing keys)</label>
+                    <input class="form-control" @bind="formSecurePath" @bind:after="MarkDirty"
+                           placeholder="(defaults to DataPath\secure if left blank)" />
+                    <small class="text-muted">
+                        Currently: @EnvironmentSettingsResolver.EffectiveSecurePath(BuildFormSettings(), EnvironmentContext.DataPath).
+                        Changing this does not move existing keys. Folder permissions are set by the provisioning script, not by this app.
+                    </small>
                 </div>
 
                 <div class="mb-3 form-check">
@@ -523,6 +535,7 @@
     private bool formDistributionEnabled;
     private string formMode = "Local";
     private string? formLocalPath;
+    private string? formSecurePath;
     private string? formAzureTenantId;
     private string? formAzureClientId;
     private string? formAzureAccountName;
@@ -686,6 +699,7 @@
         formDistributionEnabled = baseSettings.Distribution.Enabled;
         formMode = baseSettings.Distribution.Mode;
         formLocalPath = baseSettings.Distribution.LocalPath;
+        formSecurePath = baseSettings.SecurePath;
         formAzureTenantId = baseSettings.Distribution.AzureBlob.TenantId;
         formAzureClientId = baseSettings.Distribution.AzureBlob.ClientId;
         formAzureAccountName = baseSettings.Distribution.AzureBlob.AccountName;
@@ -710,6 +724,7 @@
     {
         SchemaVersion = EnvironmentSettingsResolver.CurrentSchemaVersion,
         DisplayName = string.IsNullOrWhiteSpace(formDisplayName) ? null : formDisplayName,
+        SecurePath = string.IsNullOrWhiteSpace(formSecurePath) ? null : formSecurePath.Trim(),
         Distribution = new DistributionSettings
         {
             Enabled = formDistributionEnabled,
@@ -838,10 +853,12 @@
         try
         {
             var result = await IndexService.RegenerateAllIndexesAsync();
-            regenerateFailures = result.DistributionFailures;
-            regenerateSummary = result.DistributionFailures.Count == 0
+            // Teams whose index could not be generated at all (e.g. an unreadable signing key) are listed with
+            // the distribution failures so they are not silently skipped.
+            regenerateFailures = result.DistributionFailures.Concat(result.Failures.Select(f => $"not regenerated - {f}")).ToList();
+            regenerateSummary = regenerateFailures.Count == 0
                 ? $"Regenerated {result.Regenerated} team index(es), 0 distribution failures."
-                : $"Regenerated {result.Regenerated} team index(es), {result.DistributionFailures.Count} distribution failure(s):";
+                : $"Regenerated {result.Regenerated} team index(es), {regenerateFailures.Count} failure(s):";
         }
         catch (Exception ex)
         {
@@ -1019,8 +1036,11 @@
         foreach (var team in allTeams)
         {
             // Public keys only — team-signing.json's PrivateKey is never read here.
-            var keys = await IndexService.LoadTeamSigningKeysAsync(team.FolderName);
-            exportTeams.Add(new FleetExportTeam(team.FolderName, team.Name, keys?.PublicKey, keys?.PublicKeyPrevious));
+            // An unreadable key is reported as such, never as "no key".
+            var load = await IndexService.LoadTeamSigningKeysAsync(team.FolderName);
+            exportTeams.Add(new FleetExportTeam(
+                team.FolderName, team.Name, load.Keys?.PublicKey, load.Keys?.PublicKeyPrevious,
+                KeyUnreadableReason: load.Outcome == KeyLoadOutcome.Unreadable ? load.Reason ?? "unknown reason" : null));
         }
 
         var distribution = effective.Settings.Distribution;

@@ -28,7 +28,8 @@ public sealed record FleetExportTeam(
     string FolderName,
     string DisplayName,
     string? PublicKey,
-    string? PublicKeyPrevious);
+    string? PublicKeyPrevious,
+    string? KeyUnreadableReason = null);
 
 /// <summary>
 /// M6: pure input to <see cref="FleetExportBuilder.Build"/> — no I/O, no secrets. The caller
@@ -109,8 +110,12 @@ public static class FleetExportBuilder
 
         var teamsWithKeys = input.Teams.Where(t => !string.IsNullOrWhiteSpace(t.PublicKey)).ToList();
 
+        // An unreadable key is not a missing key: the team HAS a key that this export could not read, so the
+        // warning must say so (and must not suggest generating one).
         foreach (var team in input.Teams.Where(t => string.IsNullOrWhiteSpace(t.PublicKey)))
-            warnings.Add($"No signing key: {team.FolderName} — its index can't be verified by devices");
+            warnings.Add(team.KeyUnreadableReason is null
+                ? $"No signing key: {team.FolderName} — its index can't be verified by devices"
+                : $"Key not readable: {team.FolderName} ({team.KeyUnreadableReason}) — it is missing from this export; devices can't verify its index until the key is readable and the export is regenerated");
 
         var headerLines = BuildHeaderLines(input, warnings, placeholders);
 

@@ -136,6 +136,9 @@ public static class EnvironmentSettingsResolver
             return errors;
         }
 
+        if (!string.IsNullOrWhiteSpace(settings.SecurePath) && !Path.IsPathRooted(settings.SecurePath))
+            errors.Add("SecurePath must be an absolute path (or left blank for {DataPath}\\secure).");
+
         if (settings.Distribution.Enabled)
         {
             var mode = settings.Distribution.Mode;
@@ -161,6 +164,15 @@ public static class EnvironmentSettingsResolver
 
         return errors;
     }
+
+    /// <summary>
+    /// Where the secure key store lives: the configured SecurePath, else <c>{dataPath}\secure</c>. Also the
+    /// answer for an environment without environment.json (machine defaults carry no SecurePath).
+    /// </summary>
+    public static string EffectiveSecurePath(EnvironmentSettings? settings, string dataPath) =>
+        string.IsNullOrWhiteSpace(settings?.SecurePath)
+            ? Path.Combine(dataPath, "secure")
+            : settings.SecurePath;
 
     /// <summary>
     /// A stable identifier for where distribution publishes to, or null when distribution is
@@ -207,6 +219,7 @@ public static class EnvironmentSettingsResolver
         {
             SchemaVersion = baseSettings.SchemaVersion,
             DisplayName = baseSettings.DisplayName,
+            SecurePath = baseSettings.SecurePath,
             Distribution = new DistributionSettings
             {
                 Enabled = baseSettings.Distribution.Enabled,
@@ -300,6 +313,7 @@ public static class EnvironmentSettingsResolver
         {
             SchemaVersion = form.SchemaVersion,
             DisplayName = form.DisplayName,
+            SecurePath = form.SecurePath,
             Distribution = new DistributionSettings
             {
                 Enabled = form.Distribution.Enabled,

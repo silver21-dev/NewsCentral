@@ -97,6 +97,10 @@ public class PublishingService
             if (schedule == null)
                 return Fail(result, "Schedule not found");
 
+            // Fail before anything is copied or marked Published when the target team's signing key exists
+            // but cannot be read: the index could not be regenerated, and an unsigned one must never go out.
+            await _indexGenerationService.EnsureSigningKeyUsableAsync(assignment.TargetTeam);
+
             System.Diagnostics.Debug.WriteLine(
                 $"Copying files to {assignment.TargetTeam}...");
 
@@ -297,6 +301,10 @@ public class PublishingService
                 System.Diagnostics.Debug.WriteLine(
                     $"  ✓ Index file regenerated for {assignment.TargetTeam}");
             }
+            catch (SigningKeyUnreadableException)
+            {
+                throw;   // reported to the user by the outer handler; never downgraded to a warning
+            }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine(
@@ -317,7 +325,7 @@ public class PublishingService
             System.Diagnostics.Debug.WriteLine("=== PUBLISH FAILED ===");
             System.Diagnostics.Debug.WriteLine($"Error: {ex.Message}");
             System.Diagnostics.Debug.WriteLine($"Stack: {ex.StackTrace}");
-            return Fail(result, $"Publishing error: {ex.Message}");
+            return Fail(result, ex is SigningKeyUnreadableException ? ex.Message : $"Publishing error: {ex.Message}");
         }
     }
 

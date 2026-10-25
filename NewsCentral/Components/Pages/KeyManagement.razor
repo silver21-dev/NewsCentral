@@ -5,6 +5,7 @@
 @using Microsoft.Extensions.Localization
 @inject IStringLocalizer<KeyManagement> Localizer
 @inject IndexGenerationService IndexService
+@inject TeamKeyService KeyService
 @inject TeamService TeamService
 @inject TeamContextService TeamContext
 @inject AuthenticationService AuthService
@@ -46,7 +47,18 @@
                 <strong>@Localizer["CurrentTeam"]:</strong> @currentTeamName (@currentTeamFolder)
             </div>
 
-            @if (currentKeys == null ||
+            @* TODO(i18n): the unreadable-key and migration texts are English-only for now. *@
+            @if (keyUnreadable)
+            {
+                <div class="alert alert-danger">
+                    <i class="bi bi-lock me-2"></i>
+                    <strong>Key not readable.</strong>
+                    The signing key for this team exists or may exist, but could not be read: @keyLoad!.Reason.
+                    Publishing for this team is blocked until access is restored. A new key is not offered, because
+                    replacing an unreadable key would leave every device that trusts it unable to verify this team.
+                </div>
+            }
+            else if (currentKeys == null ||
                  (string.IsNullOrEmpty(currentKeys.PublicKey) && string.IsNullOrEmpty(currentKeys.PrivateKey)))
             {
                 <div class="alert alert-warning">
@@ -100,7 +112,23 @@
         </div>
     </div>
 
+    @if (migrationIssues.Count > 0)
+    {
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            <strong>Key migration needs attention.</strong>
+            <ul class="mb-0">
+                @foreach (var issue in migrationIssues)
+                {
+                    <li>@issue</li>
+                }
+            </ul>
+        </div>
+    }
+
     @* ── Generate / Apply ──────────────────────────────────────────────────── *@
+    @if (!keyUnreadable)
+    {
     <div class="card mb-4">
         <div class="card-header">
             <h5>@Localizer["GenerateSection"]</h5>
@@ -155,6 +183,7 @@
             }
         </div>
     </div>
+    }
 
     @* ── Republish ─────────────────────────────────────────────────────────── *@
     <div class="card mb-4">
@@ -216,7 +245,10 @@
     private bool isAuthorized;
     private string? currentTeamFolder;
     private string? currentTeamName;
-    private TeamSigningKeys? currentKeys;
+    private TeamKeyLoadResult? keyLoad;
+    private TeamSigningKeys? currentKeys => keyLoad?.Keys;
+    private bool keyUnreadable => keyLoad?.Outcome == KeyLoadOutcome.Unreadable;
+    private IReadOnlyList<string> migrationIssues = Array.Empty<string>();
     private string? pendingPrivateKey;
     private string? pendingPublicKey;
     private bool isBusy;
@@ -252,7 +284,9 @@
     {
         try
         {
-            currentKeys = await IndexService.LoadTeamSigningKeysAsync(currentTeamFolder!);
+            keyLoad = await IndexService.LoadTeamSigningKeysAsync(currentTeamFolder!);
+            // Migration problems are an administrator concern (the old file is exposed until it is migrated).
+            migrationIssues = AuthService.IsSystemAdmin() ? KeyService.Issues : Array.Empty<string>();
         }
         catch (Exception ex)
         {
