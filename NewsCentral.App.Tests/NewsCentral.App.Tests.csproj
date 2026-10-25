@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests for authoring-app services. The MAUI project (net10.0-windows, MAUI SDK) cannot be referenced from a
+    plain test project, so the framework-free service sources under test are compiled in directly. Only files
+    with no MAUI/Blazor dependency may be added here; if a file starts needing MAUI types, the logic belongs in
+    NewsCentral.Shared (with tests in NewsCentral.Shared.Tests) instead.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- WindowsIdentityService uses LibraryImport (source-generated stub needs unsafe blocks). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.2" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NewsCentral.Shared\NewsCentral.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\NewsCentral\Services\AuthenticationService.cs" Link="App\AuthenticationService.cs" />
+    <Compile Include="..\NewsCentral\Services\UserService.cs" Link="App\UserService.cs" />
+    <Compile Include="..\NewsCentral\Services\UiLanguageService.cs" Link="App\UiLanguageService.cs" />
+    <Compile Include="..\NewsCentral\Services\UserPreferenceStore.cs" Link="App\UserPreferenceStore.cs" />
+    <Compile Include="..\NewsCentral\Services\WindowsIdentityService.cs" Link="App\WindowsIdentityService.cs" />
+    <Compile Include="..\NewsCentral\Services\IStorageService.cs" Link="App\IStorageService.cs" />
+    <Compile Include="..\NewsCentral\Services\LocalStorageService.cs" Link="App\LocalStorageService.cs" />
+    <Compile Include="..\NewsCentral\Services\EnvironmentContext.cs" Link="App\EnvironmentContext.cs" />
+    <Compile Include="..\NewsCentral\Repositories\*.cs" Link="App\Repositories\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

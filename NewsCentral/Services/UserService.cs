@@ -3,6 +3,17 @@ using NewsCentral.Repositories;
 
 namespace NewsCentral.Services;
 
+/// <summary>
+/// config/users.json cannot be written by the current Windows account. The message is user-facing: the page
+/// shows it as is instead of an error.
+/// </summary>
+public sealed class UsersFileNotWritableException : InvalidOperationException
+{
+    public const string UserMessage = "Your password can only be changed by an administrator.";
+
+    public UsersFileNotWritableException() : base(UserMessage) { }
+}
+
 public class UserService
 {
     private readonly IStorageService _storage;
@@ -181,7 +192,15 @@ public class UserService
         usersCollection.LastModified = DateTime.UtcNow;
         usersCollection.ModifiedBy   = currentUser.UserID;
 
-        await _userRepo.UpdateAsync(usersCollection);
+        try
+        {
+            await _userRepo.UpdateAsync(usersCollection);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // users.json is writable by administrators only: not a failure to report, a rule to explain.
+            throw new UsersFileNotWritableException();
+        }
         return true;
     }
 

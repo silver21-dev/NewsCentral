@@ -31,18 +31,68 @@ public class AuthenticationService
     private readonly UiLanguageService _uiLanguageService;
     private readonly AppConfiguration _appConfiguration;
     private readonly ILogger<AuthenticationService> _logger;
+    private readonly UserPreferenceStore _preferences;
     private User? _currentUser;
 
     public event Action? OnAuthenticationStateChanged;
 
     public AuthenticationService(IStorageService storage, WindowsIdentityService windowsIdentityService, UiLanguageService uiLanguageService,
-        IConfiguration configuration, ILogger<AuthenticationService> logger)
+        IConfiguration configuration, ILogger<AuthenticationService> logger, UserPreferenceStore preferences)
     {
         _appConfiguration = new AppConfiguration(configuration);
         _logger = logger;
         _userRepo = new JsonFileRepository<UsersCollection>(storage, "config", "");
         _windowsIdentityService = windowsIdentityService;
         _uiLanguageService = uiLanguageService;
+        _preferences = preferences;
+    }
+
+    /// <summary>
+    /// users.json may be read-only for authors (administrators own it), so recording the last login is a courtesy:
+    /// an access or IO failure on this one write is logged and login carries on. Only the write is wrapped - the
+    /// credential check has already happened and is never softened.
+    /// </summary>
+    private async Task TryRecordLastLoginAsync(UsersCollection usersCollection, User user)
+    {
+        try
+        {
+            user.LastLogin = DateTime.UtcNow;
+            usersCollection.LastModified = DateTime.UtcNow;
+            await _userRepo.UpdateAsync(usersCollection);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            _logger.LogWarning("Could not record last login for {User}: users.json is not writable ({Reason}). Login continues.",
+                user.Username, ex.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    /// Applies the signed-in user's UI language. The per-user local store wins (including an explicit "follow
+    /// Windows"); only when this machine has no choice for the user is the legacy users.json value taken - a
+    /// read-only migration, users.json is never written for this. The effective value is mirrored onto the
+    /// in-memory user so the Settings page shows it.
+    /// </summary>
+    private void ApplyUserLanguage(User user)
+    {
+        var (found, language) = _preferences.GetPreferredLanguage(user.UserID);
+        var effective = found ? language : user.PreferredUiLanguage;
+        user.PreferredUiLanguage = effective;
+        _uiLanguageService.Apply(effective);
+    }
+
+    /// <summary>
+    /// Checks the current user's password without signing in again: no last-login write, no state change.
+    /// False when local accounts are disabled, nobody is signed in, or the password is wrong.
+    /// </summary>
+    public async Task<bool> VerifyCurrentPasswordAsync(string password)
+    {
+        if (_currentUser == null || !IsLocalLoginEnabled)
+            return false;
+
+        var usersCollection = await _userRepo.GetByIdAsync("users");
+        var user = usersCollection?.Users.FirstOrDefault(u => u.UserID == _currentUser.UserID && u.IsActive);
+        return user != null && BCrypt.Net.BCrypt.Verify(password, user.PasswordHash);
     }
 
     /// <summary>True when Authentication:EnableLocalAccounts is on; Login.razor renders the local logon form only then.</summary>
@@ -94,13 +144,10 @@ public class AuthenticationService
 
             System.Diagnostics.Debug.WriteLine("Password verified successfully");
 
-            // Update last login
-            user.LastLogin = DateTime.UtcNow;
-            usersCollection.LastModified = DateTime.UtcNow;
-            await _userRepo.UpdateAsync(usersCollection);
+            await TryRecordLastLoginAsync(usersCollection, user);
 
             _currentUser = user;
-            _uiLanguageService.Apply(user.PreferredUiLanguage);
+            ApplyUserLanguage(user);
             System.Diagnostics.Debug.WriteLine($"Login successful: {user.Username} (IsSystemAdmin: {user.IsSystemAdmin})");
 
             OnAuthenticationStateChanged?.Invoke();
@@ -154,12 +201,10 @@ public class AuthenticationService
 
         if (user != null)
         {
-            user.LastLogin = DateTime.UtcNow;
-            usersCollection.LastModified = DateTime.UtcNow;
-            await _userRepo.UpdateAsync(usersCollection);
+            await TryRecordLastLoginAsync(usersCollection, user);
 
             _currentUser = user;
-            _uiLanguageService.Apply(user.PreferredUiLanguage);
+            ApplyUserLanguage(user);
 
             OnAuthenticationStateChanged?.Invoke();
 
@@ -180,30 +225,20 @@ public class AuthenticationService
 
     /// <summary>
     /// L10N-1: self-service update of the CURRENT user's own UI language preference — any
-    /// authenticated role, no admin rights needed. Touches only <see cref="User.PreferredUiLanguage"/>;
-    /// every other field in <c>users.json</c> is left exactly as-is.
+    /// authenticated role, no admin rights needed. Stored in the per-user local store on this machine
+    /// (<see cref="UserPreferenceStore"/>); users.json is not touched, so this works when users.json is read-only.
     /// </summary>
-    public async Task UpdatePreferredUiLanguageAsync(string? preferredLanguage)
+    public Task UpdatePreferredUiLanguageAsync(string? preferredLanguage)
     {
         if (_currentUser == null)
             throw new UnauthorizedAccessException("Not authenticated");
 
-        var usersCollection = await _userRepo.GetByIdAsync("users")
-            ?? throw new InvalidOperationException("Users collection not found");
-
-        var user = usersCollection.Users.FirstOrDefault(u => u.UserID == _currentUser.UserID)
-            ?? throw new InvalidOperationException("User not found");
-
         var normalized = string.IsNullOrWhiteSpace(preferredLanguage) ? null : preferredLanguage.Trim();
-        user.PreferredUiLanguage = normalized;
-        usersCollection.LastModified = DateTime.UtcNow;
-        usersCollection.ModifiedBy = _currentUser.UserID;
+        _preferences.SetPreferredLanguage(_currentUser.UserID, normalized);
 
-        await _userRepo.UpdateAsync(usersCollection);
-
-        // Keep the in-memory session's own user object in sync — never re-fetch the whole user
-        // record just to reflect the ONE field we just changed.
+        // Keep the in-memory session's own user object in sync.
         _currentUser.PreferredUiLanguage = normalized;
+        return Task.CompletedTask;
     }
 
     public User? GetCurrentUser()

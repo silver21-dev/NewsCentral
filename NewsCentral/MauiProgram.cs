@@ -152,6 +152,9 @@ public static class MauiProgram
         var userEnvironmentStore = new UserEnvironmentStore();
         builder.Services.AddSingleton(userEnvironmentStore);
 
+        // Per-user preferences kept on this machine (UI language) — not in the shared users.json.
+        builder.Services.AddSingleton<UserPreferenceStore>();
+
         var startupState = userEnvironmentStore.Load();
         var startupOptions = EnvironmentListBuilder.Build(
             environmentCatalog, appConfig.DataPath, startupState, currentDataPath: null, includeHidden: false);
