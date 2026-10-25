@@ -2,6 +2,7 @@ using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using Microsoft.Extensions.Logging;
+using NewsCentral.Security;
 using NewsService.Configuration;
 using NewsService.Services;
 using Xunit;
