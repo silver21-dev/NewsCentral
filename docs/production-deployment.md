@@ -298,8 +298,12 @@ environment administrator does, once, with `scripts/Set-AuthoringAcl.ps1` (eleva
    warnings only; the audit-folder check can over-report on a folder that was not provisioned by the script.
 
 Also deliver `HKLM\Software\<Company>\NewsCentral\NewsCentral\Audit\Enabled` (DWORD; `docs/configuration.md`, or
-`Set-RegistryOverrides.ps1 -ComponentName NewsCentral -AuditEnabled`) only if policy must force auditing on or off. The script
-warns if AuthorsGroup can delete files in the `config` folder (that would let an author replace `users.json`).
+`Set-RegistryOverrides.ps1 -ComponentName NewsCentral -AuditEnabled`) only if policy must force auditing on or off.
+
+The script also makes the **`config` folder** read-only for authors (inheritance disabled; SYSTEM, Administrators and
+AdminsGroup Full, AuthorsGroup Read): otherwise anyone who can create or delete files there could replace `users.json`.
+Authors then no longer record a last-login time, and only a system administrator changes users, teams, environment
+settings and the shared environment list.
 
 ---
 

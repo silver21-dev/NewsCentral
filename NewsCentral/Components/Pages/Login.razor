@@ -466,6 +466,11 @@
         // write failure here can never block login.
         await EnvironmentDirectory.RecordSuccessfulLoginAsync();
 
+        // The sync on page load ran before anyone was signed in, so it only read the shared directory. Once a
+        // SystemAdmin is in, run it again so the write-back happens (it never writes for anyone else).
+        if (user.IsSystemAdmin)
+            _ = EnvironmentDirectory.SyncSharedDirectoryAsync(EnvironmentInitStatus.Ready);
+
         Navigation.NavigateTo("/");
     }
 }

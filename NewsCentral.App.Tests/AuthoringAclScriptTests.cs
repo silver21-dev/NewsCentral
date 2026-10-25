@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.AccessControl;
+using NewsCentral.Security;
 
 namespace NewsCentral.App.Tests;
 
@@ -91,6 +93,52 @@ public sealed class AuthoringAclScriptTests : IDisposable
         Assert.Contains("What if", output);
         Assert.False(Directory.Exists(Path.Combine(_data, "secure")));
         Assert.False(Directory.Exists(Path.Combine(_data, "audit")));
+    }
+
+    [Fact]
+    public void WhatIf_ShowsTheConfigFolderAcl_AndLeavesItUntouched()
+    {
+        if (_powershell is null || !OperatingSystem.IsWindows()) return;
+        var config = Path.Combine(_data, "config");
+        var before = new DirectoryInfo(config).GetAccessControl().GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+
+        var (code, output) = Run(Common + " -WhatIf");
+
+        Assert.Equal(0, code);
+        Assert.Contains(config, output);
+        Assert.Contains("AuthorsGroup read-only (folder and files)", output);
+        Assert.Equal(before, new DirectoryInfo(config).GetAccessControl().GetSecurityDescriptorSddlForm(AccessControlSections.Access));
+    }
+
+    [Fact]
+    public void Apply_MakesTheConfigFolderReadOnlyForAuthors_AndTheDriftCheckAgrees()
+    {
+        if (_powershell is null || !OperatingSystem.IsWindows()) return;
+        var config = Path.Combine(_data, "config");
+        var me = System.Security.Principal.WindowsIdentity.GetCurrent().Name;   // keeps this test's own cleanup rights
+        var users = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null);
+
+        // Give BUILTIN\Users the Modify the dev box inherits from the drive root, so there is something to remove.
+        var info = new DirectoryInfo(config);
+        var acl = info.GetAccessControl();
+        acl.AddAccessRule(new FileSystemAccessRule(users, FileSystemRights.Modify,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        info.SetAccessControl(acl);
+        Assert.NotNull(AuthoringAclChecks.ConfigFolderWritableByBroadIdentity(AclExposureEvaluator.Read(config)));
+
+        var (code, output) = Run($"-DataPath '{_data}' -AdminsGroup '{me}' -AuthorsGroup 'BUILTIN\\Users'");
+
+        Assert.True(code == 0, output);
+        var after = new DirectoryInfo(config).GetAccessControl();
+        Assert.True(after.AreAccessRulesProtected);
+        var usersRules = after.GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier))
+            .Cast<FileSystemAccessRule>().Where(r => r.IdentityReference.Equals(users)).ToList();
+        Assert.NotEmpty(usersRules);
+        Assert.All(usersRules, r => Assert.Equal(0, (int)r.FileSystemRights & (int)AuthoringAclChecks.ConfigFolderWriteRights));
+        Assert.Null(AuthoringAclChecks.ConfigFolderWritableByBroadIdentity(AclExposureEvaluator.Read(config)));
+        Assert.DoesNotContain(
+            AuthoringAclChecks.Check(_data, Path.Combine(_data, "secure"), Path.Combine(_data, "audit")),
+            w => w.Area == AuthoringAclChecks.AreaConfig);
     }
 
     [Fact]

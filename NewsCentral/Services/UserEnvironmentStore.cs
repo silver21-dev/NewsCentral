@@ -21,6 +21,12 @@ public sealed class UserEnvironmentStore
         _filePath = Path.Combine(folder, "user-environments.json");
     }
 
+    /// <summary>Test seam: a store backed by an explicit file, so tests never touch the real per-user file.</summary>
+    public UserEnvironmentStore(string filePath)
+    {
+        _filePath = filePath;
+    }
+
     /// <summary>
     /// Loads the state synchronously — a missing file returns a fresh empty state; a corrupt or
     /// unreadable file does the same (logged at Debug) and is deliberately NOT overwritten here, so

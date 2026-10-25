@@ -7,7 +7,7 @@ public sealed record AclDriftWarning(string Area, string Path, string Message);
 
 /// <summary>
 /// Detects when the permissions scripts/Set-AuthoringAcl.ps1 should have applied are missing: the key store readable,
-/// users.json writable, or the audit log tamperable by a broad identity (Users, Everyone, Authenticated Users,
+/// users.json writable, the config folder writable, or the audit log tamperable by a broad identity (Users, Everyone, Authenticated Users,
 /// INTERACTIVE - see <see cref="AclExposureEvaluator"/>). The app only WARNS; it never blocks and never sets an ACL.
 ///
 /// Caveat inherited from the evaluator: inheritance flags are ignored, so an ACE scoped to "files only" or "this folder
@@ -19,6 +19,7 @@ public static class AuthoringAclChecks
     public const string AreaKeys = "keys";
     public const string AreaUsers = "users.json";
     public const string AreaAudit = "audit";
+    public const string AreaConfig = "config";
 
     /// <summary>Reading a key file (ReadData is also ListDirectory on a folder).</summary>
     public const FileSystemRights KeysReadRights = FileSystemRights.ReadData;
@@ -30,6 +31,15 @@ public static class AuthoringAclChecks
         | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles
         | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
 
+    /// <summary>
+    /// Anything that lets a holder add, replace or delete files in the config folder (WriteData is CreateFiles and
+    /// AppendData is CreateDirectories on a folder), and so replace users.json, or take the folder over.
+    /// </summary>
+    public const FileSystemRights ConfigFolderWriteRights =
+        FileSystemRights.WriteData | FileSystemRights.AppendData
+        | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles
+        | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+
     /// <summary>What lets a holder rewrite or remove audit lines, or take the folder over.</summary>
     public const FileSystemRights AuditTamperRights =
         FileSystemRights.WriteData | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles
@@ -38,6 +48,7 @@ public static class AuthoringAclChecks
     private static readonly int KeysMask = AclExposureEvaluator.WithGenericRead(KeysReadRights);
     private static readonly int UsersMask = AclExposureEvaluator.WithGenericWrite(UsersFileWriteRights);
     private static readonly int AuditMask = AclExposureEvaluator.WithGenericWrite(AuditTamperRights);
+    private static readonly int ConfigMask = AclExposureEvaluator.WithGenericWrite(ConfigFolderWriteRights);
 
     // ── Pure evaluation (over already-read rules) ───────────────────────────────
 
@@ -47,13 +58,16 @@ public static class AuthoringAclChecks
     public static AclExposure? UsersFileWritableByBroadIdentity(IEnumerable<AclRuleView> rules) =>
         AclExposureEvaluator.FindExposure(rules, UsersMask, UsersFileWriteRights);
 
+    public static AclExposure? ConfigFolderWritableByBroadIdentity(IEnumerable<AclRuleView> rules) =>
+        AclExposureEvaluator.FindExposure(rules, ConfigMask, ConfigFolderWriteRights);
+
     public static AclExposure? AuditTamperableByBroadIdentity(IEnumerable<AclRuleView> rules) =>
         AclExposureEvaluator.FindExposure(rules, AuditMask, AuditTamperRights);
 
     // ── File-system check ───────────────────────────────────────────────────────
 
     /// <summary>
-    /// Reads the three ACLs and returns a warning for each exposure found. Never throws: an asset that does not exist
+    /// Reads the four ACLs and returns a warning for each exposure found. Never throws: an asset that does not exist
     /// yet, or whose ACL cannot be read (a network share the account cannot query), produces no warning.
     /// </summary>
     public static IReadOnlyList<AclDriftWarning> Check(string dataPath, string securePath, string auditPath)
@@ -81,6 +95,16 @@ public static class AuthoringAclChecks
             if (exposure != null)
                 warnings.Add(new AclDriftWarning(AreaUsers, usersFile,
                     $"users.json ({usersFile}) can be changed by {exposure.Identity} ({exposure.Rights}). An author could make themselves administrator. " +
+                    "Run scripts/Set-AuthoringAcl.ps1."));
+        }
+
+        var configDir = Path.Combine(dataPath, "config");
+        if (Directory.Exists(configDir))
+        {
+            var exposure = Safe(() => ConfigFolderWritableByBroadIdentity(AclExposureEvaluator.Read(configDir)));
+            if (exposure != null)
+                warnings.Add(new AclDriftWarning(AreaConfig, configDir,
+                    $"The config folder ({configDir}) can be changed by {exposure.Identity} ({exposure.Rights}). An author could replace users.json, teams.json or the environment settings. " +
                     "Run scripts/Set-AuthoringAcl.ps1."));
         }
 

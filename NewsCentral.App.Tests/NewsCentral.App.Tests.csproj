@@ -36,6 +36,12 @@
   <ItemGroup>
     <Compile Include="..\NewsCentral\Services\AuthenticationService.cs" Link="App\AuthenticationService.cs" />
     <Compile Include="..\NewsCentral\Services\UserService.cs" Link="App\UserService.cs" />
+    <Compile Include="..\NewsCentral\Services\EnvironmentDirectoryService.cs" Link="App\EnvironmentDirectoryService.cs" />
+    <Compile Include="..\NewsCentral\Services\EnvironmentSettingsService.cs" Link="App\EnvironmentSettingsService.cs" />
+    <Compile Include="..\NewsCentral\Services\UserEnvironmentStore.cs" Link="App\UserEnvironmentStore.cs" />
+    <Compile Include="..\NewsCentral\Services\TeamContextService.cs" Link="App\TeamContextService.cs" />
+    <Compile Include="..\NewsCentral\Services\EnvironmentProbe.cs" Link="App\EnvironmentProbe.cs" />
+    <Compile Include="..\NewsCentral\Services\DataSeederService.cs" Link="App\DataSeederService.cs" />
     <Compile Include="..\NewsCentral\Services\UiLanguageService.cs" Link="App\UiLanguageService.cs" />
     <Compile Include="..\NewsCentral\Services\UserPreferenceStore.cs" Link="App\UserPreferenceStore.cs" />
     <Compile Include="..\NewsCentral\Services\WindowsIdentityService.cs" Link="App\WindowsIdentityService.cs" />

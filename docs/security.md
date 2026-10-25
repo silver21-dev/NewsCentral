@@ -152,8 +152,8 @@ app only warns about drift.
 - **Audit log.** Append-only JSON lines of logins, user/role/key/presentation/assignment/environment/audit-setting
   events (never passwords, hashes, private keys or content); `Audit:Enabled` defaults on and a registry policy value
   can force it. A failed write never blocks an action; it raises a banner.
-- **Drift warnings.** Keys folder readable, `users.json` writable, or the audit folder tamperable by Users /
+- **Drift warnings.** Keys folder readable, `users.json` or the `config` folder writable, or the audit folder tamperable by Users /
   Everyone / Authenticated Users / INTERACTIVE — warn only.
 
 What this does **not** do: an author who is also a Windows administrator, or a team signer for a team, still holds
-that power; and protecting `users.json` does not stop someone who can delete files in `config\` from replacing it.
+that power.

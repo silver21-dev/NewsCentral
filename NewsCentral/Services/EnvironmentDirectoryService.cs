@@ -375,7 +375,9 @@ public sealed class EnvironmentDirectoryService
     /// writes back whichever side(s) changed. The local cache is always eligible to be saved; the
     /// remote file is written only when <paramref name="status"/> is <see cref="EnvironmentInitStatus.Ready"/>
     /// — a <see cref="EnvironmentInitStatus.NotInitialized"/> environment is read-only, so
-    /// <c>config/</c> is never created there. Never throws: any I/O or parse failure is caught,
+    /// <c>config/</c> is never created there. The remote file is also written only while a SystemAdmin is signed in
+    /// (S02a): before login, and for anyone else, the shared file is merged into the local cache and never written
+    /// (no temp file, no move). Never throws: any I/O or parse failure is caught,
     /// logged to Debug, and the method returns normally — this must never block login or surface an
     /// error to the user. Raises <see cref="Changed"/> only when the local cache actually changed.
     /// </summary>
@@ -444,6 +446,13 @@ public sealed class EnvironmentDirectoryService
                 if (status != EnvironmentInitStatus.Ready)
                 {
                     writeResult = "skipped (environment not initialized)";
+                }
+                else if (!_authService.IsSystemAdmin())
+                {
+                    // Before login, and for anyone who is not a SystemAdmin, the shared file is read-only: it decides
+                    // which environments every user's picker offers, so only administrators may change it (the same
+                    // rule as Add/Remove). The merge above still updates this machine's own cache.
+                    writeResult = "skipped (not a system administrator)";
                 }
                 else if (EnvironmentPaths.Canonicalize(_environment.DataPath) != startPath)
                 {

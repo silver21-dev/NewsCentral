@@ -432,17 +432,25 @@ when users.json is not writable. See `docs/newscentral-spec.md` for the non-admi
 |---|---|
 | `SecurePath` | inheritance disabled; SYSTEM, Administrators, AdminsGroup: Full. Nothing else |
 | `SecurePath\keys\<team>` | `TeamSigners[team]`: Modify (plus the inherited administrators) |
-| `DataPath\config\users.json` | inheritance disabled on the file; SYSTEM, Administrators, AdminsGroup: Full; AuthorsGroup: Read |
+| `DataPath\config` (folder) | inheritance disabled; SYSTEM, Administrators, AdminsGroup: Full; AuthorsGroup: Read; all for the folder and its files. Every writer of this folder is a SystemAdmin, so authors only read it |
+| `DataPath\config\users.json` | also protected on its own, as defence in depth: inheritance disabled on the file; SYSTEM, Administrators, AdminsGroup: Full; AuthorsGroup: Read |
 | `AuditPath` | inheritance disabled; SYSTEM, Administrators, AdminsGroup: Full. AuthorsGroup, folders (this folder and subfolders): ListDirectory, CreateFiles, CreateDirectories, ReadAttributes, Synchronize. AuthorsGroup, files (inherit only): AppendData, ReadAttributes, Synchronize. OWNER RIGHTS, files (inherit only): ReadData, AppendData, ReadAttributes, ReadPermissions, Synchronize, so a file's owner cannot rewrite, delete or re-ACL it. OWNER RIGHTS, folders: ListDirectory, ReadAttributes, ReadPermissions, Synchronize (see below). No CREATOR OWNER ACE |
 
-Two limits worth knowing: (1) the OWNER RIGHTS entry for **folders** goes beyond the minimum — the owner of a folder
+One limit worth knowing: the OWNER RIGHTS entry for **folders** goes beyond the minimum — the owner of a folder
 holds WRITE_DAC implicitly, so an author who creates a month folder could otherwise re-ACL it and delete the audit
-files inside; (2) protecting `users.json` itself does not stop an author who can **delete files in the `config`
-folder** from deleting it and creating a new one — the script warns when AuthorsGroup holds that right on `config`.
+files inside.
+
+**The `config` folder (S02a).** Protecting `users.json` alone would not stop an author who can create or delete files in
+`config\` from replacing it, so the folder itself is read-only for authors. Writers under `config\` and their minimum
+role: `users.json` (user management: SystemAdmin; first-time setup: the wizard), `teams.json` (team management:
+SystemAdmin), `environment.json` (environment settings: SystemAdmin), `environments.json` (the shared environment
+directory: Add/Remove SystemAdmin, and the sync write-back only while a SystemAdmin is signed in, never before login).
+What authors lose: the last-login time is not recorded, and their sessions read but never write the shared directory.
 
 **Drift warnings** (Key Management and Environment Management; warn-only, never block), using the shared
 `AclExposureEvaluator` (identities Users / Everyone / Authenticated Users / INTERACTIVE, Deny cancels Allow,
 inheritance flags ignored): the keys folder (and each team folder) readable (`ReadData`) by a broad identity;
-`users.json` writable by one; the audit folder granting `WriteData`, `Delete`, `DeleteSubdirectoriesAndFiles`,
+`users.json` writable by one; the `config` folder granting `WriteData` (CreateFiles), `AppendData`, `Delete`,
+`DeleteSubdirectoriesAndFiles`, `ChangePermissions` or `TakeOwnership` to one; the audit folder granting `WriteData`, `Delete`, `DeleteSubdirectoriesAndFiles`,
 `ChangePermissions` or `TakeOwnership` to one. Because inheritance flags are ignored, the **audit check can
 over-report** on a folder that has not been provisioned by the script; that is accepted.

@@ -172,12 +172,13 @@ public sealed class AuthoringAclChecksTests : IDisposable
 
         GrantUsers(new DirectoryInfo(keysTeam), FileSystemRights.ReadData);
         GrantUsers(new FileInfo(usersFile), FileSystemRights.WriteData);
+        GrantUsers(new DirectoryInfo(Path.Combine(data, "config")), FileSystemRights.CreateFiles);
         GrantUsers(new DirectoryInfo(audit), FileSystemRights.Delete);
 
         var warnings = AuthoringAclChecks.Check(data, secure, audit);
 
         Assert.Equal(
-            new[] { AuthoringAclChecks.AreaKeys, AuthoringAclChecks.AreaUsers, AuthoringAclChecks.AreaAudit },
+            new[] { AuthoringAclChecks.AreaKeys, AuthoringAclChecks.AreaUsers, AuthoringAclChecks.AreaConfig, AuthoringAclChecks.AreaAudit },
             warnings.Select(w => w.Area).ToArray());
         Assert.Contains("cz-its", warnings[0].Path);
         Assert.All(warnings, w => Assert.Contains("Set-AuthoringAcl.ps1", w.Message));
@@ -190,6 +191,45 @@ public sealed class AuthoringAclChecksTests : IDisposable
             Path.Combine(_root, "nope"), Path.Combine(_root, "nope", "secure"), Path.Combine(_root, "nope", "audit"));
 
         Assert.Empty(warnings);
+    }
+
+    // â”€â”€ config folder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    [Theory]
+    [InlineData(FileSystemRights.CreateFiles)]
+    [InlineData(FileSystemRights.WriteData)]
+    [InlineData(FileSystemRights.AppendData)]
+    [InlineData(FileSystemRights.Delete)]
+    [InlineData(FileSystemRights.DeleteSubdirectoriesAndFiles)]
+    [InlineData(FileSystemRights.Modify)]
+    public void ConfigFolder_WritableByAuthenticatedUsersOrUsers_IsFlagged(FileSystemRights granted)
+    {
+        var authenticatedUsers = new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
+
+        Assert.Equal("Users", AuthoringAclChecks.ConfigFolderWritableByBroadIdentity(new[] { Allow(Users, granted) })?.Identity);
+        Assert.NotNull(AuthoringAclChecks.ConfigFolderWritableByBroadIdentity(new[] { Allow(authenticatedUsers, granted) }));
+    }
+
+    [Fact]
+    public void ConfigFolder_AsTheScriptProvisionsIt_IsNotFlagged()
+    {
+        var rules = new[]
+        {
+            Allow(System_, FileSystemRights.FullControl),
+            Allow(Admins, FileSystemRights.FullControl),
+            Allow(AuthorsGroup, FileSystemRights.Read),
+            Allow(Users, FileSystemRights.Read)
+        };
+
+        Assert.Null(AuthoringAclChecks.ConfigFolderWritableByBroadIdentity(rules));
+    }
+
+    [Fact]
+    public void ConfigFolder_AllowThenDenyOnTheSameIdentity_IsNotFlagged()
+    {
+        var rules = new[] { Allow(Users, FileSystemRights.Modify), Deny(Users, FileSystemRights.Modify) };
+
+        Assert.Null(AuthoringAclChecks.ConfigFolderWritableByBroadIdentity(rules));
     }
 
     private static void GrantUsers(FileSystemInfo target, FileSystemRights rights)

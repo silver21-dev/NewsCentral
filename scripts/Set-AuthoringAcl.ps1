@@ -12,8 +12,15 @@
         keys\<team>   TeamSigners[team]: Modify (on top of the administrators it inherits). Nothing else.
         Folders under keys\ for teams NOT in -TeamSigners lose any explicit ACE (administrators only).
 
+      <DataPath>\config   (the folder: users.json, teams.json, environment.json, environments.json)
+        inheritance disabled; SYSTEM, Administrators and AdminsGroup: Full control (folder and files);
+        AuthorsGroup: Read (folder and files). Every writer of this folder is a system administrator (user and team
+        management, environment settings, the shared environment directory), so authors only need to read it.
+        Without this, anyone who can create or delete files in the folder could replace users.json.
+
       <DataPath>\config\users.json
-        inheritance disabled on the file; SYSTEM, Administrators and AdminsGroup: Full control;
+        also protected on its own, as defence in depth (a file that is later replaced or restored keeps the same
+        rule): inheritance disabled on the file; SYSTEM, Administrators and AdminsGroup: Full control;
         AuthorsGroup: Read.
 
       AuditPath (default <DataPath>\audit)
@@ -55,10 +62,9 @@
     Hashtable of team folder name -> group allowed to sign for that team, e.g. @{ 'cz-its' = 'NC-cz-its-Signers' }.
 
 .NOTES
-    config\ folder: this script protects users.json itself. An author who can delete files in the config folder
-    (Modify or DeleteSubdirectoriesAndFiles on it) can still delete users.json and create a new one. The script
-    warns when AuthorsGroup holds such a right on the config folder; removing it is left to you because the folder
-    may hold other files authors legitimately write.
+    config\ folder: authors lose write access to it. What that changes for them: the last-login time is no longer
+    recorded, the shared environment directory (environments.json) is read but never written by their sessions, and
+    user, team and environment-setting changes need a system administrator.
 
     The OWNER RIGHTS entry for folders goes beyond the minimum: the owner of a folder holds WRITE_DAC implicitly,
     so an author who creates a month folder could otherwise re-ACL it and delete the audit files inside.
@@ -205,6 +211,18 @@ try {
         }
     }
 
+    # ---- config folder ----------------------------------------------------------
+    $configDir = Split-Path -Parent $usersFile
+    if ($PSCmdlet.ShouldProcess($configDir, 'Restrict writes to administrators; AuthorsGroup read-only (folder and files)')) {
+        $acl = Get-Acl -LiteralPath $configDir
+        Clear-Acl -Acl $acl -Protect $true
+        foreach ($sid in $fullControlSids) {
+            $acl.AddAccessRule((New-Rule $sid $FS::FullControl $containerFlags $Prop::None))
+        }
+        $acl.AddAccessRule((New-Rule $authors $FS::Read $containerFlags $Prop::None))
+        Set-Acl -LiteralPath $configDir -AclObject $acl
+    }
+
     # ---- users.json -------------------------------------------------------------
     if ($PSCmdlet.ShouldProcess($usersFile, 'Restrict writes to administrators; AuthorsGroup read-only')) {
         $acl = Get-Acl -LiteralPath $usersFile
@@ -214,16 +232,6 @@ try {
         }
         $acl.AddAccessRule((New-Rule $authors $FS::Read $Inh::None $Prop::None))
         Set-Acl -LiteralPath $usersFile -AclObject $acl
-    }
-
-    $configDir = Split-Path -Parent $usersFile
-    $configAcl = Get-Acl -LiteralPath $configDir
-    $deleteChild = [int]$FS::DeleteSubdirectoriesAndFiles
-    $risky = @($configAcl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) |
-        Where-Object { $_.AccessControlType -eq 'Allow' -and $_.IdentityReference -eq $authors -and (([int]$_.FileSystemRights -band $deleteChild) -ne 0) })
-    if ($risky.Count -gt 0) {
-        Write-Host "WARNING: $AuthorsGroup can delete files in '$configDir', so an author can still delete users.json and create a new one." -ForegroundColor Yellow
-        Write-Host '  users.json itself is protected, but remove DeleteSubdirectoriesAndFiles / Modify for that group on the config folder to close this.' -ForegroundColor Yellow
     }
 
     # ---- AuditPath --------------------------------------------------------------
@@ -258,7 +266,7 @@ try {
     if (-not $WhatIfPreference) {
         Write-Host ''
         Write-Host 'Resulting ACLs:' -ForegroundColor Cyan
-        foreach ($target in @($SecurePath, (Join-Path $SecurePath 'keys'), $usersFile, $AuditPath)) {
+        foreach ($target in @($SecurePath, (Join-Path $SecurePath 'keys'), $configDir, $usersFile, $AuditPath)) {
             if (Test-Path -LiteralPath $target) {
                 Write-Host ''
                 Write-Host "icacls `"$target`"" -ForegroundColor Cyan

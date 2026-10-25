@@ -118,6 +118,17 @@ the **login page** says "You don't have access to this environment's user list. 
 the NewsCentral authors group." instead of the raw .NET message (`UsersFileNotReadableException`). The self-service paths are unchanged (best-effort `LastLogin`, language in the local store, own password
 change explained as above).
 
+## Shared environment directory (`config/environments.json`)
+
+Authors read, administrators write. The file decides which environments every user's picker offers, so an
+unauthenticated write path would let anyone add an entry pointing at a DataPath they control, and would bypass the rule
+that Add/Remove is admin-only. `EnvironmentDirectoryService.SyncSharedDirectoryAsync` therefore always merges the file
+into the machine's local cache (`user-environments.json`), but writes the merged file back (temp file plus move) only
+while a **SystemAdmin is signed in**. The login page runs the sync when it loads (nobody signed in: read only) and
+`CompleteLoginAsync` runs it again after a SystemAdmin signs in, which is when the write-back happens. A non-admin
+session never writes the file and never leaves a temp file behind. With `Set-AuthoringAcl.ps1` the whole `config\`
+folder is also read-only for authors (`docs/anti-tamper.md` §9), so the rule holds at the file system as well.
+
 ## Role Model
 
 - `SystemAdmin` — full access across all teams
