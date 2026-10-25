@@ -370,3 +370,14 @@ re-validated with the same whole-index `ImagePath` rules as a download, because 
 S01a was never checked. If any team's cached index fails, neither lock screen nor wallpaper is touched:
 no publish, no sweep, no write, no clear — the previously published state stays. Error naming team and
 entry once per distinct failure, then Debug.
+
+**NewsViewer display-time checks (S01b).** `PresentationSelector` runs `CachedImageCheck` on every
+candidate: `ImagePath` must pass `ImagePathValidator` (team = the folder of the index it came from) and
+resolve inside `<cacheRoot>\<team>\`; `ImageHash` must be present and equal the file's SHA-256. The former
+"no hash in index — skipping integrity check" fail-open is removed. A candidate failing any check is
+ineligible and the selector falls through to the next newest; with none eligible NewsViewer behaves as with
+no content. The "News arrived!" notification takes its item from the same selection, so it never announces
+what the poster would refuse. Each rejection is a Warning line in `%LOCALAPPDATA%\NewsCentral\launch.log`
+(once per presentation per run; NewsService owns the Error-level signal). `BypassImageIntegrityCheck`
+(dev) skips only the hash comparison. The delivered-image buttons read `PublishedImagePath`, not the cache,
+and are unchanged.

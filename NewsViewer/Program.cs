@@ -155,8 +155,14 @@ static class Program
         var probes = new LaunchProbes(simulateRemote);
         bool remoteSession = probes.IsRemoteSession();
 
+        // A candidate whose ImagePath / ImageHash / cached file fails the display-time checks is ineligible and
+        // the selection falls through to the next one; each rejection is a Warning line in launch.log (once per
+        // presentation per run). The poster AND the "News arrived!" notification both take their item from this
+        // selection, so the notification can never announce something the poster would refuse.
         var selector = new PresentationSelector(
-            config.CacheRootPath, configuration, config.BypassImageIntegrityCheck);
+            config.CacheRootPath, configuration, config.BypassImageIntegrityCheck,
+            onRejected: (presentationId, reason) =>
+                launchLog.Append(triggerName, "Warning", "ImageIneligible", null, note: $"presentation={presentationId}; {reason}"));
 
         // Terminal step — re-asserted every run, unconditionally, regardless of whether any
         // wallpaper content is active. NewsService owns the wallpaper IMAGE machine-wide via

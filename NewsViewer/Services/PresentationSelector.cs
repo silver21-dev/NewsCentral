@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using NewsCentral.Configuration;
@@ -12,15 +11,23 @@ public sealed class PresentationSelector
     private readonly string _cacheRootPath;
     private readonly IConfiguration _configuration;
     private readonly bool _bypassImageIntegrityCheck;
+    private readonly Action<string, string>? _onRejected;
+    private readonly HashSet<string> _warned = new(StringComparer.Ordinal);
 
+    /// <param name="onRejected">
+    /// Called with (presentation id, reason) the first time a candidate is rejected in this run; NewsViewer
+    /// writes it to launch.log as a Warning line. NewsService owns the Error-level signal.
+    /// </param>
     public PresentationSelector(
         string cacheRootPath,
         IConfiguration configuration,
-        bool bypassImageIntegrityCheck = false)
+        bool bypassImageIntegrityCheck = false,
+        Action<string, string>? onRejected = null)
     {
         _cacheRootPath             = cacheRootPath;
         _configuration             = configuration;
         _bypassImageIntegrityCheck = bypassImageIntegrityCheck;
+        _onRejected                = onRejected;
     }
 
     /// <summary>
@@ -36,27 +43,40 @@ public sealed class PresentationSelector
 
     /// <summary>
     /// Shared selection core: enumerate every signature-verified assignment across the effective
-    /// team set, pick the newest active one matching <paramref name="predicate"/>, then resolve and
-    /// integrity-check its image. Image verification failure returns (best, null) so the caller can
-    /// decline to act on unverified content.
+    /// team set and pick the newest active one matching <paramref name="predicate"/> whose image is
+    /// eligible: <c>ImagePath</c> passes <see cref="ImagePathValidator"/> and stays inside the cache team
+    /// root, <c>ImageHash</c> is present, and the file's SHA-256 matches it (<see cref="CachedImageCheck"/>;
+    /// no empty-hash skip). A candidate failing any check is ineligible and the selection falls through
+    /// to the next newest; (null, null) when none is eligible — exactly as with no content.
     /// </summary>
     private (PublishedAssignmentIndex? Assignment, string? ImagePath) SelectActiveMatching(
         string[] teams, Func<PublishedAssignmentIndex, bool> predicate)
     {
-        var now  = DateTime.Now;
-        var best = ActiveAssignmentSelector.PickNewestToTeam(
-            EnumerateVerifiedAssignments(teams), now, predicate);
+        var now        = DateTime.Now;
+        var candidates = EnumerateVerifiedAssignments(teams).ToList();
+        var teamOf     = new Dictionary<PublishedAssignmentIndex, string>(ReferenceEqualityComparer.Instance);
+        foreach (var (team, assignment) in candidates) teamOf[assignment] = team;
 
-        if (best is null) return (null, null);
+        var remaining = candidates.Select(c => c.Assignment).ToList();
+        while (true)
+        {
+            var best = ActiveAssignmentSelector.PickNewestToTeam(remaining, now, predicate);
+            if (best is null) return (null, null);
 
-        var imagePath = Path.Combine(
-            _cacheRootPath,
-            best.Content.ImagePath.Replace('/', Path.DirectorySeparatorChar));
+            if (CachedImageCheck.TryResolveVerified(_cacheRootPath, teamOf[best], best.Content.ImagePath,
+                    best.Content.ImageHash, _bypassImageIntegrityCheck, out var imagePath, out var reason))
+                return (best, imagePath);
 
-        if (!_bypassImageIntegrityCheck && !VerifyImageHash(imagePath, best.Content.ImageHash))
-            return (best, null);
+            remaining.Remove(best);
+            Reject(best, reason);
+        }
+    }
 
-        return (best, imagePath);
+    private void Reject(PublishedAssignmentIndex item, string reason)
+    {
+        System.Diagnostics.Debug.WriteLine($"[Image] presentation {item.PresentationId}: ineligible — {reason}");
+        if (_warned.Add(item.AssignmentId + "|" + item.PresentationId))
+            _onRejected?.Invoke(item.PresentationId, reason);
     }
 
     /// <summary>
@@ -64,7 +84,7 @@ public sealed class PresentationSelector
     /// verification (SignatureGate.VerifyWithPrecedence → ShouldReject). Rejected/unreadable
     /// indexes are skipped. No active-window or display-type filtering is applied here.
     /// </summary>
-    private IEnumerable<PublishedAssignmentIndex> EnumerateVerifiedAssignments(string[] teams)
+    private IEnumerable<(string Team, PublishedAssignmentIndex Assignment)> EnumerateVerifiedAssignments(string[] teams)
     {
         // Effective teams = static (registry/appsettings) ∪ dynamic (Entra-resolved, read-only here;
         // NewsViewer never writes resolved-teams.json). Per-team verification routes through
@@ -99,54 +119,7 @@ public sealed class PresentationSelector
             System.Diagnostics.Debug.WriteLine($"[Signing] {team}: index accepted — {reason}");
 
             foreach (var a in index.PublishedAssignments)
-                yield return a;
-        }
-    }
-
-    private static bool VerifyImageHash(string imagePath, string? storedHash)
-    {
-        if (string.IsNullOrEmpty(storedHash))
-        {
-            System.Diagnostics.Debug.WriteLine(
-                $"[ImageHash] {Path.GetFileName(imagePath)}: no hash in index — skipping integrity check");
-            return true;
-        }
-
-        if (!File.Exists(imagePath))
-        {
-            System.Diagnostics.Debug.WriteLine(
-                $"[ImageHash] {Path.GetFileName(imagePath)}: file not found");
-            return false;
-        }
-
-        try
-        {
-            string prefix   = "sha256:";
-            string expected = storedHash.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                ? storedHash[prefix.Length..]
-                : storedHash;
-
-            using var sha256    = SHA256.Create();
-            using var stream    = File.OpenRead(imagePath);
-            byte[] hashBytes    = sha256.ComputeHash(stream);
-            string actual       = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
-
-            if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
-            {
-                System.Diagnostics.Debug.WriteLine(
-                    $"[ImageHash] {Path.GetFileName(imagePath)}: hash mismatch — image rejected");
-                return false;
-            }
-
-            System.Diagnostics.Debug.WriteLine(
-                $"[ImageHash] {Path.GetFileName(imagePath)}: hash OK");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine(
-                $"[ImageHash] {Path.GetFileName(imagePath)}: error during verification — {ex.Message}");
-            return false;
+                yield return (team, a);
         }
     }
 }
