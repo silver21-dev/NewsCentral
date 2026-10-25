@@ -193,7 +193,7 @@ public sealed class AuthoringAclChecksTests : IDisposable
         Assert.Empty(warnings);
     }
 
-    // â”€â”€ config folder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── config folder ──────────────────────────────────────────────
 
     [Theory]
     [InlineData(FileSystemRights.CreateFiles)]

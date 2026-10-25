@@ -38,11 +38,11 @@ public class UserService
         _authService = authService;
         _audit       = audit ?? NullAuditLog.Instance;
 
-        // Primary JsonFileRepository constructor â€” no [Obsolete] warning
+        // Primary JsonFileRepository constructor — no [Obsolete] warning
         _userRepo = new JsonFileRepository<UsersCollection>(_storage, "config", "");
     }
 
-    // â”€â”€ Authorization helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Authorization helpers ─────────────────────────────────────────────────
 
     // Every method that writes users.json starts here. users.json is writable by environment administrators
     // only (Set-AuthoringAcl.ps1), and a TeamAdmin who could edit it could make themselves a SystemAdmin, so
@@ -55,7 +55,7 @@ public class UserService
         return currentUser;
     }
 
-    // â”€â”€ Queries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Queries ──────────────────────────────────────────────────────────────
 
     public async Task<List<User>> GetAllUsersAsync()
     {
@@ -76,7 +76,7 @@ public class UserService
             u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
     }
 
-    // â”€â”€ UPN helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── UPN helpers ───────────────────────────────────────────────────────────
 
     public Task UpdateUserUPNAsync(string userId, string? upn) =>
         _audit.RunAsync(AuditEvents.UserUpnChanged, userId, () => UpdateUserUPNCoreAsync(userId, upn),
@@ -129,7 +129,7 @@ public class UserService
         await UpdateUserUPNAsync(userId, upn);
     }
 
-    // â”€â”€ CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── CRUD ─────────────────────────────────────────────────────────────────
 
     public Task<User> CreateUserAsync(
         string username, string email, string displayName,
@@ -261,7 +261,7 @@ public class UserService
         return true;
     }
 
-    // â”€â”€ Team role management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Team role management ──────────────────────────────────────────────────
 
     public Task<bool> AssignUserToTeamAsync(
         string userId, string teamId, string teamFolderName, List<string> roles) =>
