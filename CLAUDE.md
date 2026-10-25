@@ -132,6 +132,7 @@ No direct inter-process communication. Coordination is via the shared cache fold
 - Build/test: `dotnet build` and `dotnet test` at the repo root; both test suites must pass before a commit.
 - NewsService may be running as a Windows service from `NewsService\bin\Debug`; it locks `NewsCentral.Shared.dll`. If a build fails with MSB3027 "locked by NewsCentral", ask the user to stop the service. Don't build into an alternate output path.
 - Commit with `git commit -F <tempfile>` (not a long inline `-m`); report build and test results before committing.
+- Never edit source files through PowerShell `Get-Content`/`Set-Content` without an explicit encoding: Windows PowerShell 5.1 reads them in the ANSI codepage and corrupts non-ASCII characters (emoji, box-drawing lines, dashes) and drops BOMs. Read and write UTF-8 with `[IO.File]::ReadAllText`/`WriteAllText` and a `UTF8Encoding`, and preserve an existing BOM. Prefer the Edit tool for source changes.
 
 ---
 
