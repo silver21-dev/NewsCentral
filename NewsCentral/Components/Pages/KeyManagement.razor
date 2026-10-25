@@ -2,6 +2,7 @@
 @using NewsCentral.Services
 @using NewsCentral.Models
 @using NewsCentral.Security
+@using NewsCentral.Components.Shared
 @using Microsoft.Extensions.Localization
 @inject IStringLocalizer<KeyManagement> Localizer
 @inject IndexGenerationService IndexService
@@ -36,6 +37,8 @@
         </div>
         return;
     }
+
+    <AclDriftWarnings />
 
     @* ── Current keys ─────────────────────────────────────────────────────── *@
     <div class="card mb-4">

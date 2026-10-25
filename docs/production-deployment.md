@@ -251,13 +251,13 @@ is what gets deployed. See `docs/security.md` and `docs/anti-tamper.md`.
    Management**.
 2. Select the team. **Generate** a new ECDSA P-256 key pair — held in page state until applied.
 3. **Apply.** This sets `PublicKeyPrevious` to the outgoing `PublicKey` (rotation continuity) and writes
-   `team-signing.json` into the team's authoring folder.
+   `team-signing.json` into the environment's **secure store** (`{SecurePath}\keys\{team}\`, default `{DataPath}\secure`; S02).
 4. Copy the **full public key** from the page — it is rendered copyable specifically for GPO deployment.
 5. **Republish** — a separate deliberate action that re-signs and saves `index.json`, with the self-verify
    guard running at publish time.
 6. Repeat per team. Record each team's public key against its **exact team folder name**.
 
-`team-signing.json` never leaves the authoring tier — it is written through `IStorageService` and is never
+`team-signing.json` never leaves the authoring tier — it is written to the secure store (not the DataPath `IStorageService`) and is never
 distributed via `IBlobDistributionService`. Public keys are **not secret**; treat them as configuration.
 
 > ⚠️ **Rotation trap.** Signing and index regeneration are distinct operations. Regenerating indexes
@@ -266,9 +266,40 @@ distributed via `IBlobDistributionService`. Public keys are **not secret**; trea
 > force clients to re-sync. `PublicKeyPrevious` must remain in the registry until an actual content
 > change has propagated to every machine.
 
-> ⚠️ **Private signing keys currently live in `team-signing.json` on the authoring tier.** Azure Key
+> ⚠️ **Private signing keys live in `team-signing.json` in the authoring tier's secure store (S02; see 6.1).** Azure Key
 > Vault migration is the flagged highest-priority preventive measure. Until then, the authoring tier's
 > backup and access control *is* the key protection.
+
+### 6.1 Lock down the authoring tier (`Set-AuthoringAcl.ps1`)
+
+DataPath is shared by every author, so by itself it protects nothing from them. NewsCentral never sets ACLs; the
+environment administrator does, once, with `scripts/Set-AuthoringAcl.ps1` (elevated, 64-bit PowerShell,
+`-WhatIf` supported, exit `0`/`1`). Order matters:
+
+1. **Create the groups**: administrators, authors, and one signer group per team that signs (for example
+   `NC-Admins`, `NC-Authors`, `NC-cz-its-Signers`). Make sure the administrators are in the administrators group
+   and in `NC-Authors` only if they author too.
+2. **Sign in to NewsCentral as a system administrator once.** That login migrates every team key from
+   `{DataPath}\{team}\team-signing.json` into the secure store (verified copy, then delete). Check that no
+   `{DataPath}\*\team-signing.json` is left and that Key Management / the main layout show no migration warning.
+   The script **refuses** (exit 1, listing the files) while any remain.
+3. **Preview, then apply**:
+   ```powershell
+   .\scripts\Set-AuthoringAcl.ps1 -DataPath <DataPath> -AdminsGroup <DOMAIN\NC-Admins> -AuthorsGroup <DOMAIN\NC-Authors> `
+       -TeamSigners @{ 'cz-its' = '<DOMAIN\NC-cz-its-Signers>' } -WhatIf
+   .\scripts\Set-AuthoringAcl.ps1 -DataPath <DataPath> -AdminsGroup <DOMAIN\NC-Admins> -AuthorsGroup <DOMAIN\NC-Authors> `
+       -TeamSigners @{ 'cz-its' = '<DOMAIN\NC-cz-its-Signers>' }
+   ```
+   Add `-SecurePath` / `-AuditPath` if `environment.json` sets non-default locations. The script prints the resulting
+   ACLs (`icacls`). Administrators and signers must log off and on again for new group membership to apply.
+4. **Rotate every team key** (Key Management → Generate → Apply → deploy the new public key per Step 7 →
+   Republish). The old key files were readable by every author before step 3; treat them as copied.
+5. Confirm the **folder-permission warnings** on Key Management and Environment Management are gone. They are
+   warnings only; the audit-folder check can over-report on a folder that was not provisioned by the script.
+
+Also deliver `HKLM\Software\<Company>\NewsCentral\NewsCentral\Audit\Enabled` (DWORD; `docs/configuration.md`, or
+`Set-RegistryOverrides.ps1 -ComponentName NewsCentral -AuditEnabled`) only if policy must force auditing on or off. The script
+warns if AuthorsGroup can delete files in the `config` folder (that would let an author replace `users.json`).
 
 ---
 
@@ -428,7 +459,7 @@ HKLM\Software\{Company}\NewsCentral\NewsViewer\
 |---|---|---|
 | `Company` | Build-time constant in `Directory.Build.props` | It defines the hive path and cannot be read from the path it defines |
 | `NEWSSERVICE_AZURE_CLIENTSECRET` | Machine-scope environment variable | Only when `AuthMode=ClientSecretEnv`. The single configuration item that does not arrive through GPO. **Machine scope is required** — Local System does not see user variables. |
-| Team **private** signing keys | `team-signing.json`, authoring tier only | Never distributed; public keys only reach the fleet |
+| Team **private** signing keys | `team-signing.json` in the secure store (`{SecurePath}\keys\{team}\`), authoring tier only | Never distributed; public keys only reach the fleet |
 
 > ⚠️ **`ClientSecretEnv` is a convenience delivery, not a secure one.** A machine environment variable is
 > clear text readable by any SYSTEM process, exactly like a registry `REG_SZ` secret. Do not present it

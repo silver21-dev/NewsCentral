@@ -132,6 +132,11 @@ HKLM\Software\[Company]\NewsCentral\NewsCentral\
 │                                   with a Warning log — enforced server-side, not only in the UI)
 │       UseMockUPN        DWORD     (Debug builds only — ignored in Release; not for registry deployment)
 │       MockUPN           REG_SZ    (Debug builds only — ignored in Release; not for registry deployment)
+├── Audit\
+│       Enabled           DWORD     (0/1; policy override for the audit log. When PRESENT it wins over the
+│                                   environment's own audit.enabled and the Environment Management toggle is
+│                                   shown locked "set by policy". Absent = the environment setting, default on.
+│                                   Set with Set-RegistryOverrides.ps1 -AuditEnabled)
 ├── Storage\
 │       EnableBlobDistribution   DWORD
 │       DistributionMode         REG_SZ   ("Local" or "AzureBlob")
@@ -191,6 +196,20 @@ HKLM\Software\[Company]\NewsCentral\NewsTester\
 **`teams\` sub-hive:** team folder names are the value *names* (not the value data). Value names must match the generated folder name exactly — the sanitized team name with no `team-` prefix (e.g. `cz-its`, not `CZ_ITS`). The provider exposes them as `teams:0`, `teams:1`, … so `IConfiguration.GetSection("teams").GetChildren()` returns one entry per team. Use `TeamConfigurationReader.GetTeams(configuration)` to read them.
 
 **`Signing\` sub-hive:** contains `RequireSignedIndex` (REG_SZ `"true"`/`"false"`, default `"false"`) plus one subkey per team. Each team subkey holds `PublicKey` and (optionally) `PublicKeyPrevious` as `REG_SZ` values containing Base64-encoded SubjectPublicKeyInfo. `RegistryConfigurationProvider` surfaces all values via its recursive `WalkKey` traversal: `Signing:RequireSignedIndex`, `Signing:{teamFolderName}:PublicKey`, and `Signing:{teamFolderName}:PublicKeyPrevious`. Use `SigningKeyConfigurationReader.GetPublicKeys(configuration, teamFolderName)` to read the key list; use `configuration.GetValue<bool>("Signing:RequireSignedIndex")` to read the flag. When `RequireSignedIndex` is `true`, `SignatureGate.ShouldReject` rejects Unsigned and Disabled indexes in addition to Invalid — enabling fail-closed enforcement. NewsService and NewsViewer each maintain their own separate `Signing\` subtrees.
+
+## environment.json — secure store, audit log (NewsCentral)
+
+`{DataPath}\config\environment.json` (per environment, edited on Environment Management by a system
+administrator) carries three settings beyond distribution:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `securePath` | `{DataPath}\secure` | Root of the secure key store. Team signing keys live at `{securePath}\keys\{team}\team-signing.json`. Must be an absolute path. Changing it does **not** move existing keys. An environment without `environment.json` uses the default. |
+| `auditPath` | `{DataPath}\audit` | Root of the audit log (`{auditPath}\{yyyy-MM}\{yyyy-MM-dd}_{MACHINE}_{windowsUser}.jsonl`). Must be an absolute path. |
+| `audit.enabled` | `true` | Whether events are recorded. The registry value `Audit\Enabled` (DWORD) overrides it; when the registry value is present the Environment Management toggle is locked ("set by policy"). |
+
+NTFS permissions on these folders (and on `config\users.json`) are applied by `scripts/Set-AuthoringAcl.ps1`,
+never by the app; the app only warns about drift. See `docs/anti-tamper.md` §9 and `docs/production-deployment.md`.
 
 ## appsettings.json — NewsCentral
 

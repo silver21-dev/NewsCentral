@@ -72,11 +72,12 @@ Every anti-tamper-relevant value. Registry paths are under
 (and the flag) to **both** components if both must verify that team.
 
 **Authoring-side key material.** The **private** key (and the current/previous public keys) lives in
-`{teamFolderName}/team-signing.json` (`TeamSigningKeys`) on the **authoring tier only** — never
-written through `IBlobDistributionService`, never synced to client machines. NewsCentral loads it via
-`IndexGenerationService.LoadTeamSigningKeysAsync` to sign; the Key Management page manages it (see
-`docs/newscentral-spec.md`). The public key is what gets distributed — to the registry (static teams)
-or with the content as `SigningPublicKey` (dynamic teams, §5).
+`{SecurePath}\keys\{teamFolderName}\team-signing.json` (`TeamSigningKeys`, same JSON format as before) in
+the environment's **secure store** (§9) on the **authoring tier only** — never written through
+`IBlobDistributionService`, never synced to client machines, and no longer under the shared DataPath.
+NewsCentral loads it via `IndexGenerationService.LoadTeamSigningKeysAsync` to sign; the Key Management
+page manages it (see `docs/newscentral-spec.md`). The public key is what gets distributed — to the
+registry (static teams) or with the content as `SigningPublicKey` (dynamic teams, §5).
 
 ## 4. Enforcement behavior
 
@@ -381,3 +382,67 @@ what the poster would refuse. Each rejection is a Warning line in `%LOCALAPPDATA
 (once per presentation per run; NewsService owns the Error-level signal). `BypassImageIntegrityCheck`
 (dev) skips only the hash comparison. The delivered-image buttons read `PublishedImagePath`, not the cache,
 and are unchanged.
+
+## 9. Authoring tier: secure key store, users.json, audit log (NewsCentral, S02)
+
+DataPath is shared by every author, who needs write access to it for content. Before S02 it also held each
+team's private ECDSA key (`{team}\team-signing.json`, unique and unrecoverable) and `config\users.json` (password
+hashes and `TeamRoles`): any author with file-system access could copy every team key or make themselves an
+administrator. The app runs as the operator's own Windows account, so **ACLs can only keep data away from people
+who do not need it**. S02 therefore separates the data and lets an administrator lock it down; **the app never sets
+an ACL** (`scripts/Set-AuthoringAcl.ps1` does) and only **warns** when the permissions have drifted.
+
+**Secure store.** `environment.json` `securePath` (default `{DataPath}\secure`) roots a storage abstraction
+(`ISecureStorage`) that is deliberately separate from the DataPath `IStorageService`. Keys live at
+`{SecurePath}\keys\{teamFolderName}\team-signing.json`.
+
+**Three load outcomes** (`TeamKeyLoadResult`) — an unreadable key is never the same as no key:
+
+| Outcome | Meaning | Signing | Fleet export | Key Management |
+|---|---|---|---|---|
+| `NotConfigured` | no file | unchanged: the index is published unsigned | "No signing key" warning | offers to generate |
+| `Loaded` | file read and parsed | signs | public keys exported | shows the key |
+| `Unreadable` + reason | access denied, IO error or parse error | **index generation and publish FAIL** with an error naming the team and reason; no index is written, the existing one is unchanged (`SigningKeyGate`) | "Key not readable" warning for that team (never "no key") | shows the reason; **does not offer to generate** — replacing an unreadable key would orphan every device that trusts it (`TeamKeyService.SaveAsync` refuses too) |
+
+**Migration** from `{DataPath}\{team}\team-signing.json` (`TeamKeyMigrator`): runs for every team when a system
+administrator logs in, and lazily the first time a team's key is loaded in a session. The old file is **copied,
+read back, parsed and compared byte-for-byte with the source; only on an exact match is the old file deleted** —
+never before. Any failure keeps the old file, uses it for the session, and shows the error to administrators (banner in the main layout and on Key
+Management). If both locations hold a key and they differ, nothing is overwritten or deleted: a conflict is
+reported and the new-location file is used. Each outcome is audited as `KeyMigrated` (fingerprint only).
+
+> ⚠️ **Rotate every team key after migrating.** The old `team-signing.json` files sat in a folder every author
+> could read; assume they were copied. Run `Set-AuthoringAcl.ps1` first, then rotate each team's key (Key Management →
+> Generate → Apply → deploy the new public key → Republish; see §6 for the dual-key window).
+
+**users.json.** Writable by administrators only after provisioning. Login stays possible for authors: the
+`LastLogin` write is best effort (an `UnauthorizedAccessException`/`IOException` is logged and login continues; the
+credential check is never softened); the preferred UI language moved to a per-user local store
+(`%LOCALAPPDATA%\{Company}\NewsCentral\user-preferences.json`; the old users.json value is read once as a fallback and
+never written); and changing one's own password shows "Your password can only be changed by an administrator."
+when users.json is not writable. See `docs/newscentral-spec.md` for the non-admin write paths that remain.
+
+**Audit log.** Append-only, one JSON line per event; see `docs/newscentral-spec.md`. Written with
+`AppendData | Synchronize` only, so it works under the append-only ACL below.
+
+**Provisioning ACLs** (`scripts/Set-AuthoringAcl.ps1`, elevated, 64-bit host; refuses while any
+`{DataPath}\*\team-signing.json` exists):
+
+| Path | ACEs |
+|---|---|
+| `SecurePath` | inheritance disabled; SYSTEM, Administrators, AdminsGroup: Full. Nothing else |
+| `SecurePath\keys\<team>` | `TeamSigners[team]`: Modify (plus the inherited administrators) |
+| `DataPath\config\users.json` | inheritance disabled on the file; SYSTEM, Administrators, AdminsGroup: Full; AuthorsGroup: Read |
+| `AuditPath` | inheritance disabled; SYSTEM, Administrators, AdminsGroup: Full. AuthorsGroup, folders (this folder and subfolders): ListDirectory, CreateFiles, CreateDirectories, ReadAttributes, Synchronize. AuthorsGroup, files (inherit only): AppendData, ReadAttributes, Synchronize. OWNER RIGHTS, files (inherit only): ReadData, AppendData, ReadAttributes, ReadPermissions, Synchronize, so a file's owner cannot rewrite, delete or re-ACL it. OWNER RIGHTS, folders: ListDirectory, ReadAttributes, ReadPermissions, Synchronize (see below). No CREATOR OWNER ACE |
+
+Two limits worth knowing: (1) the OWNER RIGHTS entry for **folders** goes beyond the minimum — the owner of a folder
+holds WRITE_DAC implicitly, so an author who creates a month folder could otherwise re-ACL it and delete the audit
+files inside; (2) protecting `users.json` itself does not stop an author who can **delete files in the `config`
+folder** from deleting it and creating a new one — the script warns when AuthorsGroup holds that right on `config`.
+
+**Drift warnings** (Key Management and Environment Management; warn-only, never block), using the shared
+`AclExposureEvaluator` (identities Users / Everyone / Authenticated Users / INTERACTIVE, Deny cancels Allow,
+inheritance flags ignored): the keys folder (and each team folder) readable (`ReadData`) by a broad identity;
+`users.json` writable by one; the audit folder granting `WriteData`, `Delete`, `DeleteSubdirectoriesAndFiles`,
+`ChangePermissions` or `TakeOwnership` to one. Because inheritance flags are ignored, the **audit check can
+over-report** on a folder that has not been provisioned by the script; that is accepted.

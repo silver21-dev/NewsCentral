@@ -1,0 +1,43 @@
+@using NewsCentral.Audit
+@using NewsCentral.Configuration
+@using NewsCentral.Security
+@using NewsCentral.Services
+@inject EnvironmentContext EnvironmentContext
+@inject EnvironmentSettingsService EnvironmentSettingsService
+
+@* Warn-only drift check: the signing key folder, users.json and the audit folder against the permissions that
+   scripts/Set-AuthoringAcl.ps1 applies. The app never sets ACLs and never blocks on this. TODO(i18n). *@
+@if (warnings.Count > 0)
+{
+    <div class="alert alert-warning">
+        <i class="bi bi-shield-exclamation me-2"></i><strong>Folder permissions need attention.</strong>
+        <ul class="mb-0 mt-1">
+            @foreach (var warning in warnings)
+            {
+                <li>@warning.Message</li>
+            }
+        </ul>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<AclDriftWarning> warnings = Array.Empty<AclDriftWarning>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var dataPath = EnvironmentContext.DataPath;
+            var settings = (await EnvironmentSettingsService.GetAsync()).Settings;
+            var securePath = EnvironmentSettingsResolver.EffectiveSecurePath(settings, dataPath);
+            var auditPath = AuditSettingsResolver.EffectiveAuditPath(settings, dataPath);
+
+            // ACL reads can be slow on a network share: keep them off the UI thread.
+            warnings = await Task.Run(() => AuthoringAclChecks.Check(dataPath, securePath, auditPath));
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AclDrift] check failed: {ex.Message}");
+        }
+    }
+}

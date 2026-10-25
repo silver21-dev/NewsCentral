@@ -48,7 +48,7 @@
 
 **Canonical payload:** Identical approach to `HmacService` — `Signature` temporarily nulled, non-indented camelCase JSON with `JsonStringEnumConverter`. Signed bytes are byte-for-byte consistent across both services.
 
-**Key material — `TeamSigningKeys`:** Stored at `{teamFolderName}/team-signing.json` on the authoring tier only. Must never be written through `IBlobDistributionService` or synced to client machines.
+**Key material — `TeamSigningKeys`:** Stored in the per-environment **secure store** at `{SecurePath}\keys\{teamFolderName}\team-signing.json` (S02; `SecurePath` in `environment.json`, default `{DataPath}\secure`) on the authoring tier only — it used to sit in `{teamFolderName}/team-signing.json` under the shared DataPath, where every author could read it. Must never be written through `IBlobDistributionService` or synced to client machines. See **Authoring-tier hardening (S02)** below.
 
 | Field | Type | Used by |
 |---|---|---|
@@ -62,7 +62,7 @@
 
 **Phase A — complete:** `EcdsaSignatureService`, `SigningKeyTool`, and `TeamSigningKeys` are implemented in `NewsCentral.Shared` and covered by `NewsCentral.Shared.Tests` (9 passing xUnit facts): sign/verify round-trip, wrong-key rejection, rotation key-list fallback, `Disabled` and `Unsigned` states, public-key derivation from both Base64 PKCS#8 and PEM input, malformed-input rejection (`ArgumentException`), and tamper detection (mutated payload fails verification).
 
-**Phase B1 — complete:** `IndexGenerationService` (NewsCentral) signs `index.json` with the team's ECDSA private key loaded from `team-signing.json` (authoring tier only; never written through `IBlobDistributionService`). A team with no key is published unsigned with a warning and continues normally — phased-rollout safe. A publish-time self-verify guard was subsequently added (see **Publish-time self-verify guard** below).
+**Phase B1 — complete:** `IndexGenerationService` (NewsCentral) signs `index.json` with the team's ECDSA private key loaded from `team-signing.json` (authoring tier only; never written through `IBlobDistributionService`). A team with NO key (file absent) is published unsigned with a warning and continues normally — phased-rollout safe. A key that exists but cannot be read is a different case and blocks publishing (S02, below). A publish-time self-verify guard was subsequently added (see **Publish-time self-verify guard** below).
 
 **Publish-time self-verify guard:** After signing, `IndexGenerationService` immediately verifies that the signed index will pass client verification before `SaveIndexFileAsync` is called. The guard:
 1. Serializes the signed `TeamIndexFile` with `GetIndexJsonOptions()` — producing the exact bytes that will be written to disk.
@@ -73,7 +73,7 @@ This catches canonical/persisted-form drift at the authoring tier — if a futur
 
 **Persisted-form signing:** The index is normalized through `GetIndexJsonOptions` before signing so the signed form equals the persisted form. `GetIndexJsonOptions` uses `SmartDateTimeConverter`, which writes whole-second timestamps; signing the in-memory object directly would cover sub-second precision that is lost on write. The index is round-tripped through `GetIndexJsonOptions` before the `Sign` call so the payload is byte-consistent with the file on disk. Verifiers must parse the persisted timestamps back to the same values (standard ISO parsing and `SmartDateTimeConverter` both do so faithfully).
 
-**Phase B2 — complete:** TeamAdmin-gated Key Management page (`/key-management`) in NewsCentral. `IndexGenerationService.LoadTeamSigningKeysAsync` is now public; `SaveTeamSigningKeysAsync` added. The page lets a TeamAdmin (or SystemAdmin) for the current team: view the current public key (full, copyable for GPO) and truncated private key hint; generate a fresh ECDSA P-256 key pair (held in page state until applied); apply the new pair — sets `PublicKeyPrevious = old PublicKey` for rotation-window continuity and writes `team-signing.json` via `IStorageService` (never through `IBlobDistributionService`); republish the index as a separate deliberate action that triggers `GenerateAndSaveIndexAsync` (and the self-verify guard). The full private key is never displayed — `SigningKeyTool.Truncate` is used throughout. Nav item is gated on `AuthService.HasRole(currentTeamId, "TeamAdmin")` and reacts to team-context changes. Import-from-authority (paste/derive) is deferred.
+**Phase B2 — complete:** TeamAdmin-gated Key Management page (`/key-management`) in NewsCentral. `IndexGenerationService.LoadTeamSigningKeysAsync` is now public; `SaveTeamSigningKeysAsync` added. The page lets a TeamAdmin (or SystemAdmin) for the current team: view the current public key (full, copyable for GPO) and truncated private key hint; generate a fresh ECDSA P-256 key pair (held in page state until applied); apply the new pair — sets `PublicKeyPrevious = old PublicKey` for rotation-window continuity and writes `team-signing.json` to the secure store (S02; originally via `IStorageService` under DataPath; never through `IBlobDistributionService`); republish the index as a separate deliberate action that triggers `GenerateAndSaveIndexAsync` (and the self-verify guard). The full private key is never displayed — `SigningKeyTool.Truncate` is used throughout. Nav item is gated on `AuthService.HasRole(currentTeamId, "TeamAdmin")` and reacts to team-context changes. Import-from-authority (paste/derive) is deferred.
 
 **Phase C — complete (C1 + C2):** `SyncService` (NewsService, C1) and `PresentationSelector` (NewsViewer, C2) now verify `index.json` with `EcdsaSignatureService.Verify` using the team's registry public key read by `SigningKeyConfigurationReader.GetPublicKeys(configuration, teamFolderName)` — `Signing:{teamFolderName}:PublicKey` and `:PublicKeyPrevious` — with dual-key rotation fallback. Both verifiers now route through `SignatureGate.ShouldReject` (see **Phase E** below). Outcome logging with the gate: rejected → `LogError`/`Debug.WriteLine` with the gate reason string; `Valid` accepted → `LogInformation`; `Unsigned` accepted (default) → `LogWarning`; `Disabled` accepted (default) → `LogInformation`. Reject action unchanged: NewsService aborts the team sync; NewsViewer skips the team entirely. Verifiers deserialize `index.json` with standard ISO timestamp parsing and no `DateTime` converter, so the parsed values byte-match the signed, persisted form.
 
@@ -129,3 +129,30 @@ End-to-end flow: **Entra device resolution → `resolved-teams.json` → effecti
 This symmetry was incomplete in practice until each tier's pre-Entra bootstrap guard was removed: both `NewsService/Worker.cs` and `NewsViewer/Program.cs` originally exited before the union was ever computed when the **static** team list was empty, which made a dynamic-only machine inert on that tier regardless of what Phase 3b wired downstream (NewsService fixed in `f8cd54b`, NewsViewer in the following commit).
 
 Session telemetry (`session-*.json`) remains on HMAC-SHA256 throughout all phases.
+
+## Authoring-tier hardening (S02, October 2026 security improvements)
+
+The authoring tier's trust boundary used to be "anyone with write access to DataPath": the same folder held every
+team's private signing key and `config/users.json` (password hashes, `TeamRoles`). S02 narrows it. Detail and the
+exact ACL table: `docs/anti-tamper.md` §9. The app never sets ACLs; `scripts/Set-AuthoringAcl.ps1` does, and the
+app only warns about drift.
+
+- **Secure key store.** Team keys live under `{SecurePath}\keys\{team}\team-signing.json`, behind their own
+  storage abstraction (not the DataPath `IStorageService`). Loading has three outcomes — `NotConfigured`,
+  `Loaded`, `Unreadable` (with a reason). `Unreadable` **fails** index generation/publish and the fleet export
+  reports "key not readable"; it is never treated as "no key", and Key Management does not offer to generate a key
+  over it. Keys are migrated from the old location with a verified copy (byte-for-byte) before the old file is
+  deleted; a failure keeps the old file in use and tells the administrator; a conflict never overwrites.
+  **Rotate every team key after migration**: the old files were exposed.
+- **users.json.** Administrator-writable only after provisioning. Login's `LastLogin` write is best effort, the UI
+  language lives in a per-user local store, and the password page explains that an administrator must change it.
+  Non-admin write paths that remain in the UI are listed in `docs/newscentral-spec.md` (team administrators manage
+  users and team roles).
+- **Audit log.** Append-only JSON lines of logins, user/role/key/presentation/assignment/environment/audit-setting
+  events (never passwords, hashes, private keys or content); `Audit:Enabled` defaults on and a registry policy value
+  can force it. A failed write never blocks an action; it raises a banner.
+- **Drift warnings.** Keys folder readable, `users.json` writable, or the audit folder tamperable by Users /
+  Everyone / Authenticated Users / INTERACTIVE — warn only.
+
+What this does **not** do: an author who is also a Windows administrator, or a team signer for a team, still holds
+that power; and protecting `users.json` does not stop someone who can delete files in `config\` from replacing it.
