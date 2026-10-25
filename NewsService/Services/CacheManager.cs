@@ -116,6 +116,14 @@ public sealed class CacheManager
         ImagePathValidator.TryResolveContained(
             Resolve(teamFolder), imagePath[(teamFolder.Length + 1)..], out _, out reason);
 
+    /// <summary>Deletes a cached image and its hash sidecar.</summary>
+    public void DeleteImage(string relativePath)
+    {
+        var path = Resolve(relativePath);
+        DeleteFile(path);
+        DeleteFile(path + HashSuffix);
+    }
+
     /// <summary>SHA-256 of the cached file, or null when it is absent or unreadable.</summary>
     public async Task<byte[]?> ComputeHashAsync(string relativePath)
     {

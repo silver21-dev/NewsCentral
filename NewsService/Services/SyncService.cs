@@ -101,6 +101,7 @@ public sealed class SyncService(
             if (!repository.IsAvailable)
             {
                 logger.LogWarning("Repository not reachable — content served from cache only");
+                await HealCachedTeamsAsync(effectiveTeams, ct);
             }
             else
             {
@@ -333,10 +334,35 @@ public sealed class SyncService(
     }
 
     /// <summary>
-    /// Unchanged-index path: checks locally (no repository access) that every image the cached index
-    /// references is still in the cache, and re-fetches only the missing ones through the normal
-    /// per-image sync. Covers files removed locally (antivirus quarantine, cleanup tools) that would
-    /// otherwise stay missing until the next publish. Never throws except for cancellation.
+    /// Runs cache self-heal for every team's cached index without contacting the repository for the
+    /// index — the path taken when the source is unreachable, so a tampered file is still deleted
+    /// (the re-download then fails and the slot stays empty until the source returns).
+    /// </summary>
+    internal async Task HealCachedTeamsAsync(IReadOnlyList<string> teams, CancellationToken ct)
+    {
+        foreach (var teamFolder in teams)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var cachedIndex = await cache.ReadJsonAsync<TeamIndexFile>($"{teamFolder}/index.json");
+                if (cachedIndex is not null) await SelfHealCacheAsync(teamFolder, cachedIndex, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Team {Team}: offline cache self-heal skipped", teamFolder);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cache self-heal (unchanged index, or source unreachable): every image the cached index references
+    /// is checked locally. A file whose SHA-256 differs from <c>ImageHash</c> is logged, deleted and
+    /// re-fetched through the verified per-image sync; an absent file is re-fetched the same way. A
+    /// re-fetch that fails verification or cannot reach the source leaves the slot empty (retried next
+    /// cycle). Covers files removed (antivirus, cleanup) or replaced in place. Never throws except for
+    /// cancellation.
     /// </summary>
     private async Task SelfHealCacheAsync(string teamFolder, TeamIndexFile cachedIndex, CancellationToken ct)
     {
@@ -349,9 +375,13 @@ public sealed class SyncService(
                 return;
             }
 
-            var missing = cachedIndex.PublishedAssignments
-                .Where(a => !cache.FileExists(a.Content.ImagePath))
-                .ToList();
+            var missing = new List<PublishedAssignmentIndex>();
+            foreach (var a in cachedIndex.PublishedAssignments)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!cache.FileExists(a.Content.ImagePath)) { missing.Add(a); continue; }
+                if (await DeleteIfTamperedAsync(teamFolder, a)) missing.Add(a);
+            }
             if (missing.Count == 0) return;
 
             var repeat = _unhealableHash.TryGetValue(teamFolder, out var known) && known == cachedIndex.IndexHash;
@@ -380,6 +410,42 @@ public sealed class SyncService(
         {
             ReportUnhealable(teamFolder, cachedIndex.IndexHash, ex.Message);
         }
+    }
+
+    // Cached-file mismatches already reported, keyed "path|actual hash": the Error is logged once per
+    // file and tampered content, repeats of the same content drop to Debug.
+    private readonly HashSet<string> _reportedMismatch = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when the cached file did not match its <c>ImageHash</c> and was deleted (so the caller
+    /// re-fetches it). A file with a missing or malformed hash is left alone — the verified sync path
+    /// reports that.
+    /// </summary>
+    private async Task<bool> DeleteIfTamperedAsync(string teamFolder, PublishedAssignmentIndex assignment)
+    {
+        var path = assignment.Content.ImagePath;
+        if (!ImageHashVerifier.TryParse(assignment.Content.ImageHash, out var expected, out _)) return false;
+
+        var actual = await cache.ComputeHashAsync(path);
+        if (actual is null || ImageHashVerifier.DigestMatches(actual, expected)) return false;
+
+        var actualHex = Convert.ToHexString(actual).ToLowerInvariant();
+        var repeat = !_reportedMismatch.Add($"{path}|{actualHex}");
+        logger.Log(repeat ? LogLevel.Debug : LogLevel.Error,
+            "Team {Team}: cached image {Path} (assignment {AssignmentId}) does not match ImageHash — " +
+            "expected sha256:{Expected}, actual sha256:{Actual}; deleting and re-downloading",
+            teamFolder, path, assignment.AssignmentId, Convert.ToHexString(expected).ToLowerInvariant(), actualHex);
+
+        try
+        {
+            cache.DeleteImage(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.Log(repeat ? LogLevel.Debug : LogLevel.Error, ex,
+                "Team {Team}: could not delete tampered cached image {Path}", teamFolder, path);
+        }
+        return true;
     }
 
     private void ReportUnhealable(string teamFolder, string indexHash, string detail)

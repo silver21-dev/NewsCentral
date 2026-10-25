@@ -355,3 +355,11 @@ index) validates the cached index's paths before fetching anything.
 re-hashed against `ImageHash` by `ImagePublisher` (§7). NewsViewer builds the cached image path from
 `ImagePath` at `PresentationSelector.cs:54` and still verifies the hash at display time; it was
 deliberately left unchanged.
+
+**Self-heal hashing (S01b).** On every cycle the cached index's images are re-hashed (unchanged-index
+path, and also when the source is unreachable). A cached file whose SHA-256 differs from `ImageHash` —
+replaced in place — is logged at Error naming team, assignment, path and expected vs actual hash (once per
+file and tampered content; repeats at Debug), deleted together with its `.hash` sidecar, and re-downloaded
+through the S01a verified path. If the re-download fails verification or the source is unreachable the slot
+stays empty and is retried next cycle; an absent file is restored the same way. A heal raises no
+`ContentChanged` event.
