@@ -107,7 +107,8 @@ renders them as dismissible banners on every page. `IndexGenerationService.Regen
 assignment delete and after a presentation update or delete) never throws: an unreadable signing key becomes the
 warning "The distributed index for <team> was not updated because its signing key could not be read." plus an
 `IndexRegenerationFailed` audit line, the old index stays and no unsigned index is written; other failures are logged
-as before. Publishing fails up front instead (`EnsureSigningKeyUsableAsync`) with "Signing key for <team> could not be
+as before. The banner withdraws itself when a later index generation for the same team succeeds (a publish or a
+background regeneration; other teams' successes leave it alone), and can also be dismissed by hand. Publishing fails up front instead (`EnsureSigningKeyUsableAsync`) with "Signing key for <team> could not be
 read: <reason>. Nothing was published ...", shown at the top of the Assignments page (sticky) or in the bulk result.
 The Index Management repair summary and the Regenerate All result list per-team failures themselves.
 

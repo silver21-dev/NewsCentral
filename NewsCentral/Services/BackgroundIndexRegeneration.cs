@@ -19,18 +19,28 @@ public sealed class BackgroundIndexRegeneration
         _audit = audit ?? NullAuditLog.Instance;
     }
 
+    private static string KeyFor(string teamFolderName) => "index-key-unreadable:" + teamFolderName;
+
+    /// <summary>
+    /// A team's index was generated and saved (by a publish or by a background regeneration), so its signing key was
+    /// readable after all: the warning about that team no longer applies.
+    /// </summary>
+    public void IndexGenerated(string teamFolderName) => _notices.Clear(KeyFor(teamFolderName));
+
     /// <summary>True when the index was regenerated.</summary>
     public async Task<bool> RunAsync(string teamFolderName, Func<Task> regenerate)
     {
         try
         {
             await regenerate();
+            IndexGenerated(teamFolderName);
             return true;
         }
         catch (SigningKeyUnreadableException ex)
         {
             _notices.Add(UserNoticeLevel.Warning,
-                $"The distributed index for {teamFolderName} was not updated because its signing key could not be read.");
+                $"The distributed index for {teamFolderName} was not updated because its signing key could not be read.",
+                KeyFor(teamFolderName));
             await _audit.RecordAsync(new AuditRecord(
                 AuditEvents.IndexRegenerationFailed, teamFolderName, AuditOutcome.Failure, ex.Reason));
             return false;

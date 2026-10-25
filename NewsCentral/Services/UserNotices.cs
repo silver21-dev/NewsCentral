@@ -3,7 +3,7 @@ namespace NewsCentral.Services;
 public enum UserNoticeLevel { Warning, Error }
 
 /// <summary>One message for the user that did not come from the page they are looking at.</summary>
-public sealed record UserNotice(Guid Id, UserNoticeLevel Level, string Message);
+public sealed record UserNotice(Guid Id, UserNoticeLevel Level, string Message, string? Key = null);
 
 /// <summary>
 /// Messages from work that happens behind an operation which itself succeeded, for example the index regeneration
@@ -23,15 +23,27 @@ public sealed class UserNotices
         get { lock (_gate) return _items.ToList(); }
     }
 
-    public void Add(UserNoticeLevel level, string message)
+    /// <summary>
+    /// <paramref name="key"/> lets the code that raised a notice withdraw it once the problem is gone
+    /// (<see cref="Clear"/>); the user can still dismiss it by hand.
+    /// </summary>
+    public void Add(UserNoticeLevel level, string message, string? key = null)
     {
         lock (_gate)
         {
             // The same warning twice in a row (a presentation saved twice) is one notice, not two.
             if (_items.Any(n => n.Level == level && n.Message == message)) return;
-            _items.Add(new UserNotice(Guid.NewGuid(), level, message));
+            _items.Add(new UserNotice(Guid.NewGuid(), level, message, key));
         }
         Changed?.Invoke();
+    }
+
+    /// <summary>Withdraws every notice raised with this key. A no-op when there is none.</summary>
+    public void Clear(string key)
+    {
+        bool removed;
+        lock (_gate) removed = _items.RemoveAll(n => n.Key != null && string.Equals(n.Key, key, StringComparison.OrdinalIgnoreCase)) > 0;
+        if (removed) Changed?.Invoke();
     }
 
     public void Dismiss(Guid id)

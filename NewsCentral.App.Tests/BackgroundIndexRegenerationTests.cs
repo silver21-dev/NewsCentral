@@ -132,6 +132,41 @@ public sealed class BackgroundIndexRegenerationTests : IDisposable
     }
 
     [Fact]
+    public async Task ALaterSuccessForTheSameTeam_ClearsTheBanner_ButAnotherTeamsSuccessDoesNot()
+    {
+        var keys = UnreadableKeyService();
+        var indexPath = Path.Combine(_root, "index.json");
+        await _background.RunAsync("cz-its", Generator("cz-its", keys, indexPath));
+        await _background.RunAsync("de-its", Generator("de-its", keys, indexPath));
+        Assert.Equal(2, _notices.Items.Count);
+
+        // A successful generation for another team (what GenerateAndSaveIndexAsync reports after a save).
+        _background.IndexGenerated("sk-team");
+        await _background.RunAsync("sk-team", () => Task.CompletedTask);
+        Assert.Equal(2, _notices.Items.Count);
+
+        // A publish for cz-its saved its index: only the cz-its banner goes.
+        _background.IndexGenerated("cz-its");
+        var remaining = Assert.Single(_notices.Items);
+        Assert.Contains("de-its", remaining.Message);
+
+        // A later successful background regeneration clears the other one too.
+        Assert.True(await _background.RunAsync("de-its", () => Task.CompletedTask));
+        Assert.Empty(_notices.Items);
+    }
+
+    [Fact]
+    public async Task AManuallyDismissedBanner_StaysGone_AndClearingAnAbsentOneIsHarmless()
+    {
+        await _background.RunAsync("cz-its", Generator("cz-its", UnreadableKeyService(), Path.Combine(_root, "index.json")));
+        _notices.Dismiss(_notices.Items[0].Id);
+
+        _background.IndexGenerated("cz-its");
+
+        Assert.Empty(_notices.Items);
+    }
+
+    [Fact]
     public void ThePublishMessage_NamesTheTeamAndTheReason_AndSaysNothingWasPublished()
     {
         var message = new SigningKeyUnreadableException("cz-its", "access denied").Message;

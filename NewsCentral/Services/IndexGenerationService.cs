@@ -360,6 +360,7 @@ public class IndexGenerationService
         System.Diagnostics.Debug.WriteLine($"=== GenerateAndSaveIndex: {teamFolderName} ===");
         var index = await GenerateIndexForTeamAsync(teamFolderName);
         var result = await SaveIndexFileAsync(teamFolderName, index);
+        _background.IndexGenerated(teamFolderName);   // the key was readable: withdraw any "key unreadable" banner
         System.Diagnostics.Debug.WriteLine($"✓ Index generation complete for {teamFolderName}");
         return result;
     }
