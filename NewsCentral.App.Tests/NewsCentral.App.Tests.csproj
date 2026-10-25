@@ -43,6 +43,9 @@
     <Compile Include="..\NewsCentral\Services\EnvironmentProbe.cs" Link="App\EnvironmentProbe.cs" />
     <Compile Include="..\NewsCentral\Services\DataSeederService.cs" Link="App\DataSeederService.cs" />
     <Compile Include="..\NewsCentral\Services\UiLanguageService.cs" Link="App\UiLanguageService.cs" />
+    <Compile Include="..\NewsCentral\Services\SigningKeyUnreadableException.cs" Link="App\SigningKeyUnreadableException.cs" />
+    <Compile Include="..\NewsCentral\Services\UserNotices.cs" Link="App\UserNotices.cs" />
+    <Compile Include="..\NewsCentral\Services\BackgroundIndexRegeneration.cs" Link="App\BackgroundIndexRegeneration.cs" />
     <Compile Include="..\NewsCentral\Services\UserPreferenceStore.cs" Link="App\UserPreferenceStore.cs" />
     <Compile Include="..\NewsCentral\Services\WindowsIdentityService.cs" Link="App\WindowsIdentityService.cs" />
     <Compile Include="..\NewsCentral\Services\IStorageService.cs" Link="App\IStorageService.cs" />

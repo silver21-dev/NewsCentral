@@ -1,4 +1,4 @@
-﻿@page "/assignments"
+@page "/assignments"
 @using System.Globalization
 @using NewsCentral.Authorization
 @using NewsCentral.Services
@@ -27,6 +27,37 @@
     <div class="page-header">
         <h2>@Localizer["Assignments"]</h2>
         <p class="subtitle">@Localizer["ViewAndManageTeamAssignments"]</p>
+    </div>
+
+    @* Sticky at the top so a publish error or warning is seen even when the lists below are long. *@
+    <div class="page-alerts">
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show mt-3">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @errorMessage
+            <button type="button" class="btn-close" @onclick="() => errorMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show mt-3">
+            <i class="bi bi-check-circle me-2"></i>
+            @successMessage
+            <button type="button" class="btn-close" @onclick="() => successMessage = null"></button>
+        </div>
+    }
+
+    @* M5a: distinct from errorMessage — the publish itself succeeded, only distribution failed. TODO(i18n). *@
+    @if (!string.IsNullOrEmpty(warningMessage))
+    {
+        <div class="alert alert-warning alert-dismissible fade show mt-3">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @warningMessage
+            <button type="button" class="btn-close" @onclick="() => warningMessage = null"></button>
+        </div>
+    }
     </div>
 
     @if (isLoading)
@@ -408,33 +439,6 @@
         }
     }
 
-    @if (!string.IsNullOrEmpty(errorMessage))
-    {
-        <div class="alert alert-danger alert-dismissible fade show mt-3">
-            <i class="bi bi-exclamation-triangle me-2"></i>
-            @errorMessage
-            <button type="button" class="btn-close" @onclick="() => errorMessage = null"></button>
-        </div>
-    }
-
-    @if (!string.IsNullOrEmpty(successMessage))
-    {
-        <div class="alert alert-success alert-dismissible fade show mt-3">
-            <i class="bi bi-check-circle me-2"></i>
-            @successMessage
-            <button type="button" class="btn-close" @onclick="() => successMessage = null"></button>
-        </div>
-    }
-
-    @* M5a: distinct from errorMessage — the publish itself succeeded, only distribution failed. TODO(i18n). *@
-    @if (!string.IsNullOrEmpty(warningMessage))
-    {
-        <div class="alert alert-warning alert-dismissible fade show mt-3">
-            <i class="bi bi-exclamation-triangle me-2"></i>
-            @warningMessage
-            <button type="button" class="btn-close" @onclick="() => warningMessage = null"></button>
-        </div>
-    }
 </div>
 
 <ConfirmDialog IsVisible="showPublishConfirm"
@@ -456,6 +460,12 @@
                OnCancel="CancelDeleteConfirm" />
 
 <style>
+.page-alerts {
+    position: sticky;
+    top: 0;
+    z-index: 1030;
+}
+
 .my-assignments-container {
     padding: 30px;
     max-width: 1200px;

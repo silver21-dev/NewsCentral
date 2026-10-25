@@ -241,6 +241,8 @@ public static class MauiProgram
         builder.Services.AddSingleton<TeamService>();
         builder.Services.AddSingleton<UserService>();
         builder.Services.AddSingleton<PosterGenerationService>();
+        builder.Services.AddSingleton<UserNotices>();
+        builder.Services.AddSingleton<BackgroundIndexRegeneration>();
         builder.Services.AddSingleton<IndexGenerationService>();
         builder.Services.AddSingleton<PresentationService>();
         builder.Services.AddSingleton<TeamContextService>();

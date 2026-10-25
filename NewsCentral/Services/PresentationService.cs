@@ -509,16 +509,8 @@ public class PresentationService
         // ── 5. Regenerate indexes for affected target teams (after the copy moves) ──
         foreach (var targetTeam in targetTeamsWithPublished)
         {
-            try
-            {
-                await _indexGenerationService.GenerateAndSaveIndexAsync(targetTeam);
+            if (await _indexGenerationService.RegenerateInBackgroundAsync(targetTeam))
                 System.Diagnostics.Debug.WriteLine($"✓ Index regenerated for {targetTeam}");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine(
-                    $"⚠ WARNING: Index regeneration failed for {targetTeam}: {ex.Message}");
-            }
         }
 
         System.Diagnostics.Debug.WriteLine($"=== DeletePresentation complete ===");
@@ -548,17 +540,9 @@ public class PresentationService
 
             foreach (var targetTeam in targetTeams)
             {
-                try
-                {
-                    await _indexGenerationService.GenerateAndSaveIndexAsync(targetTeam);
+                if (await _indexGenerationService.RegenerateInBackgroundAsync(targetTeam))
                     System.Diagnostics.Debug.WriteLine(
                         $"  ✓ Index regenerated for {targetTeam}");
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"  ⚠ WARNING: Index regen failed for {targetTeam}: {ex.Message}");
-                }
             }
         }
         catch (Exception ex)

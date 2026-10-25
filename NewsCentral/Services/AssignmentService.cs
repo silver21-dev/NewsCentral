@@ -323,20 +323,12 @@ public class AssignmentService
         // IndexGenerationService.GenerateAndSaveIndexAsync pushes to blob automatically.
         if (wasPublished && !string.IsNullOrEmpty(targetTeam))
         {
-            try
-            {
-                System.Diagnostics.Debug.WriteLine(
-                    $"→ Regenerating index for target team: {targetTeam}");
-                await _indexGenerationService.GenerateAndSaveIndexAsync(targetTeam);
+            // Non-fatal: the assignment is already soft-deleted and the index can be regenerated from the admin
+            // UI. An unreadable signing key is shown to the user (see BackgroundIndexRegeneration).
+            System.Diagnostics.Debug.WriteLine(
+                $"→ Regenerating index for target team: {targetTeam}");
+            if (await _indexGenerationService.RegenerateInBackgroundAsync(targetTeam))
                 System.Diagnostics.Debug.WriteLine($"  ✓ Index regenerated for {targetTeam}");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine(
-                    $"  ⚠ WARNING: Index regeneration failed: {ex.Message}");
-                // Non-fatal — the assignment is already soft-deleted;
-                // index can be manually regenerated from the admin UI.
-            }
         }
         else
         {

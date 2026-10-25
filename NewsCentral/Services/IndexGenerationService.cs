@@ -20,6 +20,7 @@ public class IndexGenerationService
     private readonly AuthenticationService _authService;
     private readonly EcdsaSignatureService _ecdsa;
     private readonly TeamKeyService _keys;
+    private readonly BackgroundIndexRegeneration _background;
 
     private const string IndexFileName = "index.json";
 
@@ -29,8 +30,10 @@ public class IndexGenerationService
         IServiceProvider serviceProvider,
         AuthenticationService authService,
         EcdsaSignatureService ecdsa,
-        TeamKeyService keys)
+        TeamKeyService keys,
+        BackgroundIndexRegeneration background)
     {
+        _background       = background;
         _storage          = storage;
         _blobDistribution = blobDistribution;
         _serviceProvider  = serviceProvider;
@@ -38,6 +41,13 @@ public class IndexGenerationService
         _ecdsa            = ecdsa;
         _keys             = keys;
     }
+
+    /// <summary>
+    /// Regenerates a team's index after another operation (a delete or an edit) and never throws. An unreadable
+    /// signing key is reported to the user and the audit log; the existing index stays. True when it was regenerated.
+    /// </summary>
+    public Task<bool> RegenerateInBackgroundAsync(string teamFolderName) =>
+        _background.RunAsync(teamFolderName, () => GenerateAndSaveIndexAsync(teamFolderName));
 
     // ── Index path ───────────────────────────────────────────────────────────
 
@@ -565,22 +575,4 @@ public sealed class RegenerateAllResult
     /// <summary>One "{teamFolderName}: {error}" entry per team whose index could not be generated at all
     /// (for example an unreadable signing key). Nothing was written for these teams.</summary>
     public List<string> Failures { get; set; } = new();
-}
-
-/// <summary>
-/// The team's signing key exists but could not be read. Index generation refuses rather than publishing
-/// an unsigned index; the message names the team and the reason and is safe to show to the user.
-/// </summary>
-public sealed class SigningKeyUnreadableException : InvalidOperationException
-{
-    public string TeamFolderName { get; }
-    public string Reason { get; }
-
-    public SigningKeyUnreadableException(string teamFolderName, string reason)
-        : base($"The signing key for team '{teamFolderName}' could not be read ({reason}). " +
-               "Nothing was published and the existing index is unchanged. Ask an administrator to restore access to the key.")
-    {
-        TeamFolderName = teamFolderName;
-        Reason = reason;
-    }
 }

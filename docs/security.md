@@ -144,6 +144,12 @@ app only warns about drift.
   over it. Keys are migrated from the old location with a verified copy (byte-for-byte) before the old file is
   deleted; a failure keeps the old file in use and tells the administrator; a conflict never overwrites.
   **Rotate every team key after migration**: the old files were exposed.
+  Where the user sees an unreadable key: a failed publish shows "Signing key for <team> could not be read: <reason>.
+  Nothing was published ..." at the top of the Assignments page (single publish) or in the bulk result (bulk publish);
+  when the index regeneration that follows an assignment delete or a presentation update/delete hits it, the operation
+  still completes and a banner on every page says "The distributed index for <team> was not updated because its signing
+  key could not be read." (also audited as `IndexRegenerationFailed`). The old index stays; an unsigned one is never
+  written.
 - **users.json.** Administrator-writable only after provisioning. Login's `LastLogin` write is best effort, the UI
   language lives in a per-user local store, and the password page explains that an administrator must change it.
   User management (create/update/UPN/team membership/roles/delete) requires a SystemAdmin, enforced in

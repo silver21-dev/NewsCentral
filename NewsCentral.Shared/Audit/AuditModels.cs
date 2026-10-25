@@ -33,6 +33,7 @@ public static class AuditEvents
 
     public const string AssignmentPublished = nameof(AssignmentPublished);
     public const string AssignmentDeleted = nameof(AssignmentDeleted);
+    public const string IndexRegenerationFailed = nameof(IndexRegenerationFailed);
 
     public const string EnvironmentAdded = nameof(EnvironmentAdded);
     public const string EnvironmentDeleted = nameof(EnvironmentDeleted);

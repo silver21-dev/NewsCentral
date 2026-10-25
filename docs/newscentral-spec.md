@@ -89,7 +89,7 @@ fingerprint**.
 `UserRolesChanged`, `UserTeamAssigned`, `UserTeamRemoved`, `UserUpnChanged`, `PasswordChanged`; `KeyGenerated`
 (team had no key), `KeyRotated` (a key was replaced), `KeyMigrated`; `PresentationCreated`,
 `PresentationDuplicated`, `PresentationUpdated`, `PresentationDeleted`; `AssignmentPublished`, `AssignmentDeleted`
-(there is no unpublish operation); `EnvironmentAdded`, `EnvironmentDeleted` (removed from the environment list),
+(there is no unpublish operation); `IndexRegenerationFailed` (outcome Failure, target = team, detail = reason: the index after a delete or edit was not updated because the signing key was unreadable); `EnvironmentAdded`, `EnvironmentDeleted` (removed from the environment list),
 `EnvironmentInitialized`, `EnvironmentSettingsChanged` (changed field names only); `AuditEnabled`, `AuditDisabled`.
 
 **Toggling.** `AuditDisabled` is written **before** logging stops and `AuditEnabled` **after** it starts
@@ -99,6 +99,17 @@ outcome `Failure` ("not applied") is added.
 **Failure.** When enabled and a write fails, the action still completes (auditing never blocks anything); the
 failure is logged and a persistent banner in the main layout reads "Audit log not writable — actions are not being
 recorded" until a later write succeeds.
+
+## Unreadable signing key: where it is shown
+
+`UserNotices` (singleton) carries messages from work done behind an operation that itself succeeded; `MainLayout`
+renders them as dismissible banners on every page. `IndexGenerationService.RegenerateInBackgroundAsync` (used after an
+assignment delete and after a presentation update or delete) never throws: an unreadable signing key becomes the
+warning "The distributed index for <team> was not updated because its signing key could not be read." plus an
+`IndexRegenerationFailed` audit line, the old index stays and no unsigned index is written; other failures are logged
+as before. Publishing fails up front instead (`EnsureSigningKeyUsableAsync`) with "Signing key for <team> could not be
+read: <reason>. Nothing was published ...", shown at the top of the Assignments page (sticky) or in the bulk result.
+The Index Management repair summary and the Regenerate All result list per-team failures themselves.
 
 ## users.json write restriction
 
