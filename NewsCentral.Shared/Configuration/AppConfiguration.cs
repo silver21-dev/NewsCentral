@@ -73,5 +73,12 @@ public class AppConfiguration
     public bool? AuditEnabledOverride =>
         bool.TryParse(_configuration["Audit:Enabled"], out var b) ? b : null;
 
+    /// <summary>
+    /// Ui:AllowedDomains (registry Ui\AllowedDomains, REG_SZ): the domains the More information field of a presentation
+    /// accepts, ";"- or ","-separated. Empty = no link is accepted. Independent of NewsViewer's own setting of the same
+    /// name (the fleet keeps the two aligned); parsed by MoreInfoUrlPolicy.ParseAllowedDomains.
+    /// </summary>
+    public string UiAllowedDomains => _configuration["Ui:AllowedDomains"] ?? string.Empty;
+
     public string HmacSecretKey => _configuration["Hmac:SecretKey"] ?? string.Empty;
 }

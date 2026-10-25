@@ -1,5 +1,6 @@
 @page "/presentations/edit/{presentationId}"
 @using Microsoft.Extensions.Localization
+@using NewsCentral.Components.Shared
 @using NewsCentral.Models
 @using NewsCentral.Services
 @inject PresentationService PresentationService
@@ -62,7 +63,7 @@
 
             <div class="form-group">
                 <label>@Localizer["MoreInfoUrlLabel"]</label>
-                <input type="text" @bind="moreUrl" class="form-control" placeholder="https://example.com/more-info" />
+                <MoreInfoUrlField @bind-Value="moreUrl" Placeholder="https://example.com/more-info" />
             </div>
 
             <!-- Display Type Checkboxes -->

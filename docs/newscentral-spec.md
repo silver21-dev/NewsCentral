@@ -100,6 +100,24 @@ outcome `Failure` ("not applied") is added.
 failure is logged and a persistent banner in the main layout reads "Audit log not writable — actions are not being
 recorded" until a later write succeeds.
 
+## More information link: allowed domains (S04a)
+
+The More information field of `CreatePresentation.razor` and `EditPresentation.razor` is the shared component
+`MoreInfoUrlField`, backed by `MoreInfoFieldState` (NewsCentral.Shared, tested) and `MoreInfoUrlPolicy`, the rule NewsViewer
+enforces, against NewsCentral's own `Ui:AllowedDomains` (registry `Ui\AllowedDomains`, REG_SZ; independent of
+NewsViewer's setting, keep both aligned; not part of `environment.json`, not in the fleet export).
+
+- The value is checked when it is committed (leaving the field or Enter), not per keystroke. Empty is always accepted.
+- Allowed: the normalised form (`uri.AbsoluteUri`) is stored and shown. Rejected: nothing reaches the model, the field
+  goes back to the last accepted value (empty on a new presentation) and the reason shows under it until the next
+  accepted value: no allowed domains configured; only https:// links; this domain is not allowed (with the list); a full
+  link starting with https://; no user name or password in a link. Saving is never blocked.
+- Edit page, stored link no longer allowed (the list changed): it is shown and kept, with a warning that viewers will see the
+  button grayed out; it stays unless the author changes it. Saving works.
+- Open-link button next to the field: enabled only when the current value is allowed; its tooltip is the exact URL; a
+  click opens it in the default browser. Disabled has no tooltip.
+- Index generation, publishing and duplication are unchanged: NewsViewer remains the enforcing side.
+
 ## Unreadable signing key: where it is shown
 
 `UserNotices` (singleton) carries messages from work done behind an operation that itself succeeded; `MainLayout`

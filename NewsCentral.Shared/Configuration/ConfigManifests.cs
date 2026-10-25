@@ -190,6 +190,9 @@ public static class ConfigManifests
                 "true | false (registry: DWORD 0/1). Policy override for the audit log: when present it wins over " +
                 "the environment's own Audit setting and the Environment Management toggle is shown locked " +
                 "(\"set by policy\"). Absent = the environment setting applies (default on)"),
+            Key("Ui:AllowedDomains", "", @"Ui\AllowedDomains", RegistryValueType.RegSz,
+                ControlKind.Text, OverridableState.Overridable,
+                "Domains the More information field of a presentation accepts, separated by ';' (or ','), e.g. contoso.com;intranet.contoso.net. https only; the host must equal an entry or be a subdomain of it. Empty = no link is accepted. Independent of NewsViewer's own Ui\\AllowedDomains: keep both aligned."),
             Key("Authentication:UseMockUPN", "false", @"Authentication\UseMockUPN", RegistryValueType.RegSz,
                 ControlKind.Toggle, OverridableState.Overridable,
                 "true | false (registry: REG_SZ); Debug builds only — ignored in Release"),

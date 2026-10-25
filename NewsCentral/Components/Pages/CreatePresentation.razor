@@ -1,5 +1,6 @@
 @page "/presentations/create"
 @using Microsoft.Extensions.Localization
+@using NewsCentral.Components.Shared
 @inject Services.PresentationService PresentationService
 @inject Services.TeamContextService TeamContext
 @inject Services.AuthenticationService AuthService
@@ -59,8 +60,7 @@
 
                 <div class="form-group">
                     <label>@Localizer["MoreInfoUrlLabel"]</label>
-                    <input type="text" @bind="moreUrl" class="form-control"
-                           placeholder="https://company.com/safety (optional)" />
+                    <MoreInfoUrlField @bind-Value="moreUrl" Placeholder="https://company.com/safety (optional)" />
                 </div>
 
                 <div class="form-group">

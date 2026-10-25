@@ -319,4 +319,25 @@
   <data name="InvalidImageType" xml:space="preserve">
     <value>Please select a valid image file</value>
   </data>
+  <data name="MoreInfoNoAllowedDomains" xml:space="preserve">
+    <value>More information links are disabled: no allowed domains are configured.</value>
+  </data>
+  <data name="MoreInfoSchemeNotHttps" xml:space="preserve">
+    <value>Only https:// links are allowed.</value>
+  </data>
+  <data name="MoreInfoHostNotAllowed" xml:space="preserve">
+    <value>This domain is not allowed. Allowed: {0}.</value>
+  </data>
+  <data name="MoreInfoNotAbsolute" xml:space="preserve">
+    <value>Enter a full link starting with https://.</value>
+  </data>
+  <data name="MoreInfoUserInfo" xml:space="preserve">
+    <value>A link must not contain a user name or password.</value>
+  </data>
+  <data name="MoreInfoNotAllowedWarning" xml:space="preserve">
+    <value>This link is not allowed by the current settings; viewers will see the button grayed out.</value>
+  </data>
+  <data name="MoreInfoOpenLink" xml:space="preserve">
+    <value>Open link</value>
+  </data>
 </root>

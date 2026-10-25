@@ -291,7 +291,9 @@
     Ignored while no FrameColor is set. NewsViewer only. Example: -FrameTextColor '#FFD700'
 
 .PARAMETER AllowedDomains
-    Domains the NewsViewer poster's "More information" button may open (Ui\AllowedDomains, REG_SZ), separated by
+    Valid for NewsViewer and NewsCentral. The two settings are independent: set both to the same value (same GPO).
+    NewsViewer: domains the poster's "More information" button may open. NewsCentral: domains the More information
+    field of a presentation accepts (Ui\AllowedDomains, REG_SZ), separated by
     ';' (',' also works). Only https links qualify, and the link's host must equal an entry or be a subdomain of
     it (contoso.com allows intranet.contoso.com, never evilcontoso.com). A leading '*.' or '.' on an entry is
     ignored. Without a value the button is disabled for every link, so deploy this no later than the NewsViewer
@@ -618,7 +620,7 @@ $newParameterNames = @(
     "DefaultWallpaperPath", "WallpaperStyle", "WallpaperBackgroundColor",
     "LogicalDayStartHour", "Theme", "TelemetryUploadEnabled", "LogLevel", "EventLogLevel",
     "ViewerTasksNewsViewerPath", "ViewerTasksMode", "RegisterEventSource",
-    "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions", "FrameColor", "FrameTextColor", "AllowedDomains"
+    "AzureUseWinHttpProxy", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions", "FrameColor", "FrameTextColor"
 )
 
 # Full parameter -> allowed-component map for the two fleet components. Covers every
@@ -646,6 +648,12 @@ $componentAllowedParams = @{
         "BypassDailyGate", "BypassImageIntegrityCheck", "LogicalDayStartHour", "Theme",
         "WallpaperStyle", "WallpaperBackgroundColor", "Active", "ShowDeliveredImages", "NotifyNewContent", "ShowInRemoteSessions", "FrameColor", "FrameTextColor", "AllowedDomains"
     )
+}
+
+# -AllowedDomains (Ui\AllowedDomains) exists for exactly two components: NewsViewer (enforces it) and NewsCentral
+# (validates the More information field). NewsViewer is covered by the map below; the others are refused here.
+if ($ComponentName -in @("NewsService", "NewsTester") -and $PSBoundParameters.ContainsKey("AllowedDomains")) {
+    throw "Parameter(s) AllowedDomains are valid only for -ComponentName NewsViewer or NewsCentral."
 }
 
 if ($ComponentName -in @("NewsCentral", "NewsTester")) {

@@ -1,0 +1,90 @@
+@using Microsoft.Extensions.Localization
+@using NewsCentral.Configuration
+@using NewsCentral.Ui
+@inject AppConfiguration Config
+@inject IStringLocalizer<SharedResource> Localizer
+
+@* The More information field of a presentation. The value is checked when it is committed (leaving the field or
+   pressing Enter), never per keystroke, against this app's Ui:AllowedDomains with the same rule NewsViewer enforces.
+   An allowed link is stored in its normalised form; a rejected one is not stored, the field goes back to the last
+   accepted value and the reason shows under it. Saving is never blocked. *@
+
+<div class="more-info-field">
+    <div class="more-info-row">
+        <input type="text" @key="inputKey" value="@state.Value" @onchange="OnCommitted" class="form-control"
+               placeholder="@Placeholder" />
+        @if (state.CanOpen)
+        {
+            <button type="button" class="btn btn-outline-secondary more-info-open" @onclick="OpenLink"
+                    title="@state.OpenUrl" aria-label="@Localizer["MoreInfoOpenLink"]">
+                <i class="bi bi-box-arrow-up-right"></i> @Localizer["MoreInfoOpenLink"]
+            </button>
+        }
+        else
+        {
+            <button type="button" class="btn btn-outline-secondary more-info-open" disabled
+                    aria-label="@Localizer["MoreInfoOpenLink"]">
+                <i class="bi bi-box-arrow-up-right"></i> @Localizer["MoreInfoOpenLink"]
+            </button>
+        }
+    </div>
+
+    @if (state.MessageKey is not null)
+    {
+        <small class="text-danger d-block mt-1">@MessageText</small>
+    }
+    else if (state.ExistingValueNotAllowed)
+    {
+        <small class="text-warning d-block mt-1">@Localizer["MoreInfoNotAllowedWarning"]</small>
+    }
+</div>
+
+<style>
+    .more-info-row { display: flex; gap: 8px; align-items: center; }
+    .more-info-row .form-control { flex: 1 1 auto; }
+    .more-info-open { white-space: nowrap; }
+</style>
+
+@code {
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public string? Placeholder { get; set; }
+
+    private MoreInfoFieldState state = new(null, null);
+    private bool initialised;
+    // Changing the key re-creates the input, which is how a rejected entry is wiped from the box (Blazor would
+    // otherwise keep the typed text, because the bound value did not change).
+    private int inputKey;
+
+    protected override void OnParametersSet()
+    {
+        if (initialised) return;
+        initialised = true;
+        var domains = MoreInfoUrlPolicy.ParseAllowedDomains(Config.UiAllowedDomains).Domains;
+        state = new MoreInfoFieldState(domains, Value);
+    }
+
+    private string MessageText => state.MessageKey is { } key
+        ? (key == MoreInfoFieldState.KeyHostNotAllowed
+            ? string.Format(Localizer[key].Value, state.AllowedDomainsText)
+            : Localizer[key].Value)
+        : string.Empty;
+
+    private async Task OnCommitted(ChangeEventArgs e)
+    {
+        var accepted = state.Commit(e.Value?.ToString());
+        inputKey++;
+        if (accepted)
+            await ValueChanged.InvokeAsync(state.Value);
+    }
+
+    private void OpenLink()
+    {
+        // OpenUrl is the policy's own output, null unless the value is allowed.
+        if (state.OpenUrl is { } url)
+        {
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+            catch { /* no browser available: nothing to do */ }
+        }
+    }
+}

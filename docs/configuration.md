@@ -133,6 +133,9 @@ HKLM\Software\[Company]\NewsCentral\NewsCentral\
 │                                   with a Warning log — enforced server-side, not only in the UI)
 │       UseMockUPN        DWORD     (Debug builds only — ignored in Release; not for registry deployment)
 │       MockUPN           REG_SZ    (Debug builds only — ignored in Release; not for registry deployment)
+├── Ui\
+│       AllowedDomains    REG_SZ    (domains the More information field of a presentation accepts, ';'-separated; default empty = no link is accepted.
+│                                   INDEPENDENT of NewsViewer's Ui\AllowedDomains - keep both aligned; set with Set-RegistryOverrides.ps1 -AllowedDomains)
 ├── Audit\
 │       Enabled           DWORD     (0/1; policy override for the audit log. When PRESENT it wins over the
 │                                   environment's own audit.enabled and the Environment Management toggle is

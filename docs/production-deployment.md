@@ -297,6 +297,8 @@ environment administrator does, once, with `scripts/Set-AuthoringAcl.ps1` (eleva
 5. Confirm the **folder-permission warnings** on Key Management and Environment Management are gone. They are
    warnings only; the audit-folder check can over-report on a folder that was not provisioned by the script.
 
+Also deliver `HKLM\Software\<Company>\NewsCentral\NewsCentral\Ui\AllowedDomains` (REG_SZ) with the **same value** as NewsViewer's `Ui\AllowedDomains` (S04), in the same GPO. The two settings are independent: NewsViewer enforces its own, and NewsCentral uses its own to refuse a More information link that viewers would show grayed out, at entry time. An empty NewsCentral value rejects every new link.
+
 Also deliver `HKLM\Software\<Company>\NewsCentral\NewsCentral\Audit\Enabled` (DWORD; `docs/configuration.md`, or
 `Set-RegistryOverrides.ps1 -ComponentName NewsCentral -AuditEnabled`) only if policy must force auditing on or off.
 

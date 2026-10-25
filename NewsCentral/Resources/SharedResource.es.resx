@@ -104,4 +104,25 @@
   <data name="PleaseSelectImage" xml:space="preserve"><value>Por favor seleccione una imagen</value></data>
   <data name="ImageTooLarge" xml:space="preserve"><value>La imagen debe ser menor de 10 MB</value></data>
   <data name="InvalidImageType" xml:space="preserve"><value>Por favor seleccione un archivo de imagen válido</value></data>
+  <data name="MoreInfoNoAllowedDomains" xml:space="preserve">
+    <value>Los enlaces de más información están desactivados: no hay dominios permitidos configurados.</value>
+  </data>
+  <data name="MoreInfoSchemeNotHttps" xml:space="preserve">
+    <value>Solo se permiten enlaces con https://.</value>
+  </data>
+  <data name="MoreInfoHostNotAllowed" xml:space="preserve">
+    <value>Este dominio no está permitido. Permitidos: {0}.</value>
+  </data>
+  <data name="MoreInfoNotAbsolute" xml:space="preserve">
+    <value>Introduzca un enlace completo que empiece por https://.</value>
+  </data>
+  <data name="MoreInfoUserInfo" xml:space="preserve">
+    <value>Un enlace no puede contener nombre de usuario ni contraseña.</value>
+  </data>
+  <data name="MoreInfoNotAllowedWarning" xml:space="preserve">
+    <value>La configuración actual no permite este enlace; los espectadores verán el botón atenuado.</value>
+  </data>
+  <data name="MoreInfoOpenLink" xml:space="preserve">
+    <value>Abrir enlace</value>
+  </data>
 </root>

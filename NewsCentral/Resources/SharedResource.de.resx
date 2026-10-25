@@ -104,4 +104,25 @@
   <data name="PleaseSelectImage" xml:space="preserve"><value>Bitte wählen Sie ein Bild aus</value></data>
   <data name="ImageTooLarge" xml:space="preserve"><value>Bild muss kleiner als 10 MB sein</value></data>
   <data name="InvalidImageType" xml:space="preserve"><value>Bitte wählen Sie eine gültige Bilddatei</value></data>
+  <data name="MoreInfoNoAllowedDomains" xml:space="preserve">
+    <value>Links zu weiteren Informationen sind deaktiviert: Es sind keine erlaubten Domains konfiguriert.</value>
+  </data>
+  <data name="MoreInfoSchemeNotHttps" xml:space="preserve">
+    <value>Nur Links mit https:// sind erlaubt.</value>
+  </data>
+  <data name="MoreInfoHostNotAllowed" xml:space="preserve">
+    <value>Diese Domain ist nicht erlaubt. Erlaubt: {0}.</value>
+  </data>
+  <data name="MoreInfoNotAbsolute" xml:space="preserve">
+    <value>Geben Sie einen vollständigen Link ein, der mit https:// beginnt.</value>
+  </data>
+  <data name="MoreInfoUserInfo" xml:space="preserve">
+    <value>Ein Link darf keinen Benutzernamen und kein Kennwort enthalten.</value>
+  </data>
+  <data name="MoreInfoNotAllowedWarning" xml:space="preserve">
+    <value>Dieser Link ist nach den aktuellen Einstellungen nicht erlaubt; Betrachter sehen die Schaltfläche ausgegraut.</value>
+  </data>
+  <data name="MoreInfoOpenLink" xml:space="preserve">
+    <value>Link öffnen</value>
+  </data>
 </root>
