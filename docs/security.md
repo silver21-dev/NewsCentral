@@ -146,8 +146,9 @@ app only warns about drift.
   **Rotate every team key after migration**: the old files were exposed.
 - **users.json.** Administrator-writable only after provisioning. Login's `LastLogin` write is best effort, the UI
   language lives in a per-user local store, and the password page explains that an administrator must change it.
-  Non-admin write paths that remain in the UI are listed in `docs/newscentral-spec.md` (team administrators manage
-  users and team roles).
+  User management (create/update/UPN/team membership/roles/delete) requires a SystemAdmin, enforced in
+  `UserService` and audited as a Failure when refused; others see the Users page read-only
+  (`docs/newscentral-spec.md`).
 - **Audit log.** Append-only JSON lines of logins, user/role/key/presentation/assignment/environment/audit-setting
   events (never passwords, hashes, private keys or content); `Audit:Enabled` defaults on and a registry policy value
   can force it. A failed write never blocks an action; it raises a banner.

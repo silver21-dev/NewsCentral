@@ -13,8 +13,16 @@
 <div class="page-container">
     <div class="page-header">
         <h1>@Localizer["PageTitle"]</h1>
-        <button @onclick="ShowCreateDialog" class="btn btn-primary">@Localizer["CreateUser"]</button>
+        @if (CanManageUsers)
+        {
+            <button @onclick="ShowCreateDialog" class="btn btn-primary">@Localizer["CreateUser"]</button>
+        }
     </div>
+
+    @if (!CanManageUsers)
+    {
+        <div class="alert alert-info">@Localizer["ReadOnlyNotice"]</div>
+    }
 
     @if (isLoading)
     {
@@ -51,7 +59,7 @@
                             @if (!string.IsNullOrEmpty(user.UPN))
                             {
                                 <span class="upn-badge">@user.UPN</span>
-                                <span class="auto-login-indicator" title="Windows auto-login enabled">🔓</span>
+                                <span class="auto-login-indicator" title="Windows auto-login enabled">đź”“</span>
                             }
                             else
                             {
@@ -89,14 +97,17 @@
                         }
                     </div>
 
-                    <div class="user-actions">
-                        <button @onclick="() => EditUser(user)" class="btn btn-secondary">@Localizer["Edit"]</button>
-                        <button @onclick="() => ManageTeams(user)" class="btn btn-primary">@Localizer["ManageTeams"]</button>
-                        @if (AuthService.IsSystemAdmin() && user.UserID != AuthService.GetCurrentUser()?.UserID)
-                        {
-                            <button @onclick="() => DeleteUser(user)" class="btn btn-danger">@Localizer["Delete"]</button>
-                        }
-                    </div>
+                    @if (CanManageUsers)
+                    {
+                        <div class="user-actions">
+                            <button @onclick="() => EditUser(user)" class="btn btn-secondary">@Localizer["Edit"]</button>
+                            <button @onclick="() => ManageTeams(user)" class="btn btn-primary">@Localizer["ManageTeams"]</button>
+                            @if (user.UserID != AuthService.GetCurrentUser()?.UserID)
+                            {
+                                <button @onclick="() => DeleteUser(user)" class="btn btn-danger">@Localizer["Delete"]</button>
+                            }
+                        </div>
+                    }
                 </div>
             }
         </div>
@@ -563,10 +574,12 @@
         await LoadData();
     }
 
-    // SystemAdmin may administer every team; a TeamAdmin only the team(s) where
-    // they hold the TeamAdmin role. Controls which role checkboxes are editable.
-    private bool CanAdministerTeam(string teamId) =>
-        AuthService.HasRole(teamId, "TeamAdmin");
+    // users.json is writable by environment administrators only, and UserService refuses every other caller.
+    // Everyone else gets the list read-only, with no write controls.
+    private bool CanManageUsers => AuthService.IsSystemAdmin();
+
+    // A SystemAdmin administers every team, so every role checkbox in the dialog is editable.
+    private bool CanAdministerTeam(string teamId) => CanManageUsers;
 
     private async Task LoadData()
     {

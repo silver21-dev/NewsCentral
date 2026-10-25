@@ -108,11 +108,14 @@ language works and survives a restart (per-user local store `user-preferences.js
 `user-environments.json` in `%LOCALAPPDATA%`); the Change Password page says "Your password can only be changed by
 an administrator."
 
-**Non-administrator write paths to users.json.** Besides the self-service ones above, a **TeamAdmin who is not a
-SystemAdmin** can reach these through `UserService` / the Users page: create a user (not a SystemAdmin), update a
-user, change a user's UPN, assign/remove a user to/from a team they administer, and change roles in a team they
-administer. Under the restricted ACL those writes fail with an access error for such a user; they work for system
-administrators. `ChangePasswordAsync` for one's own account is the third non-admin path (handled as described).
+**User management is SystemAdmin-only (S02a).** A TeamAdmin who could write users.json could make themselves a
+SystemAdmin, so every `UserService` method that writes it (create user, update user, change UPN, assign/remove a
+team member, change team roles, delete user) requires `IsSystemAdmin` and throws `UnauthorizedAccessException`
+otherwise; the refusal is recorded in the audit log with outcome Failure. The check lives in the service, not only
+in the UI. On the Users page a non-SystemAdmin sees the list read-only, with no write controls and the message
+"You don't have access to this environment's user list. Ask an administrator to add you to the NewsCentral authors
+group." The self-service paths are unchanged (best-effort `LastLogin`, language in the local store, own password
+change explained as above).
 
 ## Role Model
 

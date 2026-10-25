@@ -57,4 +57,5 @@
   <data name="MustHaveRole" xml:space="preserve"><value>El usuario debe tener al menos un rol en el equipo</value></data>
   <data name="UsernameDisplayNameRequired" xml:space="preserve"><value>El nombre de usuario y el nombre para mostrar son obligatorios</value></data>
   <data name="PasswordRequired" xml:space="preserve"><value>La contraseña es obligatoria para los nuevos usuarios</value></data>
+  <data name="ReadOnlyNotice" xml:space="preserve"><value>No tiene acceso a la lista de usuarios de este entorno. Pida a un administrador que le aĂ±ada al grupo de autores de NewsCentral.</value></data>
 </root>

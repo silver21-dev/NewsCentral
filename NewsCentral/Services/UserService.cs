@@ -28,23 +28,24 @@ public class UserService
         _authService = authService;
         _audit       = audit ?? NullAuditLog.Instance;
 
-        // Primary JsonFileRepository constructor — no [Obsolete] warning
+        // Primary JsonFileRepository constructor â€” no [Obsolete] warning
         _userRepo = new JsonFileRepository<UsersCollection>(_storage, "config", "");
     }
 
-    // ── Authorization helpers ─────────────────────────────────────────────────
+    // â”€â”€ Authorization helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-    // True if the user is a SystemAdmin or holds TeamAdmin in at least one team.
-    private static bool IsTeamAdminOfAnyTeam(User user) =>
-        user.IsSystemAdmin || user.TeamRoles.Any(tr => tr.Roles.Contains("TeamAdmin"));
+    // Every method that writes users.json starts here. users.json is writable by environment administrators
+    // only (Set-AuthoringAcl.ps1), and a TeamAdmin who could edit it could make themselves a SystemAdmin, so
+    // the rule is enforced in the service and not only by hiding controls.
+    private User RequireSystemAdmin(string action)
+    {
+        var currentUser = _authService.GetCurrentUser();
+        if (currentUser == null || !currentUser.IsSystemAdmin)
+            throw new UnauthorizedAccessException($"Only a SystemAdmin can {action}");
+        return currentUser;
+    }
 
-    // True if the user may administer the given team: SystemAdmin (any team) or
-    // TeamAdmin of that specific team.
-    private static bool CurrentUserAdministersTeam(User user, string teamId) =>
-        user.IsSystemAdmin ||
-        user.TeamRoles.Any(tr => tr.TeamID == teamId && tr.Roles.Contains("TeamAdmin"));
-
-    // ── Queries ──────────────────────────────────────────────────────────────
+    // â”€â”€ Queries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public async Task<List<User>> GetAllUsersAsync()
     {
@@ -65,7 +66,7 @@ public class UserService
             u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
     }
 
-    // ── UPN helpers ───────────────────────────────────────────────────────────
+    // â”€â”€ UPN helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public Task UpdateUserUPNAsync(string userId, string? upn) =>
         _audit.RunAsync(AuditEvents.UserUpnChanged, userId, () => UpdateUserUPNCoreAsync(userId, upn),
@@ -73,6 +74,7 @@ public class UserService
 
     private async Task UpdateUserUPNCoreAsync(string userId, string? upn)
     {
+        RequireSystemAdmin("change a user's UPN");
         var usersCollection = await _userRepo.GetByIdAsync("users")
             ?? throw new InvalidOperationException("Users collection not found");
 
@@ -100,6 +102,7 @@ public class UserService
             {
                 await _audit.RunAsync(AuditEvents.UserUpnChanged, newUser.UserID, async () =>
                 {
+                    RequireSystemAdmin("change a user's UPN");
                     newUser.UPN = upn.Trim();
                     usersCollection!.LastModified = DateTime.UtcNow;
                     await _userRepo.UpdateAsync(usersCollection);
@@ -116,7 +119,7 @@ public class UserService
         await UpdateUserUPNAsync(userId, upn);
     }
 
-    // ── CRUD ─────────────────────────────────────────────────────────────────
+    // â”€â”€ CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public Task<User> CreateUserAsync(
         string username, string email, string displayName,
@@ -130,12 +133,7 @@ public class UserService
         string username, string email, string displayName,
         string password, bool isSystemAdmin)
     {
-        var currentUser = _authService.GetCurrentUser();
-        if (currentUser == null || (!currentUser.IsSystemAdmin && !IsTeamAdminOfAnyTeam(currentUser)))
-            throw new UnauthorizedAccessException("Only SystemAdmin or TeamAdmin can create users");
-
-        if (isSystemAdmin && !currentUser.IsSystemAdmin)
-            throw new UnauthorizedAccessException("Only SystemAdmin can create SystemAdmin users");
+        var currentUser = RequireSystemAdmin("create users");
 
         var existing = await GetUserByUsernameAsync(username);
         if (existing != null)
@@ -174,9 +172,7 @@ public class UserService
     private async Task<User> UpdateUserCoreAsync(
         string userId, string email, string displayName, bool isActive)
     {
-        var currentUser = _authService.GetCurrentUser();
-        if (currentUser == null || (!currentUser.IsSystemAdmin && !IsTeamAdminOfAnyTeam(currentUser)))
-            throw new UnauthorizedAccessException("Only SystemAdmin or TeamAdmin can update users");
+        var currentUser = RequireSystemAdmin("update users");
 
         var usersCollection = await _userRepo.GetByIdAsync("users")
             ?? throw new InvalidOperationException("Users collection not found");
@@ -184,8 +180,6 @@ public class UserService
         var user = usersCollection.Users.FirstOrDefault(u => u.UserID == userId)
             ?? throw new InvalidOperationException($"User {userId} not found");
 
-        if (user.IsSystemAdmin && !currentUser.IsSystemAdmin)
-            throw new UnauthorizedAccessException("Only SystemAdmin can modify a SystemAdmin user");
 
         user.Email       = email;
         user.DisplayName = displayName;
@@ -239,9 +233,7 @@ public class UserService
 
     private async Task<bool> DeleteUserCoreAsync(string userId)
     {
-        var currentUser = _authService.GetCurrentUser();
-        if (currentUser == null || !currentUser.IsSystemAdmin)
-            throw new UnauthorizedAccessException("Only SystemAdmin can delete users");
+        var currentUser = RequireSystemAdmin("delete users");
 
         if (currentUser.UserID == userId)
             throw new InvalidOperationException("Cannot delete your own account");
@@ -259,7 +251,7 @@ public class UserService
         return true;
     }
 
-    // ── Team role management ──────────────────────────────────────────────────
+    // â”€â”€ Team role management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public Task<bool> AssignUserToTeamAsync(
         string userId, string teamId, string teamFolderName, List<string> roles) =>
@@ -270,12 +262,7 @@ public class UserService
     private async Task<bool> AssignUserToTeamCoreAsync(
         string userId, string teamId, string teamFolderName, List<string> roles)
     {
-        var currentUser = _authService.GetCurrentUser();
-        if (currentUser == null || !CurrentUserAdministersTeam(currentUser, teamId))
-            throw new UnauthorizedAccessException("You don't have permission to assign users to this team");
-
-        if (!currentUser.IsSystemAdmin && roles.Contains("TeamAdmin"))
-            throw new UnauthorizedAccessException("Only SystemAdmin can grant TeamAdmin role");
+        var currentUser = RequireSystemAdmin("assign users to teams");
 
         var usersCollection = await _userRepo.GetByIdAsync("users");
         if (usersCollection == null) return false;
@@ -304,9 +291,7 @@ public class UserService
 
     private async Task<bool> RemoveUserFromTeamCoreAsync(string userId, string teamId)
     {
-        var currentUser = _authService.GetCurrentUser();
-        if (currentUser == null || !CurrentUserAdministersTeam(currentUser, teamId))
-            throw new UnauthorizedAccessException("You don't have permission to remove users from this team");
+        var currentUser = RequireSystemAdmin("remove users from teams");
 
         var usersCollection = await _userRepo.GetByIdAsync("users");
         if (usersCollection == null) return false;
@@ -314,9 +299,6 @@ public class UserService
         var user = usersCollection.Users.FirstOrDefault(u => u.UserID == userId);
         if (user == null) return false;
 
-        var existingRole = user.TeamRoles.FirstOrDefault(tr => tr.TeamID == teamId);
-        if (!currentUser.IsSystemAdmin && existingRole != null && existingRole.Roles.Contains("TeamAdmin"))
-            throw new UnauthorizedAccessException("Only SystemAdmin can remove a TeamAdmin from a team");
 
         var removed = user.TeamRoles.RemoveAll(tr => tr.TeamID == teamId);
         if (removed == 0) return false;
@@ -336,8 +318,7 @@ public class UserService
     private async Task<bool> UpdateTeamRolesCoreAsync(
         string userId, string teamId, List<string> roles)
     {
-        var currentUser = _authService.GetCurrentUser()
-            ?? throw new UnauthorizedAccessException("Not authenticated");
+        var currentUser = RequireSystemAdmin("change team roles");
 
         var usersCollection = await _userRepo.GetByIdAsync("users");
         if (usersCollection == null) return false;
@@ -348,17 +329,6 @@ public class UserService
         var teamRole = user.TeamRoles.FirstOrDefault(tr => tr.TeamID == teamId);
         if (teamRole == null) return false;
 
-        if (!currentUser.IsSystemAdmin)
-        {
-            if (!CurrentUserAdministersTeam(currentUser, teamId))
-                throw new UnauthorizedAccessException("You don't have permission to modify roles for this team");
-
-            if (roles.Contains("TeamAdmin") && !teamRole.Roles.Contains("TeamAdmin"))
-                throw new UnauthorizedAccessException("Only SystemAdmin can grant TeamAdmin role");
-
-            if (!roles.Contains("TeamAdmin") && teamRole.Roles.Contains("TeamAdmin"))
-                throw new UnauthorizedAccessException("Only SystemAdmin can revoke TeamAdmin role");
-        }
 
         teamRole.Roles = roles;
         usersCollection.LastModified = DateTime.UtcNow;
