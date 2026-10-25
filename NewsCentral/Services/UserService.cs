@@ -15,6 +15,16 @@ public sealed class UsersFileNotWritableException : InvalidOperationException
     public UsersFileNotWritableException() : base(UserMessage) { }
 }
 
+/// <summary>
+/// config/users.json cannot be read by the current Windows account, so nobody can be signed in. The login page shows
+/// its own localized explanation instead of the .NET message.
+/// </summary>
+public sealed class UsersFileNotReadableException : IOException
+{
+    public UsersFileNotReadableException(Exception inner)
+        : base("config/users.json cannot be read by this Windows account.", inner) { }
+}
+
 public class UserService
 {
     private readonly IStorageService _storage;

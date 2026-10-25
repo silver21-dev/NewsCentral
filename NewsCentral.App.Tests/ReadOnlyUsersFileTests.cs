@@ -1,3 +1,5 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using NewsCentral.Models;
@@ -45,6 +47,7 @@ public sealed class ReadOnlyUsersFileTests : IDisposable
     public void Dispose()
     {
         try { File.SetAttributes(UsersFile, FileAttributes.Normal); } catch { /* best effort */ }
+        try { AllowRead(); } catch { /* best effort */ }
         try { Directory.Delete(_root, recursive: true); } catch { /* best effort */ }
     }
 
@@ -201,6 +204,45 @@ public sealed class ReadOnlyUsersFileTests : IDisposable
         Assert.True(await users.ChangePasswordAsync("u-1", "New-Passw0rd!"));
         Assert.True(await auth.VerifyCurrentPasswordAsync("New-Passw0rd!"));
         Assert.False(await auth.VerifyCurrentPasswordAsync(Password));
+    }
+
+    private static readonly FileSystemAccessRule DenyRead = new(
+        WindowsIdentity.GetCurrent().User!, FileSystemRights.ReadData, AccessControlType.Deny);
+
+    private void MakeUnreadable()
+    {
+        var info = new FileInfo(UsersFile);
+        var acl = info.GetAccessControl();
+        acl.AddAccessRule(DenyRead);
+        info.SetAccessControl(acl);
+    }
+
+    private void AllowRead()
+    {
+        var info = new FileInfo(UsersFile);
+        var acl = info.GetAccessControl();
+        acl.RemoveAccessRule(DenyRead);
+        info.SetAccessControl(acl);
+    }
+
+    [Fact]
+    public async Task LocalLogin_WhenUsersJsonCannotBeRead_ThrowsTheExplainableException_AndAuditsNothingSecret()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        MakeUnreadable();
+
+        var ex = await Assert.ThrowsAsync<UsersFileNotReadableException>(() => NewAuth().LoginAsync("author", Password));
+        Assert.IsAssignableFrom<UnauthorizedAccessException>(ex.InnerException);
+        Assert.DoesNotContain(Password, ex.ToString());
+    }
+
+    [Fact]
+    public async Task UpnLogin_WhenUsersJsonCannotBeRead_ThrowsTheExplainableException()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        MakeUnreadable();
+
+        await Assert.ThrowsAsync<UsersFileNotReadableException>(() => NewAuth().LoginWithUpnAsync());
     }
 
     [Fact]

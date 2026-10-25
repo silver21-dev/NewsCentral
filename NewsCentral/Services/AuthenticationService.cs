@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
@@ -114,6 +114,22 @@ public class AuthenticationService
     /// <summary>True when Authentication:EnableLocalAccounts is on; Login.razor renders the local logon form only then.</summary>
     public bool IsLocalLoginEnabled => _appConfiguration.EnableLocalAccounts;
 
+    /// <summary>
+    /// Reads users.json for a sign-in. An access-denied read is reported as <see cref="UsersFileNotReadableException"/>
+    /// so the login page can explain it instead of showing the raw .NET message.
+    /// </summary>
+    private async Task<UsersCollection?> LoadUsersForLoginAsync()
+    {
+        try
+        {
+            return await _userRepo.GetByIdAsync("users");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new UsersFileNotReadableException(ex);
+        }
+    }
+
     public async Task<User?> LoginAsync(string username, string password)
     {
         // Enforced here, not only in the UI: a disabled setting refuses even if the page is bypassed.
@@ -129,7 +145,7 @@ public class AuthenticationService
         try
         {
             System.Diagnostics.Debug.WriteLine("Loading users from repository...");
-            var usersCollection = await _userRepo.GetByIdAsync("users");
+            var usersCollection = await LoadUsersForLoginAsync();
 
             if (usersCollection == null)
             {
@@ -209,7 +225,16 @@ public class AuthenticationService
 
         System.Diagnostics.Debug.WriteLine($"Attempting UPN login with UPN: {upn}");
 
-        var usersCollection = await _userRepo.GetByIdAsync("users");
+        UsersCollection? usersCollection;
+        try
+        {
+            usersCollection = await LoadUsersForLoginAsync();
+        }
+        catch (UsersFileNotReadableException)
+        {
+            await AuditLoginFailedAsync(upn, "users.json is not readable");
+            throw;
+        }
 
         if (usersCollection == null)
         {

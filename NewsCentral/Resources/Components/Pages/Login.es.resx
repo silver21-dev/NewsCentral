@@ -27,4 +27,5 @@
   <data name="UpnNotDetected" xml:space="preserve"><value>No se pudo detectar su UPN.</value></data>
   <data name="NoAccountForUpn" xml:space="preserve"><value>No hay ninguna cuenta activa para {0} en este entorno.</value></data>
   <data name="MockSuffix" xml:space="preserve"><value>simulado</value></data>
+  <data name="UsersFileNotReadable" xml:space="preserve"><value>No tiene acceso a la lista de usuarios de este entorno. Pida a un administrador que le añada al grupo de autores de NewsCentral.</value></data>
 </root>

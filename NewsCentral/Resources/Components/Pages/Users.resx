@@ -57,5 +57,5 @@
   <data name="MustHaveRole" xml:space="preserve"><value>User must have at least one role in the team</value></data>
   <data name="UsernameDisplayNameRequired" xml:space="preserve"><value>Username and display name are required</value></data>
   <data name="PasswordRequired" xml:space="preserve"><value>Password is required for new users</value></data>
-  <data name="ReadOnlyNotice" xml:space="preserve"><value>You donâ€™t have access to this environmentâ€™s user list. Ask an administrator to add you to the NewsCentral authors group.</value></data>
+  <data name="ReadOnlyNotice" xml:space="preserve"><value>User changes can only be made by a system administrator.</value></data>
 </root>

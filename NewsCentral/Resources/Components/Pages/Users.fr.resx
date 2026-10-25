@@ -57,5 +57,5 @@
   <data name="MustHaveRole" xml:space="preserve"><value>L'utilisateur doit avoir au moins un rôle dans l'équipe</value></data>
   <data name="UsernameDisplayNameRequired" xml:space="preserve"><value>Le nom d'utilisateur et le nom affiché sont obligatoires</value></data>
   <data name="PasswordRequired" xml:space="preserve"><value>Le mot de passe est obligatoire pour les nouveaux utilisateurs</value></data>
-  <data name="ReadOnlyNotice" xml:space="preserve"><value>Vous nâ€™avez pas accĂ¨s Ă  la liste des utilisateurs de cet environnement. Demandez Ă  un administrateur de vous ajouter au groupe dâ€™auteurs NewsCentral.</value></data>
+  <data name="ReadOnlyNotice" xml:space="preserve"><value>Les modifications des utilisateurs ne peuvent être effectuées que par un administrateur système.</value></data>
 </root>

@@ -1,4 +1,4 @@
-﻿@page "/login"
+@page "/login"
 @using NewsCentral.Services
 @using NewsCentral.Models
 @using NewsCentral.Configuration
@@ -343,6 +343,10 @@
                 errorMessage = Localizer["InvalidCredentials"];
             }
         }
+        catch (UsersFileNotReadableException)
+        {
+            errorMessage = Localizer["UsersFileNotReadable"];
+        }
         catch (Exception ex)
         {
             errorMessage = ex.Message;
@@ -379,6 +383,10 @@
                     errorMessage = Localizer["InvalidCredentials"];
                     break;
             }
+        }
+        catch (UsersFileNotReadableException)
+        {
+            errorMessage = Localizer["UsersFileNotReadable"];
         }
         catch (Exception ex)
         {

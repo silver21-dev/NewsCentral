@@ -113,8 +113,9 @@ SystemAdmin, so every `UserService` method that writes it (create user, update u
 team member, change team roles, delete user) requires `IsSystemAdmin` and throws `UnauthorizedAccessException`
 otherwise; the refusal is recorded in the audit log with outcome Failure. The check lives in the service, not only
 in the UI. On the Users page a non-SystemAdmin sees the list read-only, with no write controls and the message
-"You don't have access to this environment's user list. Ask an administrator to add you to the NewsCentral authors
-group." The self-service paths are unchanged (best-effort `LastLogin`, language in the local store, own password
+"User changes can only be made by a system administrator." When users.json cannot be read at all (access denied),
+the **login page** says "You don't have access to this environment's user list. Ask an administrator to add you to
+the NewsCentral authors group." instead of the raw .NET message (`UsersFileNotReadableException`). The self-service paths are unchanged (best-effort `LastLogin`, language in the local store, own password
 change explained as above).
 
 ## Role Model
