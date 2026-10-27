@@ -86,8 +86,9 @@
                 <h4>⏳ Pending Approval (@pendingAssignments.Count)</h4>
             </div>
 
-            <BulkRunPanel Running="@(isRunning && runSection == "Pending")" Done="runDone" Total="runTotal" Verb="@runVerb"
-                          Result="@(runSection == "Pending" ? runResult : null)" OnStop="StopRun" />
+            <BulkRunPanel TItem="Assignment" Running="@(isRunning && runSection == "Pending")" Done="runDone" Total="runTotal" Verb="@runVerb"
+                          Result="@(runSection == "Pending" ? runResult : null)" OnStop="StopRun"
+                          ItemLabel="@(a => a.TargetTeam)" />
 
             <div class="bulk-toolbar">
                 <TriStateCheckbox State="@pendingSelection.StateOf(EligiblePendingIds)"
@@ -181,8 +182,9 @@
                 <h4>✓ Approved - Ready to Publish (@approvedAssignments.Count)</h4>
             </div>
 
-            <BulkRunPanel Running="@(isRunning && runSection == "Approved")" Done="runDone" Total="runTotal" Verb="@runVerb"
+            <BulkRunPanel TItem="Assignment" Running="@(isRunning && runSection == "Approved")" Done="runDone" Total="runTotal" Verb="@runVerb"
                           Result="@(runSection == "Approved" ? runResult : null)" OnStop="StopRun"
+                          ItemLabel="@(a => a.TargetTeam)"
                           WarningSummaryFormat="{0} assignment(s) published with distribution warnings" />
 
             <div class="bulk-toolbar">
@@ -331,8 +333,9 @@
                 }
             </div>
 
-            <BulkRunPanel Running="@(isRunning && runSection == "Published")" Done="runDone" Total="runTotal" Verb="@runVerb"
-                          Result="@(runSection == "Published" ? runResult : null)" OnStop="StopRun" />
+            <BulkRunPanel TItem="Assignment" Running="@(isRunning && runSection == "Published")" Done="runDone" Total="runTotal" Verb="@runVerb"
+                          Result="@(runSection == "Published" ? runResult : null)" OnStop="StopRun"
+                          ItemLabel="@(a => a.TargetTeam)" />
 
             <div class="bulk-toolbar">
                 <TriStateCheckbox State="@publishedSelection.StateOf(EligiblePublishedIds)"

@@ -1,8 +1,7 @@
 @* UI-2 — progress line (with Stop) while a bulk run is active, and the result summary once it
-   finishes. Operates directly on BulkRunResult<Assignment> — all three bulk actions on this page
-   set (Approve/Reject/Publish) act on Assignment items, so a generic item-label callback was not
-   needed; the failure/warning lines use Assignment.TargetTeam directly. *@
-@using NewsCentral.Models
+   finishes. Generic over the item type of the bulk run; the failure and warning lines label each
+   item with the item-label callback supplied by the caller. *@
+@typeparam TItem
 @using NewsCentral.Ui
 
 @if (Running)
@@ -27,7 +26,7 @@ else if (Result != null)
             <ul class="mb-0 mt-1">
                 @foreach (var w in warnings.Take(5))
                 {
-                    <li>@w.Item.TargetTeam: @w.Outcome.Warning?.TrimEnd('.')</li>
+                    <li>@ItemLabel(w.Item):@w.Outcome.Warning?.TrimEnd('.')</li>
                 }
             </ul>
         }
@@ -37,7 +36,7 @@ else if (Result != null)
             <ul class="mb-0 mt-2">
                 @foreach (var f in failures.Take(20))
                 {
-                    <li>@f.Item.TargetTeam: @f.Outcome.Error?.TrimEnd('.')</li>
+                    <li>@ItemLabel(f.Item):@f.Outcome.Error?.TrimEnd('.')</li>
                 }
                 @if (failures.Count > 20)
                 {
@@ -64,7 +63,8 @@ else if (Result != null)
     [Parameter] public int Done { get; set; }
     [Parameter] public int Total { get; set; }
     [Parameter] public string Verb { get; set; } = "Processing";
-    [Parameter] public BulkRunResult<Assignment>? Result { get; set; }
+    [Parameter] public BulkRunResult<TItem>? Result { get; set; }
+    [Parameter, EditorRequired] public Func<TItem, string> ItemLabel { get; set; } = default!;
     [Parameter] public EventCallback OnStop { get; set; }
 
     /// <summary>

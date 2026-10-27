@@ -28,8 +28,8 @@
     {
         @* UI-2 — bulk run progress/summary, shown above the list so it stays visible even once a
            successful run has emptied the list below (e.g. rejecting every pending item). *@
-        <BulkRunPanel Running="isRunning" Done="runDone" Total="runTotal" Verb="@runVerb"
-                      Result="runResult" OnStop="StopRun" />
+        <BulkRunPanel TItem="Assignment" Running="isRunning" Done="runDone" Total="runTotal" Verb="@runVerb"
+                      Result="runResult" OnStop="StopRun" ItemLabel="@(a => a.TargetTeam)" />
 
         @if (!string.IsNullOrEmpty(errorMessage) && !showRejectDialog)
         {
