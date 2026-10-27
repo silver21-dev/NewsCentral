@@ -44,15 +44,6 @@
   <data name="AssignmentsCreated" xml:space="preserve"><value>Zeitplan und {0} Zuweisung(en) erfolgreich erstellt!</value></data>
   <data name="PendingApprovalSuffix" xml:space="preserve"><value>Zuweisungen warten auf Genehmigung.</value></data>
   <data name="AutoApprovedSuffix" xml:space="preserve"><value>Zuweisungen wurden automatisch genehmigt.</value></data>
-  <data name="SearchTeamsPlaceholder" xml:space="preserve"><value>Teams suchen…</value></data>
-  <data name="ShowSelectedOnly" xml:space="preserve"><value>Nur ausgewählte anzeigen</value></data>
-  <data name="SelectedCounter" xml:space="preserve"><value>{0} von {1} ausgewählt</value></data>
-  <data name="SelectAllLabel" xml:space="preserve"><value>Alle auswählen ({0})</value></data>
-  <data name="SelectAllShownLabel" xml:space="preserve"><value>Alle angezeigten auswählen ({0})</value></data>
-  <data name="AllTeamsChip" xml:space="preserve"><value>Alle {0} Teams</value></data>
-  <data name="MoreChipsSuffix" xml:space="preserve"><value>+{0} weitere</value></data>
-  <data name="NoTeamsMatch" xml:space="preserve"><value>Keine Teams entsprechen „{0}“.</value></data>
-  <data name="NoTeamsSelected" xml:space="preserve"><value>Keine Teams ausgewählt.</value></data>
   <data name="CreateAssignmentsSingular" xml:space="preserve"><value>{0} Zuweisung erstellen</value></data>
   <data name="CreateAssignmentsPlural" xml:space="preserve"><value>{0} Zuweisungen erstellen</value></data>
 </root>

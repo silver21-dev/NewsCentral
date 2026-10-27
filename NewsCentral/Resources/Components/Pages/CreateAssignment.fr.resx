@@ -44,15 +44,6 @@
   <data name="AssignmentsCreated" xml:space="preserve"><value>Planification et {0} affectation(s) créées avec succès !</value></data>
   <data name="PendingApprovalSuffix" xml:space="preserve"><value>Les affectations sont en attente d'approbation.</value></data>
   <data name="AutoApprovedSuffix" xml:space="preserve"><value>Les affectations sont automatiquement approuvées.</value></data>
-  <data name="SearchTeamsPlaceholder" xml:space="preserve"><value>Rechercher des équipes…</value></data>
-  <data name="ShowSelectedOnly" xml:space="preserve"><value>Afficher uniquement la sélection</value></data>
-  <data name="SelectedCounter" xml:space="preserve"><value>{0} sur {1} sélectionnée(s)</value></data>
-  <data name="SelectAllLabel" xml:space="preserve"><value>Tout sélectionner ({0})</value></data>
-  <data name="SelectAllShownLabel" xml:space="preserve"><value>Sélectionner tout ce qui est affiché ({0})</value></data>
-  <data name="AllTeamsChip" xml:space="preserve"><value>Les {0} équipes</value></data>
-  <data name="MoreChipsSuffix" xml:space="preserve"><value>+{0} de plus</value></data>
-  <data name="NoTeamsMatch" xml:space="preserve"><value>Aucune équipe ne correspond à « {0} ».</value></data>
-  <data name="NoTeamsSelected" xml:space="preserve"><value>Aucune équipe sélectionnée.</value></data>
   <data name="CreateAssignmentsSingular" xml:space="preserve"><value>Créer {0} affectation</value></data>
   <data name="CreateAssignmentsPlural" xml:space="preserve"><value>Créer {0} affectations</value></data>
 </root>

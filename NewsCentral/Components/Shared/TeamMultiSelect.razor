@@ -1,0 +1,310 @@
+@using Microsoft.Extensions.Localization
+@using NewsCentral.Models
+@using NewsCentral.Ui
+@inject IStringLocalizer<SharedResource> Localizer
+
+@* Multi-select team picker: search, show-selected-only, counter, chips, tri-state header and a scrolling
+   list. Search text and show-selected-only are private state and only affect what is SHOWN, never what is
+   selected. The selection is owned by the parent; this component mutates it and reports every change through
+   the selection-changed callback. *@
+
+@{
+    var shown = TeamPickerFilter.Shown(Teams, Selection, showSelectedOnly, teamSearch);
+    var selectedCount = TeamPickerFilter.SelectedCount(Teams, Selection);
+    var filterActive = showSelectedOnly || !string.IsNullOrWhiteSpace(teamSearch);
+}
+
+<div class="team-multi-select">
+    @if (Label != null)
+    {
+        <label class="section-label">@Label</label>
+    }
+
+    <div class="other-teams-toolbar">
+        <input type="text" class="other-teams-search" placeholder="@Localizer["TeamPickerSearchPlaceholder"]"
+               @bind="teamSearch" @bind:event="oninput" disabled="@Disabled" />
+        <label class="other-teams-toggle">
+            <input type="checkbox" @bind="showSelectedOnly" disabled="@Disabled" />
+            @Localizer["TeamPickerShowSelectedOnly"]
+        </label>
+        <span class="other-teams-counter">
+            @string.Format(Localizer["TeamPickerSelectedCounter"].Value, selectedCount, Teams.Count)
+        </span>
+    </div>
+
+    @if (selectedCount > 0)
+    {
+        <div class="other-teams-chips">
+            @if (selectedCount == Teams.Count)
+            {
+                <span class="team-chip">
+                    @string.Format(Localizer["TeamPickerAllTeamsChip"].Value, Teams.Count)
+                    <button type="button" class="team-chip-remove" @onclick="ClearAllTeams" disabled="@Disabled" aria-label="Clear">×</button>
+                </span>
+            }
+            else
+            {
+                var selectedTeams = Teams
+                    .Where(t => Selection.IsSelected(t.TeamID))
+                    .OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                @foreach (var team in selectedTeams.Take(12))
+                {
+                    <span class="team-chip">
+                        @team.Name
+                        <button type="button" class="team-chip-remove" disabled="@Disabled"
+                                @onclick="@(() => ToggleTeam(team.TeamID, false))" aria-label="Remove">×</button>
+                    </span>
+                }
+                @if (selectedTeams.Count > 12)
+                {
+                    <button type="button" class="team-chip team-chip-more" disabled="@Disabled"
+                            @onclick="@(() => showSelectedOnly = true)">
+                        @string.Format(Localizer["TeamPickerMoreChipsSuffix"].Value, selectedTeams.Count - 12)
+                    </button>
+                }
+            }
+        </div>
+    }
+
+    <div class="other-teams-list-header">
+        <TriStateCheckbox State="@Selection.StateOf(shown.Select(t => t.TeamID))"
+                          OnToggle="ToggleShown"
+                          Disabled="@Disabled"
+                          Label="@(filterActive
+                              ? string.Format(Localizer["TeamPickerSelectAllShownLabel"].Value, shown.Count)
+                              : string.Format(Localizer["TeamPickerSelectAllLabel"].Value, Teams.Count))" />
+    </div>
+
+    @if (shown.Count == 0)
+    {
+        <p class="no-teams-match">
+            @(string.IsNullOrWhiteSpace(teamSearch)
+                ? Localizer["TeamPickerNoTeamsSelected"].Value
+                : string.Format(Localizer["TeamPickerNoTeamsMatch"].Value, teamSearch))
+        </p>
+    }
+    else
+    {
+        <div class="other-teams-scroll">
+            @foreach (var team in shown)
+            {
+                var isSelected = Selection.IsSelected(team.TeamID);
+
+                <label class="other-team-row @(isSelected ? "selected" : "")">
+                    <input type="checkbox"
+                           checked="@isSelected"
+                           disabled="@Disabled"
+                           @onchange="@(e => ToggleTeam(team.TeamID, (bool)e.Value!))" />
+                    <span class="other-team-name">@team.Name@if (CurrentTeamId != null && team.TeamID == CurrentTeamId)
+                        {
+                            <text> @CurrentTeamSuffix</text>
+                        }</span>
+                    <span class="other-team-folder">@team.FolderName</span>
+                    <span class="other-team-desc" title="@team.Description">@team.Description</span>
+                </label>
+            }
+        </div>
+    }
+</div>
+
+<style>
+    .team-multi-select .section-label {
+        display: block;
+        font-weight: 600;
+        color: #667eea;
+        margin-bottom: 10px;
+    }
+
+    .other-teams-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+    }
+
+    .other-teams-search {
+        flex: 1 1 220px;
+        min-width: 160px;
+        padding: 8px 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        font-size: 13px;
+        box-sizing: border-box;
+    }
+
+    .other-teams-toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: normal;
+        font-size: 13px;
+        color: #333;
+        white-space: nowrap;
+        cursor: pointer;
+        margin-bottom: 0;
+    }
+
+    .other-teams-counter {
+        font-size: 13px;
+        color: #666;
+        white-space: nowrap;
+        margin-left: auto;
+    }
+
+    .other-teams-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 12px;
+    }
+
+    .team-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #e7f3ff;
+        border: 1px solid #667eea;
+        border-radius: 14px;
+        padding: 3px 6px 3px 10px;
+        font-size: 12px;
+        color: #333;
+    }
+
+    .team-chip-more {
+        background: #f0f1fd;
+        border: 1px dashed #667eea;
+        cursor: pointer;
+        color: #667eea;
+    }
+
+    .team-chip-remove {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+        color: #667eea;
+        padding: 0 4px;
+    }
+
+        .team-chip-remove:hover {
+            color: #c82333;
+        }
+
+    .other-teams-list-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 10px;
+        background: #f0f1fd;
+        border: 1px solid #ddd;
+        border-bottom: none;
+        border-radius: 5px 5px 0 0;
+        font-size: 13px;
+        font-weight: 600;
+        color: #333;
+        cursor: pointer;
+        margin-bottom: 0;
+    }
+
+    .other-teams-scroll {
+        max-height: 420px;
+        overflow-y: auto;
+        border: 1px solid #ddd;
+        border-radius: 0 0 5px 5px;
+    }
+
+    .other-team-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 10px;
+        min-height: 32px;
+        border-bottom: 1px solid #eee;
+        cursor: pointer;
+        font-weight: normal;
+        margin-bottom: 0;
+    }
+
+        .other-team-row:last-child {
+            border-bottom: none;
+        }
+
+        .other-team-row:hover {
+            background: #f8f9fa;
+        }
+
+        .other-team-row.selected {
+            background: #e7f3ff;
+        }
+
+    .other-team-name {
+        font-size: 13px;
+        color: #333;
+        flex: 0 1 auto;
+        min-width: 140px;
+    }
+
+    .other-team-folder {
+        font-size: 11px;
+        color: #999;
+        flex-shrink: 0;
+        font-family: monospace;
+    }
+
+    .other-team-desc {
+        font-size: 12px;
+        color: #777;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .no-teams-match {
+        padding: 15px;
+        text-align: center;
+        color: #999;
+        font-style: italic;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+    }
+</style>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<Team> Teams { get; set; } = Array.Empty<Team>();
+    [Parameter, EditorRequired] public SelectionModel<string> Selection { get; set; } = default!;
+    [Parameter] public EventCallback OnSelectionChanged { get; set; }
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public string? CurrentTeamId { get; set; }
+    [Parameter] public string? CurrentTeamSuffix { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    // Search and show-selected-only only affect what is SHOWN, never what is selected.
+    private string teamSearch = string.Empty;
+    private bool showSelectedOnly;
+
+    private Task ToggleTeam(string teamId, bool isSelected)
+    {
+        Selection.Set(teamId, isSelected);
+        return OnSelectionChanged.InvokeAsync();
+    }
+
+    // Deselects only the ids in Teams; selected ids outside the list are left alone.
+    private Task ClearAllTeams()
+    {
+        foreach (var team in Teams)
+            Selection.Set(team.TeamID, false);
+        return OnSelectionChanged.InvokeAsync();
+    }
+
+    private Task ToggleShown()
+    {
+        Selection.ToggleAll(TeamPickerFilter.Shown(Teams, Selection, showSelectedOnly, teamSearch).Select(t => t.TeamID));
+        return OnSelectionChanged.InvokeAsync();
+    }
+}

@@ -125,4 +125,31 @@
   <data name="MoreInfoOpenLink" xml:space="preserve">
     <value>Ouvrir le lien</value>
   </data>
+  <data name="TeamPickerSearchPlaceholder" xml:space="preserve">
+    <value>Rechercher des équipes…</value>
+  </data>
+  <data name="TeamPickerShowSelectedOnly" xml:space="preserve">
+    <value>Afficher uniquement la sélection</value>
+  </data>
+  <data name="TeamPickerSelectedCounter" xml:space="preserve">
+    <value>{0} sur {1} sélectionnée(s)</value>
+  </data>
+  <data name="TeamPickerSelectAllLabel" xml:space="preserve">
+    <value>Tout sélectionner ({0})</value>
+  </data>
+  <data name="TeamPickerSelectAllShownLabel" xml:space="preserve">
+    <value>Sélectionner tout ce qui est affiché ({0})</value>
+  </data>
+  <data name="TeamPickerAllTeamsChip" xml:space="preserve">
+    <value>Les {0} équipes</value>
+  </data>
+  <data name="TeamPickerMoreChipsSuffix" xml:space="preserve">
+    <value>+{0} de plus</value>
+  </data>
+  <data name="TeamPickerNoTeamsMatch" xml:space="preserve">
+    <value>Aucune équipe ne correspond à « {0} ».</value>
+  </data>
+  <data name="TeamPickerNoTeamsSelected" xml:space="preserve">
+    <value>Aucune équipe sélectionnée.</value>
+  </data>
 </root>

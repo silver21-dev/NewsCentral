@@ -340,4 +340,31 @@
   <data name="MoreInfoOpenLink" xml:space="preserve">
     <value>Open link</value>
   </data>
+  <data name="TeamPickerSearchPlaceholder" xml:space="preserve">
+    <value>Search teams…</value>
+  </data>
+  <data name="TeamPickerShowSelectedOnly" xml:space="preserve">
+    <value>Show selected only</value>
+  </data>
+  <data name="TeamPickerSelectedCounter" xml:space="preserve">
+    <value>{0} of {1} selected</value>
+  </data>
+  <data name="TeamPickerSelectAllLabel" xml:space="preserve">
+    <value>Select all ({0})</value>
+  </data>
+  <data name="TeamPickerSelectAllShownLabel" xml:space="preserve">
+    <value>Select all shown ({0})</value>
+  </data>
+  <data name="TeamPickerAllTeamsChip" xml:space="preserve">
+    <value>All {0} teams</value>
+  </data>
+  <data name="TeamPickerMoreChipsSuffix" xml:space="preserve">
+    <value>+{0} more</value>
+  </data>
+  <data name="TeamPickerNoTeamsMatch" xml:space="preserve">
+    <value>No teams match '{0}'.</value>
+  </data>
+  <data name="TeamPickerNoTeamsSelected" xml:space="preserve">
+    <value>No teams selected.</value>
+  </data>
 </root>
