@@ -74,3 +74,31 @@ public static class BulkOperationRunner
         return new BulkRunResult<TItem>(outcomes, stopped);
     }
 }
+
+/// <summary>
+/// Which items of a bulk run to try again: the ones that failed plus the ones never processed because the
+/// run was stopped.
+/// </summary>
+public static class BulkRetrySelection
+{
+    /// <summary>
+    /// The items of <paramref name="attempted"/> whose outcome failed, plus those with no outcome at all, in
+    /// <paramref name="attempted"/> order. Outcome i belongs to attempted[i] (the runner processes in order and
+    /// appends one outcome per processed item), so items are matched by position, never by equality.
+    /// </summary>
+    /// <exception cref="ArgumentException">There are more outcomes than attempted items.</exception>
+    public static List<TItem> Remaining<TItem>(IReadOnlyList<TItem> attempted, BulkRunResult<TItem> result)
+    {
+        if (result.Outcomes.Count > attempted.Count)
+            throw new ArgumentException("The result has more outcomes than attempted items.", nameof(result));
+
+        var remaining = new List<TItem>();
+        for (var i = 0; i < attempted.Count; i++)
+        {
+            if (i >= result.Outcomes.Count || !result.Outcomes[i].Outcome.Succeeded)
+                remaining.Add(attempted[i]);
+        }
+
+        return remaining;
+    }
+}

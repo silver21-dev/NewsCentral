@@ -511,9 +511,11 @@
 
         try
         {
-            await PresentationService.DuplicatePresentationAsync(
+            var duplicateSource = await PresentationService.LoadDuplicateSourceAsync(
                 presentationToDuplicate.TeamFolderName,
-                presentationToDuplicate.PresentationID,
+                presentationToDuplicate.PresentationID);
+            await PresentationService.DuplicateToTeamAsync(
+                duplicateSource,
                 targetTeam.TeamID,
                 targetTeam.FolderName);
 

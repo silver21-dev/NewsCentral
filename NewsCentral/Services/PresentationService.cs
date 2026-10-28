@@ -127,60 +127,61 @@ public class PresentationService
     // ── Duplicate ─────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Creates a NEW presentation in <paramref name="targetTeamFolder"/> seeded from the source with
-    /// ONLY its name, MoreUrl, and ORIGINAL picture — no description, poster, or assignment/schedule.
-    /// The copy is "draft" by construction (a presentation with no assignments). The source's ORIGINAL
-    /// image bytes are copied (falling back to the embedded content image only if the original is
-    /// missing/unreadable); reusing <see cref="CreatePresentationAsync"/> performs the cross-team image
-    /// copy into the target team's storage and enforces ContentAuthor/SystemAdmin on the target team.
+    /// Reads the presentation to duplicate and its ORIGINAL picture ONCE, so a run over many target teams
+    /// does not re-read them per team. The original image bytes are used (falling back to the embedded
+    /// content image only if the original is missing/unreadable). A read, so a success writes no audit
+    /// record; a failure (presentation not found, image unavailable) is audited as one Failure and rethrown.
     /// </summary>
-    public Task<Presentation> DuplicatePresentationAsync(
-        string sourceTeamFolder,
-        string presentationId,
+    public async Task<DuplicateSource> LoadDuplicateSourceAsync(string sourceTeamFolder, string presentationId)
+    {
+        try
+        {
+            var sourceRepo = new TeamAwareRepository<Presentation>(_storage, sourceTeamFolder, "presentations");
+            var source     = await sourceRepo.GetByIdAsync(presentationId)
+                ?? throw new InvalidOperationException($"Presentation {presentationId} not found");
+
+            // Copy the source's ORIGINAL image (pre-posterization), not the poster/ContentImageBase64.
+            byte[]? originalBytes = null;
+            if (!string.IsNullOrEmpty(source.OriginalImagePath))
+                originalBytes = await _storage.ReadBytesAsync(source.OriginalImagePath);
+
+            var (imageData, originalName) = DuplicateImage.Choose(
+                originalBytes, source.ContentImageBase64, source.ImageOriginalName, presentationId);
+
+            return new DuplicateSource(
+                sourceTeamFolder, presentationId, source.Name, source.MoreUrl, imageData, originalName);
+        }
+        catch (Exception ex)
+        {
+            await _audit.RecordAsync(new AuditRecord(
+                AuditEvents.PresentationDuplicated, presentationId, AuditOutcome.Failure,
+                $"from={sourceTeamFolder}; source unavailable: {AuditLogExtensions.Describe(ex)}"));
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Creates ONE new presentation in <paramref name="targetTeamFolder"/> seeded from
+    /// <paramref name="source"/> with ONLY its name, MoreUrl, and ORIGINAL picture — no description, poster,
+    /// or assignment/schedule. The copy is "draft" by construction (a presentation with no assignments).
+    /// Reusing the create path performs the cross-team image copy into the target team's storage and enforces
+    /// ContentAuthor/SystemAdmin on the target team. Records one PresentationDuplicated audit entry per call.
+    /// </summary>
+    public Task<Presentation> DuplicateToTeamAsync(
+        DuplicateSource source,
         string targetTeamId,
         string targetTeamFolder) =>
-        _audit.RunAsync(AuditEvents.PresentationDuplicated, presentationId,
-            () => DuplicatePresentationCoreAsync(sourceTeamFolder, presentationId, targetTeamId, targetTeamFolder),
-            detail: $"from={sourceTeamFolder}; to={targetTeamFolder}",
-            detailFrom: p => $"from={sourceTeamFolder}; to={targetTeamFolder}; copy={p.PresentationID}");
-
-    private async Task<Presentation> DuplicatePresentationCoreAsync(
-        string sourceTeamFolder,
-        string presentationId,
-        string targetTeamId,
-        string targetTeamFolder)
-    {
-        var sourceRepo = new TeamAwareRepository<Presentation>(_storage, sourceTeamFolder, "presentations");
-        var source     = await sourceRepo.GetByIdAsync(presentationId)
-            ?? throw new InvalidOperationException($"Presentation {presentationId} not found");
-
-        // Copy the source's ORIGINAL image (pre-posterization), not the poster/ContentImageBase64.
-        byte[]? imageData = null;
-        if (!string.IsNullOrEmpty(source.OriginalImagePath))
-            imageData = await _storage.ReadBytesAsync(source.OriginalImagePath);
-
-        // Fallback only when the original file is missing/unreadable.
-        if ((imageData is null || imageData.Length == 0) && !string.IsNullOrEmpty(source.ContentImageBase64))
-            imageData = Convert.FromBase64String(source.ContentImageBase64);
-
-        if (imageData is null || imageData.Length == 0)
-            throw new InvalidOperationException(
-                $"Cannot duplicate presentation {presentationId}: source image is unavailable");
-
-        var originalImageName = string.IsNullOrEmpty(source.ImageOriginalName)
-            ? "image.jpg"
-            : source.ImageOriginalName;
-
-        // Seed ONLY name + moreUrl + original picture; description omitted; no poster/assignment.
-        return await CreatePresentationCoreAsync(
-            targetTeamId,
-            targetTeamFolder,
-            name: source.Name,
-            description: string.Empty,
-            moreUrl: source.MoreUrl,
-            imageData: imageData,
-            originalImageName: originalImageName);
-    }
+        _audit.RunAsync(AuditEvents.PresentationDuplicated, source.PresentationId,
+            () => CreatePresentationCoreAsync(
+                targetTeamId,
+                targetTeamFolder,
+                name: source.Name,
+                description: string.Empty,
+                moreUrl: source.MoreUrl,
+                imageData: source.ImageData,
+                originalImageName: source.OriginalImageName),
+            detail: $"from={source.SourceTeamFolder}; to={targetTeamFolder}",
+            detailFrom: p => $"from={source.SourceTeamFolder}; to={targetTeamFolder}; copy={p.PresentationID}");
 
     // ── Update ───────────────────────────────────────────────────────────────
 
@@ -578,3 +579,12 @@ public class PresentationService
         }
     }
 }
+
+/// <summary>A presentation read once for duplication: what a copy is seeded with.</summary>
+public sealed record DuplicateSource(
+    string SourceTeamFolder,
+    string PresentationId,
+    string Name,
+    string MoreUrl,
+    byte[] ImageData,
+    string OriginalImageName);
