@@ -162,12 +162,15 @@ public sealed class TaskScriptGeneratorTests
             var script = string.Join("\r\n", Generate().Split("\r\n").Where(l => !l.StartsWith("#Requires")));
             var path = Path.Combine(dir, "r.ps1");
             File.WriteAllText(path, script, System.Text.Encoding.ASCII);
-            var before = Directory.GetFiles(Path.GetTempPath(), "NewsViewerTask*.xml").Length;
 
             var psi = new System.Diagnostics.ProcessStartInfo(powershell)
             {
                 RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
             };
+            // The script under test gets its own temp folder (GetTempPath reads TMP, then TEMP), so task XML written by
+            // GeneratedScriptBehaviourTests in the shared %TEMP% in parallel can never be mistaken for this run's.
+            psi.Environment["TEMP"] = dir;
+            psi.Environment["TMP"] = dir;
             foreach (var a in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path, "-WhatIf", "-Verbose" }) psi.ArgumentList.Add(a);
             using var p = System.Diagnostics.Process.Start(psi)!;
             var output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
@@ -182,7 +185,9 @@ public sealed class TaskScriptGeneratorTests
                 Assert.Contains(expected.TaskName, output);   // the -WhatIf preview names the task
                 Assert.Contains("Legacy HKLM Run value", output);
             }
-            Assert.Equal(before, Directory.GetFiles(Path.GetTempPath(), "NewsViewerTask*.xml").Length);
+            var leftovers = Directory.GetFiles(dir, "NewsViewerTask*.xml");
+            Assert.True(leftovers.Length == 0,
+                "-WhatIf left task XML in its temp folder: " + string.Join(", ", leftovers.Select(Path.GetFileName)));
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
