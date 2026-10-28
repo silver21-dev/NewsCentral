@@ -76,17 +76,24 @@ NewsCentral.Shared\
     └── AppConfiguration.cs                typed accessor over IConfiguration for the NewsCentral authoring app (DataPath, distribution, Azure/HMAC; no admin creds — M5b removed the Initialization:* seed keys)
 ```
 
-## NewsCentral.Shared — Launch and Ui Layout
+## NewsCentral.Shared — Launch, Publishing and Ui Layout
 
 ```
 NewsCentral.Shared\
 ├── Launch\
 │   ├── LaunchDecision.cs          pure NewsViewer launch decision: LaunchInputs, ILaunchProbes (IsRemoteSession / IsSessionVisible / HasShell / IdleTime / IsBusy), LaunchDecider.Decide (the ordered rule table), UseVirtualDesktop + ShouldAssertWallpaperStyle, ContentKeys, RemoteDetection, FullScreenHeuristic, ProbeMath, LaunchLogTrimmer
 │   └── NotificationLogic.cs       NotificationCountdown (60 s, hover/lock pause, first outcome wins), NotificationPlacement (bottom-right/left, DIP scaling), LaunchLogLine (the launch.log line format)
+├── Publishing\
+│   ├── DuplicateImage.cs                   pure choice of the picture (and file name) a duplicated presentation is seeded with: original bytes, else the embedded image, else an error
+│   ├── IndexInclusion.cs                   pure predicate: whether an assignment belongs in a given team's index.json (PUB-2)
+│   ├── PresentationCopyRepairPlanner.cs    pure decision for cleaning up a target team's orphaned cross-team presentation copy (PUB-1)
+│   ├── PresentationDeletePlanner.cs        pure plan of the soft-delete moves in target teams when a presentation is deleted from its source team (PUB-1)
+│   └── PublishedCopyRepairPlanner.cs       pure decision (Sync / Remove / InSync / Left) for a target team's copy of a cross-team assignment (PUB-1)
+│   (authoring-app logic, not used by NewsViewer)
 └── Ui\
     ├── MoreInfoUrlPolicy.cs       MoreInfoUrlPolicy, MoreInfoDecision — whether the poster's More information link may open (https + Ui:AllowedDomains); pure
     └── FramePalette.cs            Rgb, ChromePalette, FramePaletteBuilder — poster frame/text colours (Ui:FrameColor / Ui:FrameTextColor) derived from the theme; pure, no System.Drawing
-    (the other files in Ui\ — thumbnail cache, selection and bulk-operation helpers — belong to the authoring app)
+    (the other files in Ui\ — thumbnail cache, selection, team-picker filter and bulk-operation helpers — belong to the authoring app)
 ```
 
 ## NewsService — Service Layout
