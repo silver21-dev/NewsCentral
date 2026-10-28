@@ -6,8 +6,8 @@ public static class AuditLogExtensions
 {
     /// <summary>
     /// Runs <paramref name="action"/> and records the outcome: Success when it returns (and <paramref name="isSuccess"/>,
-    /// if given, agrees), Failure with the exception type and message when it throws - the exception is rethrown
-    /// unchanged. Recording never alters the action's result or exception.
+    /// if given, agrees), Failure with <paramref name="detail"/> (if any) followed by the exception type and message when it
+    /// throws - the exception is rethrown unchanged. Recording never alters the action's result or exception.
     /// </summary>
     public static async Task<T> RunAsync<T>(
         this IAuditLog audit,
@@ -26,7 +26,9 @@ public static class AuditLogExtensions
         }
         catch (Exception ex)
         {
-            await audit.RecordAsync(new AuditRecord(eventName, target, AuditOutcome.Failure, Describe(ex)));
+            // The caller's detail comes first so AuditLog's length cut only shortens the exception text.
+            await audit.RecordAsync(new AuditRecord(eventName, target, AuditOutcome.Failure,
+                string.IsNullOrEmpty(detail) ? Describe(ex) : $"{detail}; {Describe(ex)}"));
             throw;
         }
 

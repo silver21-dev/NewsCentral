@@ -83,8 +83,10 @@ working under the append-only ACL that `Set-AuthoringAcl.ps1` applies.
 **Line fields** (camelCase; optional ones are omitted): `utc`, `machine`, `windowsAccount`, `appUser` (or
 `attemptedUser` for a failed login), `environment` (display name, else DataPath), `event`, `target` (team /
 presentation id / user id / setting name), `outcome` (`Success` | `Failure`), `detail` (short reason, cut at 200
-characters, single line). Never passwords, hashes, private keys or full content; key events carry only a **public-key
-fingerprint**.
+characters, single line). When an audited action throws, `detail` is the action's own detail followed by
+`ExceptionType: message` (e.g. `from=cz-its; to=at-its; UnauthorizedAccessException: …`); the 200-character cut
+therefore shortens only the exception text. Never passwords, hashes, private keys or full content; key events carry
+only a **public-key fingerprint**.
 
 **Events.** `LoginSucceeded`, `LoginFailed`, `Logout`; `UserCreated`, `UserUpdated`, `UserDeleted`,
 `UserRolesChanged`, `UserTeamAssigned`, `UserTeamRemoved`, `UserUpnChanged`, `PasswordChanged`; `KeyGenerated`
@@ -93,7 +95,7 @@ fingerprint**.
 (there is no unpublish operation); `IndexRegenerationFailed` (outcome Failure, target = team, detail = reason: the index after a delete or edit was not updated because the signing key was unreadable); `EnvironmentAdded`, `EnvironmentDeleted` (removed from the environment list),
 `EnvironmentInitialized`, `EnvironmentSettingsChanged` (changed field names only); `AuditEnabled`, `AuditDisabled`.
 
-`PresentationDuplicated` is recorded once per target team (detail `from=…; to=…; copy=…`); a source that cannot be loaded is one Failure record (detail `from=…; source unavailable: …`).
+`PresentationDuplicated` is recorded once per target team (detail `from=…; to=…; copy=…`); a failed copy is a Failure record with detail `from=…; to=…; ExceptionType: message`; a source that cannot be loaded is one Failure record (detail `from=…; source unavailable: …`).
 
 **Toggling.** `AuditDisabled` is written **before** logging stops and `AuditEnabled` **after** it starts
 (`AuditToggle`). If saving the setting fails after `AuditDisabled` was written, a second `AuditDisabled` line with

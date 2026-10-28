@@ -340,6 +340,41 @@ public sealed class AuditRunAsyncTests : AuditTestBase
     }
 
     [Fact]
+    public async Task Exception_WithDetail_RecordsDetailThenException()
+    {
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            NewLog().RunAsync<int>(AuditEvents.UserDeleted, "u-1", () => throw new UnauthorizedAccessException("nope"),
+                detail: "from=a; to=b"));
+
+        using var doc = JsonDocument.Parse(Assert.Single(Lines(OnlyFile())));
+        Assert.Equal("from=a; to=b; UnauthorizedAccessException: nope", doc.RootElement.GetProperty("detail").GetString());
+    }
+
+    [Fact]
+    public async Task Exception_WithDetail_LongMessage_KeepsDetailPrefix()
+    {
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            NewLog().RunAsync<int>(AuditEvents.UserDeleted, "u-1",
+                () => throw new UnauthorizedAccessException(new string('x', 500)), detail: "from=a; to=b"));
+
+        using var doc = JsonDocument.Parse(Assert.Single(Lines(OnlyFile())));
+        var detail = doc.RootElement.GetProperty("detail").GetString()!;
+        Assert.StartsWith("from=a; to=b; ", detail);
+        Assert.True(detail.Length <= 201);
+    }
+
+    [Fact]
+    public async Task Exception_WithEmptyDetail_RecordsExceptionOnly()
+    {
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            NewLog().RunAsync<int>(AuditEvents.UserDeleted, "u-1", () => throw new UnauthorizedAccessException("nope"),
+                detail: ""));
+
+        using var doc = JsonDocument.Parse(Assert.Single(Lines(OnlyFile())));
+        Assert.Equal("UnauthorizedAccessException: nope", doc.RootElement.GetProperty("detail").GetString());
+    }
+
+    [Fact]
     public async Task FalseResult_IsRecordedAsFailure()
     {
         var ok = await NewLog().RunAsync(AuditEvents.UserDeleted, "u-1", () => Task.FromResult(false),
