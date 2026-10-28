@@ -69,12 +69,17 @@
             <p class="mt-3">Loading assignments...</p>
         </div>
     }
-    else if (!assignments.Any())
+    else if (!HasVisibleAssignments)
     {
         <div class="empty-state">
             <i class="bi bi-inbox" style="font-size: 4rem; color: #ccc;"></i>
             <h3>No assignments yet</h3>
             <p>Create your first assignment to get started</p>
+            @if (HiddenAssignmentCount > 0)
+            {
+                @* TODO(i18n): hidden-status note is English only, like the rest of this empty state. *@
+                <p class="text-muted">@HiddenAssignmentCount rejected or cancelled assignment(s) are not shown.</p>
+            }
         </div>
     }
     else
@@ -913,6 +918,16 @@
         .Where(a => a.Status == AssignmentStatus.Published)
         .OrderByDescending(a => a.PublishedDate ?? a.DateCreated)
         .ToList();
+
+    // Only Pending, Approved and Published have sections; the empty state keys off those, not off assignments.Any().
+    private bool HasVisibleAssignments =>
+        pendingAssignments.Any() || approvedAssignments.Any() || publishedAssignments.Any();
+
+    // Assignments in a status with no section (Draft, Rejected, Cancelled).
+    private int HiddenAssignmentCount => assignments.Count(a =>
+        a.Status != AssignmentStatus.PendingApproval &&
+        a.Status != AssignmentStatus.Approved &&
+        a.Status != AssignmentStatus.Published);
 
     private bool isLoading = true;
     private bool isPublishing = false;
