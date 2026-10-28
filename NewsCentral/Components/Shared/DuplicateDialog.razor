@@ -1,11 +1,19 @@
 @using NewsCentral.Models
 @using NewsCentral.Authorization
+@using NewsCentral.Ui
+@implements IDisposable
+@inject Services.PresentationService PresentationService
 @inject Services.AuthenticationService AuthService
 @inject Services.TeamService TeamService
 
+@* Duplicates one presentation into many teams. The dialog owns the team selection and the run: it loads the
+   authorable teams once when it opens (never on a later parameter set), reads the source once per run, then
+   copies to each selected team one after another with progress, Stop and a summary. After a run the selection
+   shrinks to the failed and unprocessed teams, so pressing the primary button again retries only those. *@
+
 @if (IsVisible)
 {
-    <div class="modal-overlay" @onclick="Cancel">
+    <div class="modal-overlay" @onclick="OverlayClicked">
         <div class="modal-content duplicate-dialog" @onclick:stopPropagation="true">
             <div class="dialog-icon"><span>📄</span></div>
 
@@ -13,21 +21,26 @@
             <p>@Message</p>
 
             <div class="dialog-field">
-                <select class="form-select" @bind="selectedTeamId">
-                    <option value="" disabled selected>@PlaceholderText</option>
-                    @foreach (var team in authorableTeams)
-                    {
-                        <option value="@team.TeamID">
-                            @team.Name@(team.FolderName == Source?.TeamFolderName ? $" {CurrentTeamSuffix}" : "")
-                        </option>
-                    }
-                </select>
+                <TeamMultiSelect Teams="authorableTeams" Selection="selection"
+                                 CurrentTeamId="@Source?.TeamID" CurrentTeamSuffix="@CurrentTeamSuffix"
+                                 Disabled="running" OnSelectionChanged="StateHasChanged" />
+
+                <BulkRunPanel TItem="Team" Running="running" Done="runDone" Total="runTotal" Verb="@verb"
+                              Result="result" OnStop="Stop" ItemLabel="@(t => t.Name)" />
+
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="alert alert-danger mt-2">@errorMessage</div>
+                }
             </div>
 
             <div class="dialog-actions">
-                <button @onclick="Cancel" class="btn btn-secondary">@CancelText</button>
-                <button @onclick="Confirm" class="btn btn-primary"
-                        disabled="@string.IsNullOrEmpty(selectedTeamId)">@ConfirmText</button>
+                <button @onclick="Close" class="btn btn-secondary" disabled="@running">
+                    @(result != null ? CloseText : CancelText)
+                </button>
+                <button @onclick="Confirm" class="btn btn-primary" disabled="@(running || selection.Count == 0)">
+                    @(ConfirmLabel?.Invoke(selection.Count) ?? selection.Count.ToString())
+                </button>
             </div>
         </div>
     </div>
@@ -51,8 +64,10 @@
         background: white;
         padding: 30px;
         border-radius: 10px;
-        max-width: 420px;
+        max-width: 640px;
         width: 90%;
+        max-height: 90vh;
+        overflow-y: auto;
         text-align: center;
         box-shadow: 0 10px 40px rgba(0,0,0,0.3);
         animation: slideIn 0.3s;
@@ -85,38 +100,133 @@
     [Parameter] public Presentation? Source { get; set; }
     [Parameter] public string Title { get; set; } = "Duplicate presentation";
     [Parameter] public string Message { get; set; } = string.Empty;
-    [Parameter] public string ConfirmText { get; set; } = "Duplicate";
     [Parameter] public string CancelText { get; set; } = "Cancel";
-    [Parameter] public string PlaceholderText { get; set; } = "Select team…";
+    [Parameter] public string CloseText { get; set; } = "Close";
     [Parameter] public string CurrentTeamSuffix { get; set; } = "(current team)";
-    [Parameter] public EventCallback<Team> OnConfirm { get; set; }
-    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public Func<int, string>? ConfirmLabel { get; set; }
+
+    /// <summary>Raised when the dialog closes; the argument is true when at least one copy succeeded while it was open.</summary>
+    [Parameter] public EventCallback<bool> OnClose { get; set; }
+
+    private const string verb = "Duplicating";
 
     private List<Team> authorableTeams = new();
-    private string selectedTeamId = string.Empty;
+    private SelectionModel<string> selection = new();
+    private BulkRunResult<Team>? result;
+    private string? errorMessage;
+    private bool anySucceeded;
+    private bool running;
+    private int runDone;
+    private int runTotal;
+    private bool wasVisible;
+    private bool disposed;
+    private CancellationTokenSource? cts;
 
     protected override async Task OnParametersSetAsync()
     {
-        if (IsVisible)
-        {
-            var user = AuthService.GetCurrentUser();
-            var allTeams = await TeamService.GetAllTeamsAsync();
-            authorableTeams = TeamAuthorization.AuthorableTeams(allTeams, user);
-        }
-        else
-        {
-            // Reset selection when closed so a re-open starts unselected.
-            selectedTeamId = string.Empty;
-            authorableTeams = new();
-        }
+        var opening = IsVisible && !wasVisible;
+        wasVisible = IsVisible;
+
+        // Load on the closed-to-open transition only; any other parameter set must not reload teams.
+        if (!opening) return;
+
+        selection = new SelectionModel<string>();
+        result = null;
+        errorMessage = null;
+        anySucceeded = false;
+
+        var user = AuthService.GetCurrentUser();
+        var allTeams = await TeamService.GetAllTeamsAsync();
+        authorableTeams = TeamAuthorization.AuthorableTeams(allTeams, user);
     }
+
+    private async Task OverlayClicked()
+    {
+        if (!running) await Close();
+    }
+
+    private Task Close() => OnClose.InvokeAsync(anySucceeded);
+
+    private void Stop() => cts?.Cancel();
 
     private async Task Confirm()
     {
-        var team = authorableTeams.FirstOrDefault(t => t.TeamID == selectedTeamId);
-        if (team is null) return;   // Confirm is disabled until a team is chosen
-        await OnConfirm.InvokeAsync(team);
+        if (Source is null || running) return;
+
+        var targets = authorableTeams
+            .Where(t => selection.IsSelected(t.TeamID))
+            .OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (targets.Count == 0) return;
+
+        result = null;
+        errorMessage = null;
+        running = true;
+        runDone = 0;
+        runTotal = targets.Count;
+
+        Services.DuplicateSource source;
+        try
+        {
+            source = await PresentationService.LoadDuplicateSourceAsync(Source.TeamFolderName, Source.PresentationID);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            running = false;
+            return;
+        }
+
+        cts = new CancellationTokenSource();
+        var progress = new InlineProgress(p =>
+        {
+            runDone = p.done;
+            runTotal = p.total;
+            if (!disposed) StateHasChanged();
+        });
+
+        BulkRunResult<Team> run;
+        try
+        {
+            run = await BulkOperationRunner.RunAsync(
+                targets,
+                async t =>
+                {
+                    await PresentationService.DuplicateToTeamAsync(source, t.TeamID, t.FolderName);
+                    return BulkItemOutcome.Success();
+                },
+                progress,
+                cts.Token);
+        }
+        finally
+        {
+            cts.Dispose();
+            cts = null;
+        }
+
+        if (disposed) return;
+
+        result = run;
+        if (run.SucceededCount > 0) anySucceeded = true;
+
+        // Retry by shrinking the selection to the failed and unprocessed teams.
+        selection.Clear();
+        foreach (var team in BulkRetrySelection.Remaining(targets, run))
+            selection.Set(team.TeamID, true);
+
+        running = false;
     }
 
-    private async Task Cancel() => await OnCancel.InvokeAsync();
+    public void Dispose()
+    {
+        disposed = true;
+        try { cts?.Cancel(); }
+        catch (ObjectDisposedException) { }
+    }
+
+    // Progress.Report posts to the captured context; the runner already runs on the renderer's, so call straight through.
+    private sealed class InlineProgress(Action<(int done, int total)> onReport) : IProgress<(int done, int total)>
+    {
+        public void Report((int done, int total) value) => onReport(value);
+    }
 }

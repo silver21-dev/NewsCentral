@@ -38,4 +38,11 @@
   <data name="CreatedByYou" xml:space="preserve"><value>Sie</value></data>
   <data name="CreatedByTeamMember" xml:space="preserve"><value>Teammitglied</value></data>
   <data name="Cancel" xml:space="preserve"><value>Abbrechen</value></data>
+  <data name="Duplicate" xml:space="preserve"><value>Duplizieren</value></data>
+  <data name="DuplicateTitle" xml:space="preserve"><value>Präsentation duplizieren</value></data>
+  <data name="DuplicateMessage" xml:space="preserve"><value>Diese Präsentation in die ausgewählten Teams duplizieren? Jedes Team erhält einen neuen Entwurf mit nur dem gleichen Namen und Bild.</value></data>
+  <data name="DuplicateToTeamsSingular" xml:space="preserve"><value>In {0} Team duplizieren</value></data>
+  <data name="DuplicateToTeamsPlural" xml:space="preserve"><value>In {0} Teams duplizieren</value></data>
+  <data name="Close" xml:space="preserve"><value>Schließen</value></data>
+  <data name="CurrentTeamSuffix" xml:space="preserve"><value>(aktuelles Team)</value></data>
 </root>

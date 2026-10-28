@@ -15,7 +15,7 @@
 
 | Service | Purpose |
 |---|---|
-| `PresentationService` | CRUD for presentations |
+| `PresentationService` | CRUD for presentations. Duplicate loads the source once and copies it to each selected team sequentially, with Stop, one `PresentationDuplicated` audit record per target, and a failed source load audited as a Failure. |
 | `AssignmentService` | Assignment lifecycle and approval workflow |
 | `PublishingService` | Publishes approved assignments to the repository |
 | `IndexGenerationService` | Generates and writes `index.json` for each team; signs the index via `EcdsaSignatureService` using the team's private key from `team-signing.json`; key file ABSENT → published unsigned with a warning; key file present but UNREADABLE → generation and publish fail with an error naming the team and reason (`SigningKeyUnreadableException`, `SigningKeyGate`). Keys are read from the secure store via `TeamKeyService` (see `docs/anti-tamper.md` §9). Public methods: `LoadTeamSigningKeysAsync` (returns a `TeamKeyLoadResult`), `SaveTeamSigningKeysAsync`, `EnsureSigningKeyUsableAsync` (publish pre-flight; used by `KeyManagement.razor`). |
@@ -91,6 +91,8 @@ fingerprint**.
 `PresentationDuplicated`, `PresentationUpdated`, `PresentationDeleted`; `AssignmentPublished`, `AssignmentDeleted`
 (there is no unpublish operation); `IndexRegenerationFailed` (outcome Failure, target = team, detail = reason: the index after a delete or edit was not updated because the signing key was unreadable); `EnvironmentAdded`, `EnvironmentDeleted` (removed from the environment list),
 `EnvironmentInitialized`, `EnvironmentSettingsChanged` (changed field names only); `AuditEnabled`, `AuditDisabled`.
+
+`PresentationDuplicated` is recorded once per target team (detail `from=…; to=…; copy=…`); a source that cannot be loaded is one Failure record (detail `from=…; source unavailable: …`).
 
 **Toggling.** `AuditDisabled` is written **before** logging stops and `AuditEnabled` **after** it starts
 (`AuditToggle`). If saving the setting fails after `AuditDisabled` was written, a second `AuditDisabled` line with

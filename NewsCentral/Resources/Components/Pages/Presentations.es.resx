@@ -38,4 +38,11 @@
   <data name="CreatedByYou" xml:space="preserve"><value>Usted</value></data>
   <data name="CreatedByTeamMember" xml:space="preserve"><value>Miembro del equipo</value></data>
   <data name="Cancel" xml:space="preserve"><value>Cancelar</value></data>
+  <data name="Duplicate" xml:space="preserve"><value>Duplicar</value></data>
+  <data name="DuplicateTitle" xml:space="preserve"><value>Duplicar presentación</value></data>
+  <data name="DuplicateMessage" xml:space="preserve"><value>¿Duplicar esta presentación en los equipos seleccionados? Cada equipo recibe un nuevo borrador con solo el mismo nombre e imagen.</value></data>
+  <data name="DuplicateToTeamsSingular" xml:space="preserve"><value>Duplicar en {0} equipo</value></data>
+  <data name="DuplicateToTeamsPlural" xml:space="preserve"><value>Duplicar en {0} equipos</value></data>
+  <data name="Close" xml:space="preserve"><value>Cerrar</value></data>
+  <data name="CurrentTeamSuffix" xml:space="preserve"><value>(equipo actual)</value></data>
 </root>

@@ -40,9 +40,10 @@
   <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="Duplicate" xml:space="preserve"><value>Duplicate</value></data>
   <data name="DuplicateTitle" xml:space="preserve"><value>Duplicate Presentation</value></data>
-  <data name="DuplicateMessage" xml:space="preserve"><value>Duplicate this presentation into the selected team? A new draft is created with the same name and picture only.</value></data>
-  <data name="SelectTeam" xml:space="preserve"><value>Select team…</value></data>
+  <data name="DuplicateMessage" xml:space="preserve"><value>Duplicate this presentation into the selected teams? Each team gets a new draft with the same name and picture only.</value></data>
+  <data name="DuplicateToTeamsSingular" xml:space="preserve"><value>Duplicate to {0} team</value></data>
+  <data name="DuplicateToTeamsPlural" xml:space="preserve"><value>Duplicate to {0} teams</value></data>
+  <data name="Close" xml:space="preserve"><value>Close</value></data>
   <data name="CurrentTeamSuffix" xml:space="preserve"><value>(current team)</value></data>
-  <data name="DuplicateSuccess" xml:space="preserve"><value>Presentation duplicated successfully</value></data>
   <data name="Comment" xml:space="preserve"><value>Comment:</value></data>
 </root>

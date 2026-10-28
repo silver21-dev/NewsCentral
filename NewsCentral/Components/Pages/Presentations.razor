@@ -137,12 +137,11 @@
                  Source="@presentationToDuplicate"
                  Title="@Localizer["DuplicateTitle"]"
                  Message="@Localizer["DuplicateMessage"]"
-                 ConfirmText="@Localizer["Duplicate"]"
                  CancelText="@Localizer["Cancel"]"
-                 PlaceholderText="@Localizer["SelectTeam"]"
+                 CloseText="@Localizer["Close"]"
                  CurrentTeamSuffix="@Localizer["CurrentTeamSuffix"]"
-                 OnConfirm="ConfirmDuplicate"
-                 OnCancel="CancelDuplicate" />
+                 ConfirmLabel="DuplicateConfirmLabel"
+                 OnClose="CloseDuplicate" />
 
 <style>
     .presentations-container {
@@ -498,44 +497,19 @@
         showDuplicate = true;
     }
 
-    private void CancelDuplicate()
+    // The dialog owns the run and its summary; here we only close it and refresh when a copy was made.
+    private async Task CloseDuplicate(bool anySucceeded)
     {
         showDuplicate = false;
         presentationToDuplicate = null;
+
+        if (anySucceeded)
+            await LoadPresentations();   // a copy shows here only when the current team was a target
     }
 
-    // NEW: Confirm — duplicate into the selected target team, then refresh the current view
-    private async Task ConfirmDuplicate(Team targetTeam)
-    {
-        if (presentationToDuplicate == null) return;
-
-        try
-        {
-            var duplicateSource = await PresentationService.LoadDuplicateSourceAsync(
-                presentationToDuplicate.TeamFolderName,
-                presentationToDuplicate.PresentationID);
-            await PresentationService.DuplicateToTeamAsync(
-                duplicateSource,
-                targetTeam.TeamID,
-                targetTeam.FolderName);
-
-            showDuplicate = false;
-            presentationToDuplicate = null;
-
-            successMessage = Localizer["DuplicateSuccess"];
-            await LoadPresentations();   // copy appears here only if the target is the current team
-
-            await Task.Delay(3000);
-            successMessage = string.Empty;
-            StateHasChanged();
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"Error duplicating presentation: {ex.Message}";
-            showDuplicate = false;
-            presentationToDuplicate = null;
-        }
-    }
+    private string DuplicateConfirmLabel(int count) => count == 1
+        ? string.Format(Localizer["DuplicateToTeamsSingular"].Value, count)
+        : string.Format(Localizer["DuplicateToTeamsPlural"].Value, count);
 
     private bool CanDelete(Presentation presentation)
     {

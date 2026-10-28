@@ -38,4 +38,11 @@
   <data name="CreatedByYou" xml:space="preserve"><value>Vous</value></data>
   <data name="CreatedByTeamMember" xml:space="preserve"><value>Membre de l'équipe</value></data>
   <data name="Cancel" xml:space="preserve"><value>Annuler</value></data>
+  <data name="Duplicate" xml:space="preserve"><value>Dupliquer</value></data>
+  <data name="DuplicateTitle" xml:space="preserve"><value>Dupliquer la présentation</value></data>
+  <data name="DuplicateMessage" xml:space="preserve"><value>Dupliquer cette présentation dans les équipes sélectionnées ? Chaque équipe reçoit un nouveau brouillon avec uniquement le même nom et la même image.</value></data>
+  <data name="DuplicateToTeamsSingular" xml:space="preserve"><value>Dupliquer dans {0} équipe</value></data>
+  <data name="DuplicateToTeamsPlural" xml:space="preserve"><value>Dupliquer dans {0} équipes</value></data>
+  <data name="Close" xml:space="preserve"><value>Fermer</value></data>
+  <data name="CurrentTeamSuffix" xml:space="preserve"><value>(équipe actuelle)</value></data>
 </root>
