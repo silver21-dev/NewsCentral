@@ -143,6 +143,7 @@ These are not auto-loaded. Read the ones a task touches; a prompt's READ FIRST l
 | Document | Read when |
 |---|---|
 | docs/anti-tamper.md | index signing, integrity values, key trust |
+| docs/authorization.md | roles, permission checks, folder ACLs and Azure RBAC for the authoring app |
 | docs/azure-setup.md | Azure/Entra app regs, RBAC, Graph consent |
 | docs/config-review-spec.md | the config review page in NewsCentral |
 | docs/configuration.md | any registry/appsettings key or its type |

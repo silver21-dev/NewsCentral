@@ -166,8 +166,9 @@ folder is also read-only for authors (`docs/anti-tamper.md` §9), so the rule ho
 
 ## Role Model
 
-- `SystemAdmin` — full access across all teams
-- `ContentAuthor` — creates and edits content within their team; edit/delete restricted to creator or SystemAdmin
+Four roles: `SystemAdmin` (environment-wide flag) and the per-team `ContentAuthor`, `ContentApprover` and
+`TeamAdmin`. What each may do, where it is enforced, and the folder and Azure permissions behind it:
+`docs/authorization.md`.
 
 **Assignment delete eligibility (any status)** — SystemAdmin, the assignment's creator, or a
 ContentAuthor of the assignment's **source** team (`AssignmentService.DeleteAssignmentAsync`'s own
