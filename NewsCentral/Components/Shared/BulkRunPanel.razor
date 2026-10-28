@@ -26,7 +26,7 @@ else if (Result != null)
             <ul class="mb-0 mt-1">
                 @foreach (var w in warnings.Take(5))
                 {
-                    <li>@ItemLabel(w.Item):@w.Outcome.Warning?.TrimEnd('.')</li>
+                    <li>@ItemLabel(w.Item): @w.Outcome.Warning?.TrimEnd('.')</li>
                 }
             </ul>
         }
@@ -36,7 +36,7 @@ else if (Result != null)
             <ul class="mb-0 mt-2">
                 @foreach (var f in failures.Take(20))
                 {
-                    <li>@ItemLabel(f.Item):@f.Outcome.Error?.TrimEnd('.')</li>
+                    <li>@ItemLabel(f.Item): @f.Outcome.Error?.TrimEnd('.')</li>
                 }
                 @if (failures.Count > 20)
                 {
