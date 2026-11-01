@@ -115,14 +115,19 @@ public sealed class EnvironmentKeyService
         Action<EnvironmentSigningKeys, DateTime> mutate,
         Func<EnvironmentSigningKeys, EnvironmentSigningKeys, string> detail)
     {
-        if (!_isSystemAdmin())
-            throw new UnauthorizedAccessException("Only a system administrator can manage the signing key.");
-
         await _gate.WaitAsync();
         try
         {
+            var refusedNotAdmin = false;
             try
             {
+                // Inside the audited block so a refused attempt leaves a Failure record; nothing is read or written.
+                if (!_isSystemAdmin())
+                {
+                    refusedNotAdmin = true;
+                    throw new UnauthorizedAccessException("Only a system administrator can manage the signing key.");
+                }
+
                 var resolved = await _resolveSecureRoot();
                 if (resolved.Root is null)
                     throw new InvalidOperationException($"The secure path is unavailable ({resolved.Error ?? "unknown"}).");
@@ -153,7 +158,8 @@ public sealed class EnvironmentKeyService
             catch (Exception ex)
             {
                 // The reason never contains key material: it is one of the fixed messages above or an IO error text.
-                await _audit.RecordAsync(new AuditRecord(eventName, AuditTarget, AuditOutcome.Failure, AuditLogExtensions.Describe(ex)));
+                var failure = refusedNotAdmin ? "not a system administrator" : AuditLogExtensions.Describe(ex);
+                await _audit.RecordAsync(new AuditRecord(eventName, AuditTarget, AuditOutcome.Failure, failure));
                 throw;
             }
         }

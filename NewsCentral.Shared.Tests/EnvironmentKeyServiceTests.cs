@@ -334,20 +334,33 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
     }
 
     [Fact]
-    public async Task NonSystemAdmin_IsRefusedForEveryAction_AndNothingIsWrittenOrAudited()
+    public async Task NonSystemAdmin_IsRefusedForEveryAction_AuditedOnceAsFailure_AndNothingIsWritten()
     {
         _admin = false;
         var svc = Service();
-        var actions = new Func<string?, Task<EnvironmentSigningKeys>>[]
+        var actions = new (string Event, Func<string?, Task<EnvironmentSigningKeys>> Run)[]
         {
-            svc.GenerateAsync, svc.PrepareNextAsync, c => svc.DiscardNextAsync(c, null), c => svc.ActivateNextAsync(c, null), svc.RetirePreviousAsync
+            (AuditEvents.KeyGenerated, svc.GenerateAsync),
+            (AuditEvents.KeyPrepared,  svc.PrepareNextAsync),
+            (AuditEvents.KeyDiscarded, c => svc.DiscardNextAsync(c, null)),
+            (AuditEvents.KeyRotated,   c => svc.ActivateNextAsync(c, null)),
+            (AuditEvents.KeyRetired,   svc.RetirePreviousAsync)
         };
 
-        foreach (var action in actions)
-            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => action(null));
+        foreach (var (eventName, run) in actions)
+        {
+            _audit.Records.Clear();
+
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => run(null));
+
+            var record = Assert.Single(_audit.Records);
+            Assert.Equal(eventName, record.Event);
+            Assert.Equal(AuditOutcome.Failure, record.Outcome);
+            Assert.Equal("not a system administrator", record.Detail);
+            Assert.Equal(EnvironmentKeyService.AuditTarget, record.Target);
+        }
 
         Assert.False(File.Exists(KeyFilePath));
-        Assert.Empty(_audit.Records);
     }
 
     // ── audit: fingerprints only ────────────────────────────────────────────
