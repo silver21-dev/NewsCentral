@@ -11,12 +11,12 @@ public sealed class SigningKeyConfigurationReaderTests
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Signing:team-x:PublicKey"]         = "PUBKEY_CURRENT",
-                ["Signing:team-x:PublicKeyPrevious"] = "PUBKEY_PREVIOUS"
+                ["Signing:PublicKey"]         = "PUBKEY_CURRENT",
+                ["Signing:PublicKeyPrevious"] = "PUBKEY_PREVIOUS"
             })
             .Build();
 
-        var keys = SigningKeyConfigurationReader.GetPublicKeys(config, "team-x");
+        var keys = SigningKeyConfigurationReader.GetPublicKeys(config);
 
         Assert.Equal(2, keys.Length);
         Assert.Equal("PUBKEY_CURRENT",  keys[0]);
@@ -29,12 +29,12 @@ public sealed class SigningKeyConfigurationReaderTests
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Signing:team-x:PublicKey"]         = "",                // empty → omitted
-                ["Signing:team-x:PublicKeyPrevious"] = "PUBKEY_PREVIOUS"
+                ["Signing:PublicKey"]         = "",                // empty → omitted
+                ["Signing:PublicKeyPrevious"] = "PUBKEY_PREVIOUS"
             })
             .Build();
 
-        var keys = SigningKeyConfigurationReader.GetPublicKeys(config, "team-x");
+        var keys = SigningKeyConfigurationReader.GetPublicKeys(config);
 
         Assert.Single(keys);
         Assert.Equal("PUBKEY_PREVIOUS", keys[0]);
@@ -47,12 +47,12 @@ public sealed class SigningKeyConfigurationReaderTests
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Signing:team-x:PublicKeyPrevious"] = "PUBKEY_PREVIOUS"
+                ["Signing:PublicKeyPrevious"] = "PUBKEY_PREVIOUS"
                 // PublicKey absent → null
             })
             .Build();
 
-        var keys = SigningKeyConfigurationReader.GetPublicKeys(config, "team-x");
+        var keys = SigningKeyConfigurationReader.GetPublicKeys(config);
 
         Assert.Single(keys);
         Assert.Equal("PUBKEY_PREVIOUS", keys[0]);
@@ -65,28 +65,24 @@ public sealed class SigningKeyConfigurationReaderTests
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        var keys = SigningKeyConfigurationReader.GetPublicKeys(config, "team-x");
+        var keys = SigningKeyConfigurationReader.GetPublicKeys(config);
 
         Assert.Empty(keys);
     }
 
     [Fact]
-    public void GetPublicKeys_IsScopedToTeam()
+    public void GetPublicKeys_IgnoresLegacyPerTeamKeys()
     {
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Signing:team-a:PublicKey"] = "KEY_A",
-                ["Signing:team-b:PublicKey"] = "KEY_B"
+                ["Signing:PublicKey"]        = "KEY_ENV"
             })
             .Build();
 
-        var keysA = SigningKeyConfigurationReader.GetPublicKeys(config, "team-a");
-        var keysB = SigningKeyConfigurationReader.GetPublicKeys(config, "team-b");
+        var keys = SigningKeyConfigurationReader.GetPublicKeys(config);
 
-        Assert.Single(keysA);
-        Assert.Equal("KEY_A", keysA[0]);
-        Assert.Single(keysB);
-        Assert.Equal("KEY_B", keysB[0]);
+        Assert.Equal(new[] { "KEY_ENV" }, keys);
     }
 }

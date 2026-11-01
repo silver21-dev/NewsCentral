@@ -56,7 +56,7 @@ public sealed class CacheIntegrityHealTests : IDisposable
         return JsonSerializer.Serialize(index, JsonDefaults.Options);
     }
 
-    private Task<bool> Sync(SyncService sut) => sut.SyncTeamAsync(Team, isDynamic: false, CancellationToken.None);
+    private Task<bool> Sync(SyncService sut) => sut.SyncTeamAsync(Team, CancellationToken.None);
 
     private async Task Seed(SyncService sut, FakeRepository repo, CapturingLogger log)
     {

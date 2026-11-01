@@ -106,10 +106,7 @@ public sealed class TeamKeyStore
     /// A short identifier for the key pair for audit lines: the first 16 hex chars of SHA-256 over the PUBLIC key.
     /// Never derived from or containing private material. Null when there is no public key.
     /// </summary>
-    public static string? Fingerprint(TeamSigningKeys? keys) =>
-        string.IsNullOrEmpty(keys?.PublicKey)
-            ? null
-            : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(keys.PublicKey)))[..16].ToLowerInvariant();
+    public static string? Fingerprint(TeamSigningKeys? keys) => KeyFingerprint.Of(keys?.PublicKey);
 
     internal static string Describe(Exception ex) => ex switch
     {

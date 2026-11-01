@@ -23,8 +23,8 @@
 - All components are configurable via `appsettings.json`. Registry values (`HKLM\Software\[Company]\NewsCentral\`) override `appsettings.json`. Each component has its own subkey (sole exception: NewsViewer reads NewsService's `Delivery` flags, read-only).
 - Storage backend (local file share vs. Azure Blob Storage) is switchable via registry without code changes.
 - Local/file share mode is the **primary development and testing configuration**. No Azure dependency is required for full functional testing.
-- HMAC-SHA256 anti-tamper for session telemetry — NewsViewer signs, NewsService verifies; `index.json` signing moved to per-team ECDSA (see below).
-- ECDSA P-256 per-team `index.json` signing — Phases A, B1 & C complete: signing core in `NewsCentral.Shared`, `IndexGenerationService` signs with team key, `SyncService` and `PresentationSelector` verify via `SigningKeyConfigurationReader`. Static-team key rotation uses `PublicKeyPrevious` (dual-key, `docs/anti-tamper.md`). B2 (Key Management page) complete; D (registry scripts) implemented in `scripts/Set-RegistryOverrides.ps1` at dev/pilot scope, GPO owns fleet configuration; see `docs/security.md`.
+- HMAC-SHA256 anti-tamper for session telemetry — NewsViewer signs, NewsService verifies; `index.json` signing moved to ECDSA (see below).
+- ECDSA P-256 `index.json` signing, per-environment key, `KeyId`, team binding (M1: verification only): signing core in `NewsCentral.Shared`, `IndexGenerationService` sets the signed `KeyId` and signs, `SyncService` and `PresentationSelector` verify via `SignatureGate.Verify` with the flat keys from `SigningKeyConfigurationReader`; missing/unknown `KeyId` or a team mismatch always rejects. Rotation uses `PublicKeyPrevious` (`docs/anti-tamper.md`). Key storage and Key Management stay per-team until M3. B2 (Key Management page) complete; D (registry scripts) implemented in `scripts/Set-RegistryOverrides.ps1` at dev/pilot scope, GPO owns fleet configuration; see `docs/security.md`.
 - All domain models live in **NewsCentral.Shared** — no model duplication across projects.
 - NativeAOT migration path is preserved for NewsViewer: new P/Invoke code uses `LibraryImport`, while the legacy `NativeMethods.cs` and `WallpaperService.cs` still use `DllImport` (blittable, AOT-compatible) until they are migrated; `AllowUnsafeBlocks` is enabled only for the generated stubs; no hand-written unsafe code; no COM.
 - Fleet components ship **framework-dependent** — .NET 10 Desktop Runtime (x64) required on every target machine (declared prerequisite, not bundled). See `docs/packaging.md`.
@@ -49,7 +49,7 @@ NewsService-only, gated by `Entra:Enabled` (default `false`). Each poll cycle Ne
 - Grace and identity are keyed `(Source, SourceId)` — **per instance**. The configured instance set is read locally and is authoritative: a removed or retargeted instance is pruned **without grace** on the next cycle, even during a Graph outage.
 - Group instances: `SourceId` and team folder name are both `Canonicalize(InclusionGroup)` — **derived, never authored**. The registry subkey is a diagnostic label only.
 - The global exclusion group **fails closed**: an unresolvable name suppresses every group instance.
-- Key trust (Option A, key-with-content): registry key wins → else the delivered `SigningPublicKey` (**dynamic teams only**) → else unsigned per `RequireSignedIndex`. Dynamic teams are rotation-free.
+- Key trust: dynamic teams verify exactly like static ones - the flat registry key (`Signing\PublicKey` / `PublicKeyPrevious`) selected by the signed `KeyId`, with `TeamFolderName` bound to the synced folder. No key is delivered in the index.
 - Single Azure app registration shared with Blob; `AzureBlob:*` must be populated even when `StorageMode=Share`.
 - **Status:** structurally complete and offline/fake-tested, shipping behind `Entra:Enabled=false`; **live validation on an Entra-joined box is still pending**.
 

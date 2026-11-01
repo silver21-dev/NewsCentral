@@ -5,23 +5,22 @@ namespace NewsCentral.Configuration;
 public static class SigningKeyConfigurationReader
 {
     /// <summary>
-    /// Returns the ECDSA public keys for <paramref name="teamFolderName"/> in
-    /// priority order — current key first, previous key second — suitable for
-    /// passing directly to <see cref="NewsCentral.Security.EcdsaSignatureService.Verify{T}"/>.
-    /// Null/empty entries are omitted; an empty array is returned when neither key
-    /// is configured, which causes Verify to return <c>Disabled</c>.
+    /// Returns the environment's ECDSA public keys in priority order — current key first, previous key
+    /// second — suitable for <see cref="NewsCentral.Security.SignatureGate.Verify"/>. Null/empty entries are
+    /// omitted; an empty array is returned when neither key is configured, which makes the gate return
+    /// <c>Disabled</c>.
     /// </summary>
     /// <remarks>
-    /// Registry source (NewsService):
-    ///   HKLM\Software\[Company]\NewsCentral\NewsService\Signing\{teamFolderName}\PublicKey
-    ///   HKLM\Software\[Company]\NewsCentral\NewsService\Signing\{teamFolderName}\PublicKeyPrevious
-    /// Both are surfaced as configuration keys by <see cref="RegistryConfigurationProvider"/>
-    /// via its recursive WalkKey traversal.
+    /// One key pair per environment, so the keys are flat (not per team). Registry source:
+    ///   HKLM\Software\[Company]\NewsCentral\NewsService\Signing\PublicKey
+    ///   HKLM\Software\[Company]\NewsCentral\NewsService\Signing\PublicKeyPrevious
+    /// and the same under NewsViewer\Signing. Both are surfaced as configuration keys
+    /// (<c>Signing:PublicKey</c>, <c>Signing:PublicKeyPrevious</c>) by <see cref="RegistryConfigurationProvider"/>.
     /// </remarks>
-    public static string?[] GetPublicKeys(IConfiguration config, string teamFolderName)
+    public static string?[] GetPublicKeys(IConfiguration config)
     {
-        var current  = config[$"Signing:{teamFolderName}:PublicKey"];
-        var previous = config[$"Signing:{teamFolderName}:PublicKeyPrevious"];
+        var current  = config["Signing:PublicKey"];
+        var previous = config["Signing:PublicKeyPrevious"];
 
         return new[] { current, previous }
             .Where(k => !string.IsNullOrEmpty(k))

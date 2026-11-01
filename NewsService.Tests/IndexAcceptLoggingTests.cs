@@ -38,7 +38,7 @@ public sealed class IndexAcceptLoggingTests : IDisposable
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                [$"Signing:{Team}:PublicKey"] = publicKey
+                ["Signing:PublicKey"] = publicKey
             })
             .Build();
 
@@ -60,9 +60,10 @@ public sealed class IndexAcceptLoggingTests : IDisposable
         IndexHash      = hash
     };
 
-    private static string SignedJson(string hash, string privateKey)
+    private static string SignedJson(string hash, string privateKey, string publicKey)
     {
         var index = NewIndex(hash);
+        index.KeyId     = KeyFingerprint.Of(publicKey);
         index.Signature = Ecdsa.Sign(index, privateKey);
         return JsonSerializer.Serialize(index, JsonDefaults.Options);
     }
@@ -73,7 +74,7 @@ public sealed class IndexAcceptLoggingTests : IDisposable
     private static bool IsAccept(string message) => message.Contains("index accepted");
     private static bool IsReject(string message) => message.Contains("index rejected");
 
-    private Task Sync(SyncService sut) => sut.SyncTeamAsync(Team, isDynamic: false, CancellationToken.None);
+    private Task Sync(SyncService sut) => sut.SyncTeamAsync(Team, CancellationToken.None);
 
     // ── Facts ─────────────────────────────────────────────────────────────────
 
@@ -82,7 +83,7 @@ public sealed class IndexAcceptLoggingTests : IDisposable
     {
         var (priv, pub) = SigningKeyTool.GenerateKeyPair();
         var (sut, log, repo, cache) = NewSut(pub);
-        repo.Text = SignedJson("h1", priv);
+        repo.Text = SignedJson("h1", priv, pub);
         await cache.WriteTextAsync($"{Team}/index.json", repo.Text);   // cache already current
 
         // First cycle: result first seen for this team → natural level (Information).
@@ -102,13 +103,13 @@ public sealed class IndexAcceptLoggingTests : IDisposable
     {
         var (priv, pub) = SigningKeyTool.GenerateKeyPair();
         var (sut, log, repo, cache) = NewSut(pub);
-        repo.Text = SignedJson("h1", priv);
+        repo.Text = SignedJson("h1", priv, pub);
         await cache.WriteTextAsync($"{Team}/index.json", repo.Text);
 
         await Sync(sut);            // settle: result now known, index unchanged
         log.Entries.Clear();
 
-        repo.Text = SignedJson("h2", priv);   // index CHANGED, result still Valid
+        repo.Text = SignedJson("h2", priv, pub);   // index CHANGED, result still Valid
         await Sync(sut);
 
         Assert.Contains(log.Entries, e => e.Level == LogLevel.Information && IsAccept(e.Message));
@@ -143,7 +144,7 @@ public sealed class IndexAcceptLoggingTests : IDisposable
         var (priv, _) = SigningKeyTool.GenerateKeyPair();
         var (_, otherPub) = SigningKeyTool.GenerateKeyPair();
         var (sut, log, repo, _) = NewSut(otherPub);       // wrong key → Invalid → rejected
-        repo.Text = SignedJson("h1", priv);
+        repo.Text = SignedJson("h1", priv, otherPub);
 
         await Sync(sut);
         Assert.Contains(log.Entries, e => e.Level == LogLevel.Error && IsReject(e.Message));
@@ -168,7 +169,7 @@ public sealed class IndexAcceptLoggingTests : IDisposable
         await Sync(sut);            // Unsigned recorded (Warning)
         log.Entries.Clear();
 
-        repo.Text = SignedJson("h1", priv);   // same IndexHash, but now validly signed
+        repo.Text = SignedJson("h1", priv, pub);   // same IndexHash, but now validly signed
         await Sync(sut);
 
         // Index unchanged, but Unsigned → Valid is a state change → Information, not Debug.

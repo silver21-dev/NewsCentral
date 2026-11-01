@@ -86,9 +86,9 @@ public sealed class SyncService(
         await RefreshEntraTeamsAsync(ct);
 
         // Effective teams = static (registry/appsettings) ∪ dynamic (Entra-resolved). Per-team
-        // verification routes through SignatureGate.VerifyWithPrecedence (registry key wins →
-        // delivered key for dynamic teams → unsigned), so dynamic-only branching never leaks here.
-        var (effectiveTeams, dynamicTeams) = ResolveEffectiveTeams(teams, cache.Root);
+        // verification routes through SignatureGate.Verify (KeyId selects the configured key, team binding),
+        // so dynamic and static teams verify identically.
+        var (effectiveTeams, _) = ResolveEffectiveTeams(teams, cache.Root);
 
         // An empty effective set is a legitimate, ongoing state — never a reason to skip the rest
         // of the cycle. Display-surface teardown, status.json, and telemetry retention all still
@@ -105,7 +105,7 @@ public sealed class SyncService(
             }
             else
             {
-                online = await SyncAllTeamsAsync(effectiveTeams, dynamicTeams, ct);
+                online = await SyncAllTeamsAsync(effectiveTeams, ct);
                 syncSource = online ? repository.SyncSource : "None";
             }
 
@@ -191,7 +191,7 @@ public sealed class SyncService(
     // ── Step 1 — team sync ───────────────────────────────────────────────────
 
     internal async Task<bool> SyncAllTeamsAsync(
-        IReadOnlyList<string> teams, HashSet<string> dynamicTeams, CancellationToken ct)
+        IReadOnlyList<string> teams, CancellationToken ct)
     {
         // An empty list is vacuously "no failures" but is not "synced successfully" — without this
         // check, RunCycleAsync would report isOnline = true on a cycle that synced nothing at all.
@@ -206,7 +206,7 @@ public sealed class SyncService(
                 ct.ThrowIfCancellationRequested();
                 try
                 {
-                    if (await SyncTeamAsync(teamFolder, dynamicTeams.Contains(teamFolder), ct))
+                    if (await SyncTeamAsync(teamFolder, ct))
                         contentChangedThisCycle = true;
                 }
                 catch (Exception ex)
@@ -233,7 +233,7 @@ public sealed class SyncService(
     /// unchanged, rejected or incomplete sync (an incomplete sync leaves the previously cached index in
     /// effect and is retried next cycle, downloading only what is still missing).
     /// </summary>
-    internal async Task<bool> SyncTeamAsync(string teamFolder, bool isDynamic, CancellationToken ct)
+    internal async Task<bool> SyncTeamAsync(string teamFolder, CancellationToken ct)
     {
         var remoteJson = await repository.ReadTextAsync($"{teamFolder}/index.json", ct);
         if (remoteJson is null)
@@ -245,8 +245,8 @@ public sealed class SyncService(
         var remoteIndex = JsonSerializer.Deserialize<TeamIndexFile>(remoteJson, Json);
         if (remoteIndex is null) return false;
 
-        var keys          = SigningKeyConfigurationReader.GetPublicKeys(configuration, teamFolder);
-        var result        = SignatureGate.VerifyWithPrecedence(remoteIndex, keys, isDynamic);
+        var keys          = SigningKeyConfigurationReader.GetPublicKeys(configuration);
+        var result        = SignatureGate.Verify(remoteIndex, teamFolder, keys);
         var requireSigned = configuration.GetValue<bool>("Signing:RequireSignedIndex");
 
         // Tracked for rejected results too, so a later recovery (e.g. Invalid → Valid after a key
@@ -255,7 +255,7 @@ public sealed class SyncService(
                             || previous != result;
         _lastVerifyResult[teamFolder] = result;
 
-        if (SignatureGate.ShouldReject(result, requireSigned, out var reason))
+        if (SignatureGate.ShouldReject(result, requireSigned, out var reason, remoteIndex))
         {
             // Security outcome — always Error, never demoted or gated on change.
             logger.LogError("Team {Team}: index rejected — {Reason}", teamFolder, reason);

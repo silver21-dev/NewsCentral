@@ -55,7 +55,7 @@ public sealed class SyncCompletenessTests : IDisposable
     private static string Hash(byte[] b) =>
         "sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(b)).ToLowerInvariant();
 
-    private Task<bool> Sync(SyncService sut) => sut.SyncTeamAsync(Team, isDynamic: false, CancellationToken.None);
+    private Task<bool> Sync(SyncService sut) => sut.SyncTeamAsync(Team, CancellationToken.None);
 
     private async Task<string?> CachedHash(CacheManager cache) =>
         (await cache.ReadJsonAsync<TeamIndexFile>($"{Team}/index.json"))?.IndexHash;

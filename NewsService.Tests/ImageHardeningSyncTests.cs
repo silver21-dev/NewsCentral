@@ -59,7 +59,7 @@ public sealed class ImageHardeningSyncTests : IDisposable
         return JsonSerializer.Serialize(index, JsonDefaults.Options);
     }
 
-    private Task<bool> Sync(SyncService sut) => sut.SyncTeamAsync(Team, isDynamic: false, CancellationToken.None);
+    private Task<bool> Sync(SyncService sut) => sut.SyncTeamAsync(Team, CancellationToken.None);
 
     private string CacheFile(string name) => Path.Combine(_root, Team, "images", "generated", name);
 

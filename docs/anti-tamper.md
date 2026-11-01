@@ -33,12 +33,11 @@ Three independent integrity values protect different artifacts:
 | **Image hash** | SHA-256, lower-case hex, `sha256:{hex}` prefix | NewsCentral `IndexGenerationService.BuildContentInfoAsync` | `content.imageHash` **inside** the signed index (so the hash is itself signature-covered) | NewsViewer `PresentationSelector.VerifyImageHash` at display time |
 | **Session telemetry** | HMAC-SHA256, Base64 | NewsViewer `TelemetryWriter` → `HmacService.Sign` | `session-*.json` `signature` field | NewsService `TelemetryUploader` → `HmacService.Verify` |
 
-**Index signature — canonical payload.** `EcdsaSignatureService.Canonicalize` temporarily nulls the
-`Signature` field — and, for key-carrying indexes, the delivered `SigningPublicKey` (via
-`IDeliveredKeyCarrier`) — then serializes with **non-indented, camelCase, enums-as-strings** JSON
-(`CanonicalOptions`). Nulling `SigningPublicKey` combined with `[JsonIgnore(WhenWritingNull)]` keeps
-the canonical bytes bit-identical whether or not a delivered key is present, so the signature never
-covers the delivered key and every pre-key static signature still verifies. **Whole-second
+**Index signature — canonical payload.** `EcdsaSignatureService.Canonicalize` temporarily nulls only the
+`Signature` field, then serializes with **non-indented, camelCase, enums-as-strings** JSON
+(`CanonicalOptions`). `KeyId` IS part of the signed payload; with `[JsonIgnore(WhenWritingNull)]` an index
+without a `KeyId` canonicalizes exactly as before, so the .NET 9 fixture still verifies (a retired
+`signingPublicKey` property in an old file is an unknown property and is ignored). **Whole-second
 timestamps** are not produced by the canonical serializer itself — before signing, the index is
 round-tripped through `JsonConfiguration.GetIndexJsonOptions()` (which uses `SmartDateTimeConverter`
 to truncate `DateTime` to whole seconds), so the signed payload matches the persisted-form bytes
@@ -60,8 +59,8 @@ Every anti-tamper-relevant value. Registry paths are under
 
 | Value | Registry path (per component) | Type | Default | Read by | Effect |
 |---|---|---|---|---|---|
-| Team public key | `…\<Component>\Signing\{teamFolderName}\PublicKey` | `REG_SZ` (Base64 SPKI) | — | NewsService, NewsViewer | Verification key for the team's `index.json`. Surfaced as `Signing:{team}:PublicKey`; read by `SigningKeyConfigurationReader.GetPublicKeys`. |
-| Previous public key | `…\<Component>\Signing\{teamFolderName}\PublicKeyPrevious` | `REG_SZ` (Base64 SPKI) | — | NewsService, NewsViewer | Rotation window — verification accepts a signature made by either key (current tried first, then previous). |
+| Environment public key | `…\<Component>\Signing\PublicKey` | `REG_SZ` (Base64 SPKI) | — | NewsService, NewsViewer | Verification key for every team's `index.json` (one key pair per environment). Surfaced as `Signing:PublicKey`; read by `SigningKeyConfigurationReader.GetPublicKeys`. |
+| Previous public key | `…\<Component>\Signing\PublicKeyPrevious` | `REG_SZ` (Base64 SPKI) | — | NewsService, NewsViewer | Rotation window — the index `KeyId` selects the current or the previous key. |
 | Require signed index | `…\<Component>\Signing\RequireSignedIndex` | `REG_SZ` `"true"`/`"false"` | `false` | NewsService, NewsViewer | Fail-closed switch — when `true`, `Unsigned` and `Disabled` are rejected in addition to `Invalid` (§4). |
 | Bypass image integrity | `…\NewsViewer\BypassImageIntegrityCheck` | `DWORD` (`0`/`1`) | `0` (false) | NewsViewer | `1` skips the display-time image SHA-256 re-check (dev/test). |
 | HMAC secret key | `…\<Component>\Hmac\SecretKey` | `REG_SZ` (Base64 32-byte) | `""` | NewsViewer (sign), NewsService (verify) | Telemetry HMAC key. Empty = HMAC disabled (telemetry treated as `Disabled` and passed through). Not used for index signing. |
@@ -77,7 +76,7 @@ the environment's **secure store** (§9) on the **authoring tier only** — neve
 `IBlobDistributionService`, never synced to client machines, and no longer under the shared DataPath.
 NewsCentral loads it via `IndexGenerationService.LoadTeamSigningKeysAsync` to sign; the Key Management
 page manages it (see `docs/newscentral-spec.md`). The public key is what gets distributed — to the
-registry (static teams) or with the content as `SigningPublicKey` (dynamic teams, §5).
+registry (flat `Signing\PublicKey`, §5); only its fingerprint (`KeyId`) travels with the content. Key storage and Key Management are still per-team until M3.
 
 ## 4. Enforcement behavior
 
@@ -91,8 +90,7 @@ identical across both verifiers:
 | `Unsigned` | accept (warning) | **reject** |
 | `Disabled` | accept | **reject** |
 
-`Disabled` means no verification key was available at all (no registry key, and — for a static team —
-no delivered key is ever consulted). Default `false` preserves phased-rollout pass-through: only a
+`Disabled` means no verification key was configured. `KeyIdMissing`, `KeyIdUnknown` and `TeamMismatch` (§5) are rejected in both modes, regardless of `RequireSignedIndex`. Default `false` preserves phased-rollout pass-through: only a
 present-but-wrong signature (`Invalid`) is rejected.
 
 **Per-module reject action:**
@@ -108,50 +106,42 @@ present-but-wrong signature (`Invalid`) is rejected.
 
 **NewsCentral signer modes** (`IndexGenerationService.GenerateIndexForTeamAsync`):
 
-- **Sign** — `team-signing.json` has a `PrivateKey`: the index is signed and the team's current
-  `PublicKey` is embedded as `SigningPublicKey` (key-with-content, §5).
+- **Sign** — `team-signing.json` has a `PrivateKey`: the index's `KeyId` is set to `KeyFingerprint.Of(PublicKey)` and then the index is signed (`KeyId` is covered by the signature).
 - **Unsigned-with-warning** — no signing key: `Signature = null`, published unsigned with a warning
   (phased-rollout safe; consumers treat it as `Unsigned`).
 - **Self-verify guard aborts publish** — after signing, the index is serialized with the persisted
   options and re-deserialized with the client-verifier options (case-insensitive, enum converter, **no**
-  `SmartDateTimeConverter`), then re-verified against the team's own public key. Any result other than
+  `SmartDateTimeConverter`), then re-verified through `SignatureGate.Verify(reloaded, teamFolderName, [publicKey])`, so KeyId and team binding are self-checked. Any result other than
   `Valid` throws `InvalidOperationException` and **aborts the publish before any file is written or
   pushed** — catching canonical/persisted-form drift at the authoring tier instead of shipping an index
   every client would reject.
 
-## 5. Static vs dynamic (Entra) key-trust model
+## 5. Key trust: one key per environment, KeyId, team binding
 
-A team's verification key is chosen by **precedence** in
-`SignatureGate.VerifyWithPrecedence(index, registryPublicKeys, isDynamicTeam)`:
+One ECDSA key pair signs every team's index in an environment. Verification is a single path for static and
+dynamic (Entra) teams alike - `SignatureGate.Verify(index, expectedTeamFolder, publicKeys)`, where
+`publicKeys` come from the flat registry values `Signing\PublicKey` and `Signing\PublicKeyPrevious`:
 
-| Condition | Key used | Result |
+| Step | Condition | Result |
 |---|---|---|
-| Registry public key configured (either current or previous non-empty) | Registry key(s), dual-key rotation | **Registry always wins** — delivered key never consulted |
-| No registry key, **dynamic** team, `SigningPublicKey` present | Delivered key | verified against the delivered key |
-| No registry key, **dynamic** team, `SigningPublicKey` absent | — | `Unsigned` |
-| No registry key, **static** team | — | `Disabled` (delivered key never consulted) |
+| 1 | no non-empty key configured | `Disabled` |
+| 2 | `signature` absent | `Unsigned` |
+| 3 | `keyId` absent or empty | `KeyIdMissing` |
+| 4 | `keyId` equals no configured key's `KeyFingerprint.Of` | `KeyIdUnknown` |
+| 5 | signature fails against the matching key only | `Invalid` |
+| 6 | `teamFolderName` differs from the folder being synced (OrdinalIgnoreCase) | `TeamMismatch` |
+| 7 | otherwise | `Valid` |
 
-Callers do `VerifyWithPrecedence(...)` → `ShouldReject(...)`; the §4 matrix then applies uniformly to
-whatever result precedence produced (so `RequireSignedIndex = true` rejects a `Disabled` static team
-with no registry key and a dynamic team carrying no delivered key alike).
+`KeyFingerprint.Of` = first 16 lowercase hex chars of SHA-256 over the decoded SPKI bytes. `KeyId` and
+`teamFolderName` are inside the signed payload, so neither can be swapped without invalidating the signature;
+the team binding stops an index signed for team A from being accepted in team B's folder now that one key
+signs them all. Callers do `Verify(...)` then `ShouldReject(...)`: `KeyIdMissing`, `KeyIdUnknown` and
+`TeamMismatch` always reject; the §4 matrix applies to the other results.
 
-**Why dynamic teams use key-with-content.** Entra-resolved teams (attribute- or group-derived; see
-`docs/entra-dynamic-teams.md`) appear at runtime and cannot be pre-provisioned with a registry public
-key. Instead NewsCentral emits the team's public key **with the content** in
-`TeamIndexFile.SigningPublicKey` (Base64 SPKI, the same form as the registry key) for **all** teams —
-a static consumer ignores it via precedence, a dynamic consumer verifies against it. Whether a team is
-static or dynamic is a property of the **consuming machine** (does `resolved-teams.json` list it?),
-not of the team, which is why every index carries the key.
-
-**Weaker anchoring, and its mitigation.** A delivered key is only as trustworthy as the distribution
-channel that carried it — authenticity for dynamic teams rests on **distribution-tier RBAC** (only
-authorized publishers can write a team's `index.json` + `SigningPublicKey`). The model is **not**
-protective against an attacker who can write the distribution channel or holds local admin on the
-consuming machine. Anti-downgrade guarantees limit the blast radius: (1) the delivered key is **never**
-used for a static team, so a key cannot be attached to downgrade a statically-trusted team; (2) a
-present registry key **always** overrides the delivered key. To harden a dynamic team, **deploy a
-registry `PublicKey` for it** — precedence makes the registry key win, pinning trust exactly as for a
-static team.
+**No delivered key.** Earlier versions embedded the public key in the index (`SigningPublicKey`) so
+Entra-resolved teams could verify without a registry key. That path was removed: anyone able to write the
+repository could sign with their own key and ship it. Dynamic teams now verify against the same registry
+key as static ones.
 
 **`resolved-teams.json`.** The list of dynamic teams NewsService resolves each cycle carries **no
 signatures** — it is a local-tier file trusted via **`%programdata%` cache ACLs**, holding only team
@@ -186,9 +176,7 @@ ECDSA **signature** governs trust, not change detection; the two are independent
 
 **Cache ACLs.** The `%programdata%\NewsCentral\` cache — the `index.json` copies, the cached images,
 and `resolved-teams.json` — is protected by filesystem ACLs. That protection is the trust anchor for
-the local consumption leg (especially the unsigned `resolved-teams.json` and, for dynamic teams, the
-delivered-key path); it is a deployment prerequisite. A future anchored-root upgrade (Option B in
-`docs/future.md`) would harden the delivered-key leg beyond ACLs. The lock-screen leg specifically no
+the local consumption leg (especially the unsigned `resolved-teams.json`); it is a deployment prerequisite. The lock-screen leg specifically no
 longer depends solely on this cache ACL for its final apply — see §7.
 
 ## 7. Display-surface publish-folder hardening (NewsService)

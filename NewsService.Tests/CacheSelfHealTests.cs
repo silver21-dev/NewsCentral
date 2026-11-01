@@ -56,7 +56,7 @@ public sealed class CacheSelfHealTests : IDisposable
     }
 
     private static Task<bool> Sync(SyncService sut, string team = Team) =>
-        sut.SyncTeamAsync(team, isDynamic: false, CancellationToken.None);
+        sut.SyncTeamAsync(team, CancellationToken.None);
 
     /// <summary>Initial sync populates the cache; counters and log are then reset.</summary>
     private static async Task Seed(SyncService sut, FakeRepository repo, CapturingLogger log, CountingNotifier n,
@@ -152,7 +152,7 @@ public sealed class CacheSelfHealTests : IDisposable
         File.Delete(CachePath("a.png"));
         repo.Texts["bad/index.json"] = "not json";   // deserialization throws for this team
 
-        await sut.SyncAllTeamsAsync(["bad", Team], new HashSet<string>(), CancellationToken.None);
+        await sut.SyncAllTeamsAsync(["bad", Team], CancellationToken.None);
 
         Assert.True(File.Exists(CachePath("a.png")));
         Assert.Contains(log.Entries, e => e.Level == LogLevel.Error && e.Message.Contains("bad"));

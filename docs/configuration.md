@@ -45,7 +45,7 @@ HKLM\Software\[Company]\NewsCentral\NewsService\
 │       <teamFolderName>\
 │           PublicKey          REG_SZ   (Base64 SubjectPublicKeyInfo — ECDSA index verification)
 │           PublicKeyPrevious  REG_SZ   (Base64 SPKI; optional — rotation window)
-│       (one subtree per team; surfaced as Signing:{teamFolderName}:PublicKey via RegistryConfigurationProvider)
+│       (flat PublicKey / PublicKeyPrevious; surfaced as Signing:PublicKey via RegistryConfigurationProvider)
 ├── Entra\
 │       Enabled              REG_SZ    "true" or "false"  (default false; gates the whole feature)
 │       GracePeriodMinutes   REG_SZ    (int retention window in minutes for the last resolved team while Graph is unreachable; default 240; MUST be REG_SZ — 0 = "no grace" is deliberate, and DWORD 0/1 coerce to "False"/"True" and the int binder throws)
@@ -111,7 +111,7 @@ HKLM\Software\[Company]\NewsCentral\NewsViewer\
 │       <teamFolderName>\
 │           PublicKey          REG_SZ   (Base64 SubjectPublicKeyInfo — ECDSA index verification)
 │           PublicKeyPrevious  REG_SZ   (Base64 SPKI; optional — rotation window)
-│       (one subtree per team; surfaced as Signing:{teamFolderName}:PublicKey via RegistryConfigurationProvider)
+│       (flat PublicKey / PublicKeyPrevious; surfaced as Signing:PublicKey via RegistryConfigurationProvider)
 ├── Delivery\
 │       WallpaperStyle            REG_SZ   (Fill | Fit | Stretch | Center | Tile; default Fit — style only, the image is NewsService/CSP-owned)
 │       WallpaperBackgroundColor  REG_SZ   ("R G B" desktop background for Fit letterbox bars; default "0 0 0")
@@ -199,7 +199,7 @@ HKLM\Software\[Company]\NewsCentral\NewsTester\
 
 **`teams\` sub-hive:** team folder names are the value *names* (not the value data). Value names must match the generated folder name exactly — the sanitized team name with no `team-` prefix (e.g. `cz-its`, not `CZ_ITS`). The provider exposes them as `teams:0`, `teams:1`, … so `IConfiguration.GetSection("teams").GetChildren()` returns one entry per team. Use `TeamConfigurationReader.GetTeams(configuration)` to read them.
 
-**`Signing\` sub-hive:** contains `RequireSignedIndex` (REG_SZ `"true"`/`"false"`, default `"false"`) plus one subkey per team. Each team subkey holds `PublicKey` and (optionally) `PublicKeyPrevious` as `REG_SZ` values containing Base64-encoded SubjectPublicKeyInfo. `RegistryConfigurationProvider` surfaces all values via its recursive `WalkKey` traversal: `Signing:RequireSignedIndex`, `Signing:{teamFolderName}:PublicKey`, and `Signing:{teamFolderName}:PublicKeyPrevious`. Use `SigningKeyConfigurationReader.GetPublicKeys(configuration, teamFolderName)` to read the key list; use `configuration.GetValue<bool>("Signing:RequireSignedIndex")` to read the flag. When `RequireSignedIndex` is `true`, `SignatureGate.ShouldReject` rejects Unsigned and Disabled indexes in addition to Invalid — enabling fail-closed enforcement. NewsService and NewsViewer each maintain their own separate `Signing\` subtrees.
+**`Signing\` sub-hive:** contains `RequireSignedIndex` (REG_SZ `"true"`/`"false"`, default `"false"`) plus the environment's `PublicKey` and (optionally) `PublicKeyPrevious` (one key pair per environment since M1; per-team subkeys are no longer read) as `REG_SZ` values containing Base64-encoded SubjectPublicKeyInfo. `RegistryConfigurationProvider` surfaces all values via its recursive `WalkKey` traversal: `Signing:RequireSignedIndex`, `Signing:PublicKey`, and `Signing:PublicKeyPrevious`. Use `SigningKeyConfigurationReader.GetPublicKeys(configuration)` to read the key list; use `configuration.GetValue<bool>("Signing:RequireSignedIndex")` to read the flag. When `RequireSignedIndex` is `true`, `SignatureGate.ShouldReject` rejects Unsigned and Disabled indexes in addition to Invalid — enabling fail-closed enforcement. NewsService and NewsViewer each maintain their own separate `Signing\` subtrees.
 
 ## environment.json — secure store, audit log (NewsCentral)
 

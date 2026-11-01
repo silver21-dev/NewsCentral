@@ -42,12 +42,9 @@ public sealed class CanonicalJsonFixtureTests
         };
         var index = JsonSerializer.Deserialize<TeamIndexFile>(json, verifierOptions)!;
 
-        // Registry-key path (static team) and delivered-key path (dynamic team).
-        Assert.Equal(VerifyResult.Valid,
-            SignatureGate.VerifyWithPrecedence(index, new string?[] { publicKey }, isDynamicTeam: false));
-        Assert.Equal(publicKey, index.SigningPublicKey);
-        Assert.Equal(VerifyResult.Valid,
-            SignatureGate.VerifyWithPrecedence(index, Array.Empty<string?>(), isDynamicTeam: true));
+        // The fixture predates KeyId (and still carries the retired signingPublicKey property, which is ignored),
+        // so it is checked at the canonicalization layer: same bytes in, same signature out.
+        Assert.Equal(VerifyResult.Valid, new EcdsaSignatureService().Verify(index, publicKey));
     }
 
     /// <summary>
@@ -71,7 +68,6 @@ public sealed class CanonicalJsonFixtureTests
             TeamName = "CZ ITS – Žluťoučký tým",
             GeneratedAt = new DateTime(2026, 10, 12, 8, 30, 15, 987, DateTimeKind.Utc).AddTicks(1234),
             Version = "1.0.0",
-            SigningPublicKey = publicKey,
             PublishedAssignments =
             {
                 new PublishedAssignmentIndex

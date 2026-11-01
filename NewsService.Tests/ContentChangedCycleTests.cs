@@ -54,7 +54,7 @@ public sealed class ContentChangedCycleTests : IDisposable
         "sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(b)).ToLowerInvariant();
 
     private static Task Cycle(SyncService sut, params string[] teams) =>
-        sut.SyncAllTeamsAsync(teams, new HashSet<string>(), CancellationToken.None);
+        sut.SyncAllTeamsAsync(teams, CancellationToken.None);
 
     [Fact]
     public async Task TwoTeamsChange_NotifierCalledOnce_AfterLastTeamFinished()

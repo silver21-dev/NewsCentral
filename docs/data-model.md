@@ -276,7 +276,7 @@ Trust assumption: team content authors are trusted, and their processes are gran
 The `index.json` written to each team folder by NewsCentral and consumed by NewsService and NewsViewer.
 
 ```csharp
-public class TeamIndexFile : ISignable, IDeliveredKeyCarrier
+public class TeamIndexFile : ISignable
 {
     public string TeamFolderName { get; set; }
     public string TeamName { get; set; }
@@ -285,16 +285,14 @@ public class TeamIndexFile : ISignable, IDeliveredKeyCarrier
     public string IndexHash { get; set; }               // SHA256 of content for change detection
     public List<PublishedAssignmentIndex> PublishedAssignments { get; set; }
     public IndexStatistics Statistics { get; set; }
-    public string? Signature { get; set; }              // ECDSA P-256 per-team (Phases B1+C complete)
+    public string? Signature { get; set; }              // ECDSA P-256 (one key per environment since M1)
 
-    // Phase 3a — key-with-content: the team's public key (Base64 SubjectPublicKeyInfo, the same
-    // form as the registry PublicKey) travels with the index for dynamic (Entra-resolved) teams.
-    // [JsonIgnore(WhenWritingNull)] + null-and-restore in EcdsaSignatureService.Canonicalize
-    // EXCLUDE it from the canonical signing input exactly like Signature, so the signature does
-    // not cover this field and a null value leaves the canonical bytes bit-identical to the
-    // pre-key form (every existing static-team signature still verifies).
+    // M1: KeyFingerprint.Of(public key) - first 16 lowercase hex of SHA-256 over the decoded SPKI.
+    // Part of the signed payload; verifiers use it to pick the configured key. Null on an unsigned
+    // index (omitted from JSON). The former signingPublicKey property is gone; old files that still
+    // contain it deserialize (unknown property ignored) but have no keyId and are rejected.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? SigningPublicKey { get; set; }
+    public string? KeyId { get; set; }
 }
 ```
 
@@ -417,7 +415,7 @@ registry comparison self-heals failed applies without a separate state record.
 
 Model: `NewsCentral.Models.ResolvedTeamsFile` (in `NewsCentral.Shared`). Written by NewsService to `{CacheRootPath}\resolved-teams.json` each poll cycle; read by NewsViewer, which **unions** these entries with the registry static team list.
 
-Lists **only** dynamic teams — resolved from either the device's Entra `extensionAttributes` (attribute schemes, see `EntraTeamNameResolver`) or group membership (group teams, see `docs/entra-dynamic-teams.md`); never static (registry-configured) teams. It is a **local-tier file**, **unsigned**, and protected by cache ACLs. It carries no signature fields because dynamic-team `index.json` verification uses a public key **delivered with the team content** (key-with-content model — `TeamIndexFile.SigningPublicKey`, verified via `SignatureGate.VerifyWithPrecedence`; see `docs/security.md`).
+Lists **only** dynamic teams — resolved from either the device's Entra `extensionAttributes` (attribute schemes, see `EntraTeamNameResolver`) or group membership (group teams, see `docs/entra-dynamic-teams.md`); never static (registry-configured) teams. It is a **local-tier file**, **unsigned**, and protected by cache ACLs. It carries no signature fields because dynamic-team `index.json` verification is identical to a static team's (registry key selected by the signed `KeyId`, via `SignatureGate.Verify`; see `docs/security.md`).
 
 ```json
 {

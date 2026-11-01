@@ -14,7 +14,13 @@ public enum VerifyResult
     /// <summary>Signature present and matches.</summary>
     Valid,
     /// <summary>Signature present but does not match — content may have been tampered with.</summary>
-    Invalid
+    Invalid,
+    /// <summary>Signed index carries no KeyId, so no verification key can be selected.</summary>
+    KeyIdMissing,
+    /// <summary>The index KeyId matches none of the configured public keys.</summary>
+    KeyIdUnknown,
+    /// <summary>Signature is valid but the index was signed for a different team folder.</summary>
+    TeamMismatch
 }
 
 /// <summary>

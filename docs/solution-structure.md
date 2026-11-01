@@ -5,7 +5,7 @@
 ```
 NewsCentral.sln
 ├── NewsCentral.Shared\          .NET 10 class library — shared domain models
-├── NewsCentral.Shared.Tests\    .NET 10 xUnit test project — ECDSA signing core + config reader + SignatureGate + Entra resolver/merger + key-with-content precedence + shared readers + active-assignment selector (all passing)
+├── NewsCentral.Shared.Tests\    .NET 10 xUnit test project — ECDSA signing core + config reader + SignatureGate + Entra resolver/merger + KeyId selection + team binding + shared readers + active-assignment selector (all passing)
 ├── NewsCentral\                 .NET 10 MAUI Blazor Hybrid — authoring app (Phase B2 complete)
 ├── NewsService\                 .NET 10 Windows Service — cache sync agent (implemented; Entra device team resolution end-to-end, phases 1–3b)
 ├── NewsService.Tests\           .NET 10 xUnit test project — Entra extension-attribute mapper + resolution orchestrator + effective-team union + registry-gated three-state apply for both display surfaces (lock screen + wallpaper), cross-surface isolation (offline seams; all passing)
@@ -63,7 +63,7 @@ NewsCentral.Shared\
 └── Configuration\
     ├── RegistryConfigurationProvider.cs   IConfigurationProvider/IConfigurationSource + AddRegistryOverrides() extension
     ├── TeamConfigurationReader.cs         GetTeams(IConfiguration) helper
-    ├── SigningKeyConfigurationReader.cs   GetPublicKeys(IConfiguration, teamFolderName) — reads Signing:{team}:PublicKey / :PublicKeyPrevious for ECDSA verification
+    ├── SigningKeyConfigurationReader.cs   GetPublicKeys(IConfiguration) - reads the flat Signing:PublicKey / Signing:PublicKeyPrevious for ECDSA verification
     ├── SolutionConstants.cs               SolutionName = "NewsCentral" — fixed hive segment for AddRegistryOverrides(company, SolutionName, component)
     ├── EntraTeamNameResolver.cs           pure per-scheme attribute resolution: selector → rule → canonicalized team folder name
     ├── EntraResolvedTeamsMerger.cs        pure grace state machine keyed (Source, SourceId); EntraSourceKey, EntraSourceOutcome
@@ -204,7 +204,7 @@ NewsCentral.Shared.Tests\
 ├── NotificationLogicTests.cs               NotificationCountdown state machine, placement/DPI maths, LaunchLogLine format (key as stored)
 ├── SessionTelemetryTests.cs                optional notification fields: HMAC unchanged for poster records, round-trip, tamper detection
 ├── FramePaletteTests.cs                    frame/text colour parsing, automatic contrast, shades, 4.5:1 sweep, fallbacks
-└── … (Entra resolver/merger, delivered-key precedence, shared readers, EffectiveTeams, authoring-app helpers — all passing)
+└── … (Entra resolver/merger, KeyId selection and team binding, shared readers, EffectiveTeams, authoring-app helpers — all passing)
 
 NewsService.Tests\ - also: SyncCompletenessTests (index-last, retry of an incomplete sync), CacheSelfHealTests, ContentChangedCycleTests (one event per cycle), ContentChangedNotifierTests, TaskDefinitionBuilderTests (real embedded XMLs), ViewerTaskScriptTests (mode resolver, script generator, stamp parity with PowerShell, emit command), ViewerTaskVerifierTests (stamp / field-comparison verification, obsolete-key warning, event-source creation).
 ```

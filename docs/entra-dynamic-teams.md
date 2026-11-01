@@ -215,14 +215,13 @@ Dynamic teams are ordinary teams to everything downstream of `resolved-teams.jso
 reads the file into a flat set of team folder names (ignoring `Source`/`SourceId` entirely — they
 exist purely to drive NewsService's own grace bookkeeping); `EffectiveTeams.Union` merges that set
 with the static (registry) team list on both NewsService and NewsViewer; verification routes through
-`SignatureGate.VerifyWithPrecedence` (registry key wins → delivered key for dynamic teams → unsigned
-per `RequireSignedIndex`) exactly as for static teams. NewsViewer is a **read-only** consumer of
+`SignatureGate.Verify` (the signed `KeyId` selects the configured registry key; team binding; see `docs/anti-tamper.md` §5) exactly as for static teams. NewsViewer is a **read-only** consumer of
 `resolved-teams.json` — it never writes it. The authoring and signing sides are untouched by any of
 this: a dynamic team's `index.json` is authored, published, and signed exactly like a static team's.
 
-**Trust model - Option A (key-with-content).** The team signing **public** key is embedded in `index.json` (`SigningPublicKey`) for **all** teams - static-vs-dynamic is a property of the *consuming machine*, not the team, so the key is inert for static consumers. Precedence (`SignatureGate.VerifyWithPrecedence`): registry key wins -> else delivered key (**dynamic teams only**) -> else unsigned per `RequireSignedIndex`. The delivered key is never used for static teams and never overrides a registry key. Dynamic teams are **rotation-free** (the key travels with the content).
+**Trust model.** Dynamic teams verify exactly like static ones: against the environment's flat registry key (`Signing\PublicKey` / `PublicKeyPrevious`), selected by the signed `KeyId`, with the index's `TeamFolderName` bound to the folder being synced. No key is delivered with the content (removed in M1), so a dynamic team needs the same registry key as a static one and rotates the same way.
 
-See `docs/security.md` for the key-with-content trust model and `docs/data-model.md` for the
+See `docs/security.md` for the trust model and `docs/data-model.md` for the
 `resolved-teams.json` schema.
 
 This consumption symmetry did not hold until recently: both `NewsService/Worker.cs` and

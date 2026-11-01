@@ -81,15 +81,14 @@ public sealed class PresentationSelector
 
     /// <summary>
     /// Yields every assignment from each effective team's index.json that passes signature
-    /// verification (SignatureGate.VerifyWithPrecedence → ShouldReject). Rejected/unreadable
+    /// verification (SignatureGate.Verify → ShouldReject). Rejected/unreadable
     /// indexes are skipped. No active-window or display-type filtering is applied here.
     /// </summary>
     private IEnumerable<(string Team, PublishedAssignmentIndex Assignment)> EnumerateVerifiedAssignments(string[] teams)
     {
         // Effective teams = static (registry/appsettings) ∪ dynamic (Entra-resolved, read-only here;
-        // NewsViewer never writes resolved-teams.json). Per-team verification routes through
-        // SignatureGate.VerifyWithPrecedence so registry-wins / delivered-key / anti-downgrade are
-        // handled centrally — no precedence branching at this call site.
+        // NewsViewer never writes resolved-teams.json). Every team verifies the same way through
+        // SignatureGate.Verify (KeyId selects the configured key, team binding).
         var dynamicTeams   = ResolvedTeamsReader.ReadDynamicTeamFolders(_cacheRootPath);
         var effectiveTeams = EffectiveTeams.Union(teams, dynamicTeams);
 
@@ -108,10 +107,10 @@ public sealed class PresentationSelector
 
             if (index?.PublishedAssignments is null) continue;
 
-            var keys          = SigningKeyConfigurationReader.GetPublicKeys(_configuration, team);
-            var result        = SignatureGate.VerifyWithPrecedence(index, keys, dynamicTeams.Contains(team));
+            var keys          = SigningKeyConfigurationReader.GetPublicKeys(_configuration);
+            var result        = SignatureGate.Verify(index, team, keys);
             var requireSigned = _configuration.GetValue<bool>("Signing:RequireSignedIndex");
-            if (SignatureGate.ShouldReject(result, requireSigned, out var reason))
+            if (SignatureGate.ShouldReject(result, requireSigned, out var reason, index))
             {
                 System.Diagnostics.Debug.WriteLine($"[Signing] {team}: index rejected — {reason}");
                 continue;

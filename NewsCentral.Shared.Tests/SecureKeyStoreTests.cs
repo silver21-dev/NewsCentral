@@ -38,7 +38,7 @@ public abstract class SecureStoreTestBase : IDisposable
     protected static TeamSigningKeys Keys(string tag = "a") => new()
     {
         PrivateKey = "priv-" + tag,
-        PublicKey = "pub-" + tag
+        PublicKey = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("pub-" + tag))   // valid Base64: the fingerprint decodes it
     };
 
     protected string WriteLegacy(string team, TeamSigningKeys keys)
@@ -139,7 +139,7 @@ public sealed class TeamKeyStoreTests : SecureStoreTestBase
     [Fact]
     public void Fingerprint_IsDerivedFromThePublicKeyOnly()
     {
-        var f = TeamKeyStore.Fingerprint(new TeamSigningKeys { PrivateKey = "SECRET", PublicKey = "pub" });
+        var f = TeamKeyStore.Fingerprint(new TeamSigningKeys { PrivateKey = "SECRET", PublicKey = "cHVi" });
 
         Assert.Equal(16, f!.Length);
         Assert.DoesNotContain("SECRET", f);

@@ -33,7 +33,7 @@ public sealed class ContentChangedNotifierTests : IDisposable
         bool requireSigned = false, string? publicKey = null, bool throwing = false)
     {
         var settings = new Dictionary<string, string?> { ["Signing:RequireSignedIndex"] = requireSigned.ToString() };
-        if (publicKey is not null) settings[$"Signing:{Team}:PublicKey"] = publicKey;
+        if (publicKey is not null) settings["Signing:PublicKey"] = publicKey;
         var config   = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
         var repo     = new FakeRepository();
         var cache    = new CacheManager(_root, JsonDefaults.Options);
@@ -62,7 +62,7 @@ public sealed class ContentChangedNotifierTests : IDisposable
     }
 
     private Task Sync(SyncService sut) =>
-        sut.SyncAllTeamsAsync([Team], new HashSet<string>(), CancellationToken.None);
+        sut.SyncAllTeamsAsync([Team], CancellationToken.None);
 
     [Fact]
     public async Task AcceptedChange_WithImage_NotifiesOnce_AfterCacheIsPopulated()
