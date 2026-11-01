@@ -197,6 +197,7 @@
     private SigningKeyLoadResult? keyLoad;
     private EnvironmentSigningKeys? keys;
     private string? loadedKeyId;      // fingerprint of Current when the page loaded; every action sends it back
+    private string? loadedNextKeyId; // fingerprint of Next when the page loaded; Activate and Discard send it back
     private bool isBusy;
     private string? pendingAction;    // prepare, activate, discard or retire: waiting for confirmation
     private string? copyFeedback;
@@ -231,6 +232,7 @@
             keyLoad = await KeyService.LoadAsync();
             keys = keyLoad.Keys;
             loadedKeyId = KeyFingerprint.Of(keys?.Current?.PublicKey);
+            loadedNextKeyId = KeyFingerprint.Of(keys?.Next?.PublicKey);
             pendingAction = null;
         }
         catch (Exception ex)
@@ -244,8 +246,8 @@
         switch (pendingAction)
         {
             case "prepare": await RunAsync(KeyService.PrepareNextAsync, "PreparedOk"); break;
-            case "activate": await RunAsync(KeyService.ActivateNextAsync, "ActivatedOk", showLink: true); break;
-            case "discard": await RunAsync(KeyService.DiscardNextAsync, "DiscardedOk"); break;
+            case "activate": await RunAsync(current => KeyService.ActivateNextAsync(current, loadedNextKeyId), "ActivatedOk", showLink: true); break;
+            case "discard": await RunAsync(current => KeyService.DiscardNextAsync(current, loadedNextKeyId), "DiscardedOk"); break;
             case "retire": await RunAsync(KeyService.RetirePreviousAsync, "RetiredOk"); break;
         }
     }
@@ -264,6 +266,7 @@
             keys = await action(loadedKeyId);
             keyLoad = SigningKeyLoadResult.Loaded(keys);
             loadedKeyId = KeyFingerprint.Of(keys.Current?.PublicKey);
+            loadedNextKeyId = KeyFingerprint.Of(keys.Next?.PublicKey);
             pendingAction = null;
             successMessage = Localizer[successKey];
             showIndexLink = showLink;

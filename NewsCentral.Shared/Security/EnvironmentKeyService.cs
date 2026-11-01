@@ -56,13 +56,13 @@ public sealed class EnvironmentKeyService
         k.Next != null ? k.Current?.PublicKey : k.PreviousPublicKey);
 
     public Task<EnvironmentSigningKeys> GenerateAsync(string? expectedCurrentKeyId) =>
-        ApplyAsync(AuditEvents.KeyGenerated, expectedCurrentKeyId,
+        ApplyAsync(AuditEvents.KeyGenerated, expectedCurrentKeyId, null, false,
             keys => keys.Current != null ? "an environment signing key already exists" : null,
             (keys, now) => keys.Current = NewPair(now),
             (before, after) => $"fingerprint={KeyFingerprint.Of(after.Current?.PublicKey)}");
 
     public Task<EnvironmentSigningKeys> PrepareNextAsync(string? expectedCurrentKeyId) =>
-        ApplyAsync(AuditEvents.KeyPrepared, expectedCurrentKeyId,
+        ApplyAsync(AuditEvents.KeyPrepared, expectedCurrentKeyId, null, false,
             keys => keys.Current == null ? "there is no current key to rotate"
                 : keys.Next != null ? "a next key is already prepared"
                 : keys.PreviousPublicKey != null ? "retire the previous key before preparing another"
@@ -70,14 +70,14 @@ public sealed class EnvironmentKeyService
             (keys, now) => keys.Next = NewPair(now),
             (before, after) => $"current={KeyFingerprint.Of(after.Current?.PublicKey)}; next={KeyFingerprint.Of(after.Next?.PublicKey)}");
 
-    public Task<EnvironmentSigningKeys> DiscardNextAsync(string? expectedCurrentKeyId) =>
-        ApplyAsync(AuditEvents.KeyDiscarded, expectedCurrentKeyId,
+    public Task<EnvironmentSigningKeys> DiscardNextAsync(string? expectedCurrentKeyId, string? expectedNextKeyId) =>
+        ApplyAsync(AuditEvents.KeyDiscarded, expectedCurrentKeyId, expectedNextKeyId, true,
             keys => keys.Next == null ? "there is no next key to discard" : null,
             (keys, now) => keys.Next = null,
             (before, after) => $"discarded={KeyFingerprint.Of(before.Next?.PublicKey)}");
 
-    public Task<EnvironmentSigningKeys> ActivateNextAsync(string? expectedCurrentKeyId) =>
-        ApplyAsync(AuditEvents.KeyRotated, expectedCurrentKeyId,
+    public Task<EnvironmentSigningKeys> ActivateNextAsync(string? expectedCurrentKeyId, string? expectedNextKeyId) =>
+        ApplyAsync(AuditEvents.KeyRotated, expectedCurrentKeyId, expectedNextKeyId, true,
             keys => keys.Next == null ? "there is no next key to activate"
                 : keys.PreviousPublicKey != null ? "retire the previous key before activating another"
                 : null,
@@ -91,7 +91,7 @@ public sealed class EnvironmentKeyService
             (before, after) => $"current={KeyFingerprint.Of(after.Current?.PublicKey)}; previous={KeyFingerprint.Of(after.PreviousPublicKey)}");
 
     public Task<EnvironmentSigningKeys> RetirePreviousAsync(string? expectedCurrentKeyId) =>
-        ApplyAsync(AuditEvents.KeyRetired, expectedCurrentKeyId,
+        ApplyAsync(AuditEvents.KeyRetired, expectedCurrentKeyId, null, false,
             keys => keys.PreviousPublicKey == null ? "there is no previous key to retire" : null,
             (keys, now) =>
             {
@@ -109,6 +109,8 @@ public sealed class EnvironmentKeyService
     private async Task<EnvironmentSigningKeys> ApplyAsync(
         string eventName,
         string? expectedCurrentKeyId,
+        string? expectedNextKeyId,
+        bool checkNext,
         Func<EnvironmentSigningKeys, string?> refusal,
         Action<EnvironmentSigningKeys, DateTime> mutate,
         Func<EnvironmentSigningKeys, EnvironmentSigningKeys, string> detail)
@@ -132,7 +134,8 @@ public sealed class EnvironmentKeyService
                         $"The existing environment signing key is not readable ({load.Reason}); it was not replaced.");
 
                 var before = load.Keys ?? new EnvironmentSigningKeys();
-                if (KeyFingerprint.Of(before.Current?.PublicKey) != expectedCurrentKeyId)
+                if (KeyFingerprint.Of(before.Current?.PublicKey) != expectedCurrentKeyId
+                    || (checkNext && KeyFingerprint.Of(before.Next?.PublicKey) != expectedNextKeyId))
                     throw new InvalidOperationException("The key was changed by someone else; reload the page.");
 
                 var why = refusal(before);

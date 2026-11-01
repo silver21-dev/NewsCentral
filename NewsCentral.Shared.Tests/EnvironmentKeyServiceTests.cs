@@ -49,7 +49,8 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
     private async Task<EnvironmentKeyService> WithPrevious()
     {
         var svc = await WithNext();
-        await svc.ActivateNextAsync(Id((await Load(svc)).Current));
+        var cur = await Load(svc);
+        await svc.ActivateNextAsync(Id(cur.Current), Id(cur.Next));
         return svc;
     }
 
@@ -93,7 +94,7 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
         var svc = await WithNext();
         var before = await Load(svc);
 
-        var keys = await svc.DiscardNextAsync(Id(before.Current));
+        var keys = await svc.DiscardNextAsync(Id(before.Current), Id(before.Next));
 
         Assert.Null(keys.Next);
         Assert.Equal(before.Current!.PublicKey, keys.Current!.PublicKey);
@@ -106,7 +107,7 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
         var svc = await WithNext();
         var before = await Load(svc);
 
-        var keys = await svc.ActivateNextAsync(Id(before.Current));
+        var keys = await svc.ActivateNextAsync(Id(before.Current), Id(before.Next));
 
         Assert.Equal(before.Next!.PublicKey, keys.Current!.PublicKey);
         Assert.Equal(before.Next.PrivateKey, keys.Current.PrivateKey);
@@ -140,7 +141,8 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
         var svc = await WithPrevious();
         await svc.RetirePreviousAsync(Id((await Load(svc)).Current));
         await svc.PrepareNextAsync(Id((await Load(svc)).Current));
-        await svc.ActivateNextAsync(Id((await Load(svc)).Current));
+        var cur = await Load(svc);
+        await svc.ActivateNextAsync(Id(cur.Current), Id(cur.Next));
 
         var keys = await Load(svc);
         Assert.NotNull(keys.Current);
@@ -189,7 +191,7 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
         var svc = await WithCurrent();
 
         var id = Id((await Load(svc)).Current);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.DiscardNextAsync(id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.DiscardNextAsync(id, null));
     }
 
     [Fact]
@@ -198,7 +200,7 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
         var svc = await WithCurrent();
         var before = await Load(svc);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.ActivateNextAsync(Id(before.Current)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.ActivateNextAsync(Id(before.Current), null));
 
         Assert.Equal(before.Current!.PublicKey, (await Load(svc)).Current!.PublicKey);
         Assert.Null((await Load(svc)).PreviousPublicKey);
@@ -213,7 +215,7 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
         keys.Next = new SigningKeyPair { PrivateKey = "x", PublicKey = Convert.ToBase64String(new byte[] { 1, 2, 3 }), CreatedAt = Now };
         await new EnvironmentKeyStore(new LocalSecureStorage(SecurePath)).SaveAsync(keys);
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.ActivateNextAsync(Id(keys.Current)));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.ActivateNextAsync(Id(keys.Current), Id(keys.Next)));
 
         Assert.Contains("previous", ex.Message);
         var after = await Load(svc);
@@ -234,6 +236,43 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
     // ── unreadable file, stale page, authorization ──────────────────────────
 
     [Fact]
+    public async Task Activate_WithAStaleNextKeyId_IsRefused_AndWritesNothing()
+    {
+        // The page showed Next A; meanwhile someone discarded it and prepared Next B.
+        var svc = await WithNext();
+        var shown = await Load(svc);
+        await svc.DiscardNextAsync(Id(shown.Current), Id(shown.Next));
+        await svc.PrepareNextAsync(Id(shown.Current));
+        var before = File.ReadAllBytes(KeyFilePath);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.ActivateNextAsync(Id(shown.Current), Id(shown.Next)));
+
+        Assert.Contains("changed by someone else", ex.Message);
+        Assert.Equal(before, File.ReadAllBytes(KeyFilePath));
+        var after = await Load(svc);
+        Assert.Null(after.PreviousPublicKey);
+        Assert.Equal(shown.Current!.PublicKey, after.Current!.PublicKey);
+    }
+
+    [Fact]
+    public async Task Discard_WithAStaleNextKeyId_IsRefused_AndWritesNothing()
+    {
+        var svc = await WithNext();
+        var shown = await Load(svc);
+        await svc.DiscardNextAsync(Id(shown.Current), Id(shown.Next));
+        await svc.PrepareNextAsync(Id(shown.Current));
+        var before = File.ReadAllBytes(KeyFilePath);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.DiscardNextAsync(Id(shown.Current), Id(shown.Next)));
+
+        Assert.Contains("changed by someone else", ex.Message);
+        Assert.Equal(before, File.ReadAllBytes(KeyFilePath));
+        Assert.NotNull((await Load(svc)).Next);
+    }
+
+    [Fact]
     public async Task UnreadableFile_RefusesEveryAction_AndWritesNothing()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(KeyFilePath)!);
@@ -241,7 +280,7 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
         var svc = Service();
         var actions = new Func<string?, Task<EnvironmentSigningKeys>>[]
         {
-            svc.GenerateAsync, svc.PrepareNextAsync, svc.DiscardNextAsync, svc.ActivateNextAsync, svc.RetirePreviousAsync
+            svc.GenerateAsync, svc.PrepareNextAsync, c => svc.DiscardNextAsync(c, null), c => svc.ActivateNextAsync(c, null), svc.RetirePreviousAsync
         };
 
         foreach (var action in actions)
@@ -272,7 +311,7 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
         var before = File.ReadAllBytes(KeyFilePath);
         var actions = new Func<string?, Task<EnvironmentSigningKeys>>[]
         {
-            svc.GenerateAsync, svc.PrepareNextAsync, svc.DiscardNextAsync, svc.ActivateNextAsync, svc.RetirePreviousAsync
+            svc.GenerateAsync, svc.PrepareNextAsync, c => svc.DiscardNextAsync(c, null), c => svc.ActivateNextAsync(c, null), svc.RetirePreviousAsync
         };
 
         foreach (var action in actions)
@@ -301,7 +340,7 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
         var svc = Service();
         var actions = new Func<string?, Task<EnvironmentSigningKeys>>[]
         {
-            svc.GenerateAsync, svc.PrepareNextAsync, svc.DiscardNextAsync, svc.ActivateNextAsync, svc.RetirePreviousAsync
+            svc.GenerateAsync, svc.PrepareNextAsync, c => svc.DiscardNextAsync(c, null), c => svc.ActivateNextAsync(c, null), svc.RetirePreviousAsync
         };
 
         foreach (var action in actions)
@@ -323,10 +362,10 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
         var k1 = await Load(svc); seen.Add(k1);
         await svc.PrepareNextAsync(Id(k1.Current));
         var k2 = await Load(svc); seen.Add(k2);
-        await svc.DiscardNextAsync(Id(k2.Current));
+        await svc.DiscardNextAsync(Id(k2.Current), Id(k2.Next));
         await svc.PrepareNextAsync(Id(k1.Current));
         var k3 = await Load(svc); seen.Add(k3);
-        await svc.ActivateNextAsync(Id(k3.Current));
+        await svc.ActivateNextAsync(Id(k3.Current), Id(k3.Next));
         await svc.RetirePreviousAsync(Id(k3.Next));
 
         Assert.Equal(
@@ -359,7 +398,7 @@ public sealed class EnvironmentKeyServiceTests : SecureStoreTestBase
         var keys = await Load(svc);
         _audit.Records.Clear();
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.ActivateNextAsync(Id(keys.Current)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.ActivateNextAsync(Id(keys.Current), null));
 
         var record = Assert.Single(_audit.Records);
         Assert.Equal("KeyRotated", record.Event);

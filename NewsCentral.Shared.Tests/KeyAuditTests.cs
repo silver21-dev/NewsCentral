@@ -35,7 +35,7 @@ public sealed class KeyAuditTests : SecureStoreTestBase
         var generated = await svc.GenerateAsync(null);
         var id = KeyFingerprint.Of(generated.Current!.PublicKey);
         var prepared = await svc.PrepareNextAsync(id);
-        var rotated = await svc.ActivateNextAsync(id);
+        var rotated = await svc.ActivateNextAsync(id, KeyFingerprint.Of(prepared.Next!.PublicKey));
         await svc.RetirePreviousAsync(KeyFingerprint.Of(rotated.Current!.PublicKey));
 
         var events = Events();

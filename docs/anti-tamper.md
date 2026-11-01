@@ -177,7 +177,7 @@ come from `EnvironmentKeyService.GpoTarget`.
 Rules enforced by the service: each action re-reads the file first, refuses when it is unreadable ("not replaced")
 or when the current key changed since the page loaded (the key was changed by someone else; reload), and is audited
 (`KeyGenerated`, `KeyPrepared`, `KeyDiscarded`, `KeyRotated`, `KeyRetired`) with **fingerprints only**. While a
-previous key is set, no new key can be prepared or activated: retire it first. Each key records `createdAt`, which
+previous key is set, no new key can be prepared or activated: retire it first. Activate (and Discard) also refuse if the next key changed since the page was loaded, so an administrator can never activate a next key whose values they did not deploy. Each key records `createdAt`, which
 the page shows as its age; rotate on your own schedule, and immediately if the file may have been exposed.
 
 **Persisted-form signing.** `index.json` is serialized with `JsonConfiguration.GetIndexJsonOptions()`
