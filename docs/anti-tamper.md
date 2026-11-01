@@ -388,6 +388,14 @@ S01a was never checked. If any team's cached index fails, neither lock screen no
 no publish, no sweep, no write, no clear — the previously published state stays. Error naming team and
 entry once per distinct failure, then Debug.
 
+**Offline signature re-check (M5).** While the repository is unreachable, NewsService re-verifies each team's
+cached `index.json` against the keys trusted now (`SignatureGate.Verify` and `ShouldReject`, as online). A
+failure — a key since removed from the registry, or an index cached unsigned before `RequireSignedIndex` was
+turned on — is logged through the rejection throttle with the suffix "; repository unreachable, cached
+content still in use", and is **not enforced**: self-heal and the display surfaces continue as before.
+NewsViewer still enforces at display time. Enforcing it for wallpaper and lock screen offline is a possible
+future change.
+
 **NewsViewer display-time checks (S01b).** `PresentationSelector` runs `CachedImageCheck` on every
 candidate: `ImagePath` must pass `ImagePathValidator` (team = the folder of the index it came from) and
 resolve inside `<cacheRoot>\<team>\`; `ImageHash` must be present and equal the file's SHA-256. The former

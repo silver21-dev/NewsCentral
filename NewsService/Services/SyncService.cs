@@ -379,7 +379,11 @@ public sealed class SyncService(
             try
             {
                 var cachedIndex = await cache.ReadJsonAsync<TeamIndexFile>($"{teamFolder}/index.json");
-                if (cachedIndex is not null) await SelfHealCacheAsync(teamFolder, cachedIndex, ct);
+                if (cachedIndex is not null)
+                {
+                    RecheckCachedIndexSignature(teamFolder, cachedIndex);
+                    await SelfHealCacheAsync(teamFolder, cachedIndex, ct);
+                }
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -387,6 +391,23 @@ public sealed class SyncService(
                 logger.LogDebug(ex, "Team {Team}: offline cache self-heal skipped", teamFolder);
             }
         }
+    }
+
+    /// <summary>
+    /// Offline re-check: the cached index is verified against the keys trusted NOW, exactly as the online path
+    /// does. A rejection is LOGGED (through the same throttle) but not enforced: the content keeps being applied
+    /// and self-heal continues. NewsViewer still enforces at display time.
+    /// </summary>
+    private void RecheckCachedIndexSignature(string teamFolder, TeamIndexFile cachedIndex)
+    {
+        var keys          = SigningKeyConfigurationReader.GetPublicKeys(configuration);
+        var result        = SignatureGate.Verify(cachedIndex, teamFolder, keys);
+        var requireSigned = configuration.GetValue("Signing:RequireSignedIndex", true);
+
+        if (SignatureGate.ShouldReject(result, requireSigned, out var reason, cachedIndex))
+            LogIndexRejected(teamFolder, reason, "; repository unreachable, cached content still in use");
+        else
+            _lastRejection.Remove(teamFolder);
     }
 
     /// <summary>
