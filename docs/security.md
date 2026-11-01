@@ -81,9 +81,9 @@ This catches canonical/persisted-form drift at the authoring tier — if a futur
 
 **Phase E — complete: Fail-closed enforcement flag (`SignatureGate` + `Signing:RequireSignedIndex`):** `SignatureGate` (in `NewsCentral.Shared/Security/`) centralizes the accept/reject decision for ECDSA verification results. Both `SyncService` and `PresentationSelector` call `SignatureGate.ShouldReject(result, requireSignedIndex, out reason)` in place of inline `VerifyResult` checks.
 
-`Signing:RequireSignedIndex` (bool, default `false`) is read from `IConfiguration` by both verifiers. Registry override: `<Component>\Signing\RequireSignedIndex` REG_SZ `"true"` or `"false"`.
+`Signing:RequireSignedIndex` (bool, default `false` when this phase shipped; **`true` since M2**) is read from `IConfiguration` by both verifiers. Registry override: `<Component>\Signing\RequireSignedIndex` REG_SZ `"true"` or `"false"`.
 
-| `VerifyResult` | `RequireSignedIndex = false` (default) | `RequireSignedIndex = true` |
+| `VerifyResult` | `RequireSignedIndex = false` | `RequireSignedIndex = true` (default since M2) |
 |---|---|---|
 | `Valid` | accept | accept |
 | `Invalid` | **reject** | **reject** |
@@ -160,3 +160,10 @@ One ECDSA key pair per environment replaces per-team keys; M1 changes **verifica
 - Registry: `Signing\PublicKey` and `Signing\PublicKeyPrevious` are flat; `Signing\{team}\...` is no longer read.
 - Authoring self-check runs `SignatureGate.Verify(reloaded, teamFolderName, [publicKey])` and requires `Valid` before anything is written.
 - Still per-team until M3: key storage (`team-signing.json`) and the Key Management page. Registry tooling, manifests and the `RequireSignedIndex` default change in M2.
+
+## M2 - client configuration for the single key
+
+- `Signing:RequireSignedIndex` now defaults to `true` everywhere: both `appsettings.json` templates, both manifests, and the code (`GetValue("Signing:RequireSignedIndex", true)`), so an absent value is fail-closed. A machine without `Signing\PublicKey` (in both `NewsService\Signing` and `NewsViewer\Signing`) shows no content.
+- Index rejections still reach the log every cycle but at Debug unless it is the first rejection for the team, the reason changed, or 60 minutes passed since the last Error for that reason (`SyncService`, injected `TimeProvider`); state is cleared when the team's index is accepted. Rejections stay Error-level.
+- NewsService warns once at startup about per-team `Signing\{team}\PublicKey` / `PublicKeyPrevious` subkeys, which are no longer read.
+- `ConfigManifests` gained `Signing:PublicKey` and `Signing:PublicKeyPrevious` (both components); `ComponentManifest.HasSigningHive`, `SigningTeamKeys` and `ComponentResolution.Signing` were removed, and Configuration Review shows the keys as ordinary rows with the copyable full-value rendering. `FleetExportBuilder` and `Set-RegistryOverrides.ps1` still emit the old per-team layout and `RequireSignedIndex = false` until M4; the authoring key store and Key Management stay per-team until M3.

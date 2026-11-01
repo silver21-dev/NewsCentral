@@ -71,7 +71,7 @@ public sealed class PresentationSelectorTests : IDisposable
     }
 
     private PresentationSelector NewSelector(List<(string Id, string Reason)>? rejected = null, bool bypass = false) =>
-        new(_cache, new ConfigurationBuilder().Build(), bypass,
+        new(_cache, new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Signing:RequireSignedIndex"] = "false" }).Build(), bypass,
             onRejected: rejected is null ? null : (id, reason) => rejected.Add((id, reason)));
 
     [Fact]

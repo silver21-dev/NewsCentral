@@ -55,7 +55,7 @@ Each of these changes what gets created later. Settle them before touching Azure
 |---|---|---|
 | Distribution tier | Azure Blob / file share | File share needs no storage account. **But if `Entra:Enabled=true`, the `AzureBlob:*` credential keys are required even in file-share mode** — the Graph reads reuse the blob credential. |
 | NewsService auth mode | `Certificate` / `ClientSecret` / `ClientSecretEnv` | `Certificate` is the production answer (Step 4). The other two place a secret in clear text (registry, or a machine environment variable). |
-| Signing posture | `RequireSignedIndex` `false` → `true` | Start `false` so an unsigned or mis-keyed team is *visible in the log* rather than invisible. Flip to `true` only after `Valid` is confirmed fleet-wide. |
+| Signing posture | `RequireSignedIndex` defaults to `true` | Fail-closed from the start: a machine without the environment's `Signing\PublicKey` shows no content, and the misconfiguration is visible as an Error in the NewsService log. Deliver the key before or with the install (see the note under Step 7). |
 | Dynamic teams | `Entra:Enabled` `false` / `true` | `false` = static registry team list only. `true` adds Step 5, Graph admin consent, and the pending live-validation risk below. |
 | `Company` value | One string, fixed at build | Defines both the registry hive and the scheduled-task folder. Must be identical in `Directory.Build.props` and every GPO path. |
 | Team folder naming | Sanitized team name | Registry `teams\` value names must match the generated folder name exactly — e.g. `cz-its`, not `CZ_ITS`, and **no `team-` prefix**. |
@@ -311,6 +311,14 @@ settings and the shared environment list.
 
 ## Step 7 — Registry configuration to push
 
+> ⚠️ **Fail-closed by default (since M2): no `Signing\PublicKey`, no content.** `Signing\RequireSignedIndex`
+> defaults to `true` (also when no value exists). A machine that lacks `Signing\PublicKey` in **both**
+> `NewsService\Signing` **and** `NewsViewer\Signing` rejects every index and shows nothing:
+> NewsService logs `index rejected — no public key, signing required` (once per team per hour at Error)
+> and NewsViewer skips the team. The GPO must therefore deliver the key **before or with** the install.
+> The pilot check is `index accepted — signature valid` in the NewsService log. Per-team
+> `Signing\{team}\PublicKey` values from the old model are ignored (NewsService warns once at startup).
+
 Two separate trees, one per fleet component. **GPO owns this configuration entirely — the installer must
 not write it** (`docs/packaging.md`). Full key surface: `docs/configuration.md`.
 
@@ -369,10 +377,9 @@ HKLM\Software\{Company}\NewsCentral\NewsService\
 │       UseWinHttpProxy         REG_SZ   "true" | "false"
 │
 ├── Signing\
-│       RequireSignedIndex      REG_SZ   "false"          ← flip to "true" at Step 8
-│       {teamFolderName}\
-│           PublicKey           REG_SZ   <Base64 SPKI>
-│           PublicKeyPrevious   REG_SZ   <Base64 SPKI>    (rotation window only)
+│       RequireSignedIndex      REG_SZ   "true"           (default; omit or leave "true")
+│       PublicKey               REG_SZ   <Base64 SPKI>    (the environment's key - REQUIRED, see note)
+│       PublicKeyPrevious       REG_SZ   <Base64 SPKI>    (rotation window only)
 │
 ├── Entra\                                                (omit entirely if not used)
 │       Enabled                 REG_SZ   "false"
@@ -445,9 +452,9 @@ HKLM\Software\{Company}\NewsCentral\NewsViewer\
 │       AllowedDomains            REG_SZ     domains the poster's More information link may open, ';'-separated (default empty = button disabled; deploy no later than the NewsViewer build that enforces it)
 │
 ├── Signing\
-│       RequireSignedIndex      REG_SZ   "false"
-│       {teamFolderName}\PublicKey          REG_SZ   <Base64 SPKI>
-│       {teamFolderName}\PublicKeyPrevious  REG_SZ   <Base64 SPKI>
+│       RequireSignedIndex      REG_SZ   "true"           (default; omit or leave "true")
+│       PublicKey                REG_SZ   <Base64 SPKI>    (the environment's key - REQUIRED, see note)
+│       PublicKeyPrevious        REG_SZ   <Base64 SPKI>
 │
 ├── Hmac\
 │       SecretKey               REG_SZ   <same Base64 32-byte key as NewsService>
@@ -501,18 +508,21 @@ HKLM\Software\{Company}\NewsCentral\NewsViewer\
 | 12 | NewsService event source present | `[System.Diagnostics.EventLog]::SourceExists('NewsService')` is true and the source is under the `Application` log (the script creates it; NewsService also creates it at startup unless `ViewerTasks\RegisterEventSource` = `"false"`) | PowerShell; Event Viewer -> Application |
 | 13 | NewsService logs no launch-surface drift at startup | Within about 10 s of service start: `NewsViewer scheduled tasks verified: both are in place (... matched by nc-hash stamp ...)` and **no** `Warning` containing `launch surface has drifted` or `NewsViewer executable not found` | Event Log -> Application, source `NewsService` |
 
-### 8.2 Flipping the fail-closed switch
+### 8.2 The fail-closed default
 
-Only after check 3 reports `Valid` for **every** team on **every** pilot machine:
+`RequireSignedIndex` is `true` by default, so there is nothing to flip: the pilot proves the key
+inventory instead. Check 3 above must report `index accepted — signature valid` for **every** team on
+**every** pilot machine, with `Signing\PublicKey` present in both `NewsService\Signing` and
+`NewsViewer\Signing`.
 
 ```
-NewsService\Signing\RequireSignedIndex   REG_SZ   "true"
-NewsViewer\Signing\RequireSignedIndex    REG_SZ   "true"
+NewsService\Signing\PublicKey            REG_SZ   <Base64 SPKI>
+NewsViewer\Signing\PublicKey             REG_SZ   <Base64 SPKI>
 ```
 
-From that point `Unsigned` and `Disabled` indexes are rejected alongside `Invalid`. A team missing its
-public key in the registry will go dark rather than display unverified content — the intent, but it means
-the key inventory must be complete first.
+`Unsigned` and `Disabled` indexes are rejected alongside `Invalid`. A machine without the key goes dark
+rather than display unverified content - the intent. Setting `RequireSignedIndex` to `"false"` is a
+deliberate pass-through for diagnosis only.
 
 ### 8.3 Diagnosing a silent no-op
 
@@ -766,7 +776,7 @@ on an environment that was already repaired is a safe no-op.
 | 7.7 | Installer registers both NewsViewer tasks at install (runs the packaged script, expects exit 0) and removes both at uninstall (`-Uninstall`) | Packaging | ☐ |
 | 8.1 | Pilot validation checks 1-13 passed | QA / Ops | ☐ |
 | 8.2 | Stabilisation window completed on the pilot group | Project lead | ☐ |
-| 8.3 | `RequireSignedIndex` flipped to `true` on both components | IT / Ops | ☐ |
+| 8.3 | `Signing\PublicKey` present on both components and `index accepted - signature valid` seen per team | IT / Ops | ☐ |
 | 8.4 | Rollout to the wider fleet | IT / Ops | ☐ |
 
 ---

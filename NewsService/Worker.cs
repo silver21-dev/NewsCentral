@@ -17,6 +17,8 @@ public sealed class Worker(
         logger.LogInformation("NewsService starting. Poll interval: {Interval}s",
             config.Service.PollIntervalSeconds);
 
+        LogIgnoredPerTeamSigningKeys(configuration, logger);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             // The effective team set is static (registry/appsettings) union dynamic
@@ -33,6 +35,24 @@ public sealed class Worker(
         }
 
         logger.LogInformation("NewsService stopped.");
+    }
+
+    // One key pair per environment (Signing\PublicKey / PublicKeyPrevious): per-team Signing\{team}\PublicKey
+    // values from the old model are never read, so say so once per process start instead of ignoring them silently.
+    internal static void LogIgnoredPerTeamSigningKeys(IConfiguration configuration, ILogger logger)
+    {
+        var ignored = configuration.GetSection("Signing").GetChildren()
+            .Where(c => c.GetSection("PublicKey").Exists() || c.GetSection("PublicKeyPrevious").Exists())
+            .Select(c => c.Key)
+            .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (ignored.Count == 0) return;
+
+        logger.LogWarning(
+            "Per-team signing keys are ignored: {Names}. Verification uses only Signing\\PublicKey and " +
+            "Signing\\PublicKeyPrevious; remove the per-team subkeys.",
+            string.Join(", ", ignored.Select(n => $"Signing\\{n}")));
     }
 
     private async Task RunCycleAsync(string[] teams, CancellationToken ct)

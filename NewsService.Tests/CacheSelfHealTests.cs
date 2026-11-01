@@ -30,7 +30,7 @@ public sealed class CacheSelfHealTests : IDisposable
         var log      = new CapturingLogger();
         var notifier = new CountingNotifier();
         var sut = new SyncService(repo, cache, lockScreen: null!, imagePublisher: null!, telemetry: null!,
-                                  entra: null!, configuration: new ConfigurationBuilder().Build(),
+                                  entra: null!, configuration: new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Signing:RequireSignedIndex"] = "false" }).Build(),
                                   logger: log, contentChanged: notifier);
         return (sut, repo, log, notifier);
     }

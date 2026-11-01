@@ -56,6 +56,8 @@ public sealed class ManifestCoverageTests
     private static readonly HashSet<string> NonPocoBackedKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "Signing:RequireSignedIndex",          // configuration.GetValue<bool>(...) ad-hoc read (SyncService / PresentationSelector), not bound to a POCO
+        "Signing:PublicKey",                    // SigningKeyConfigurationReader.GetPublicKeys ad-hoc read (SyncService / PresentationSelector), not bound to a POCO
+        "Signing:PublicKeyPrevious",            // same
         "Logging:LogLevel:Default",             // standard .NET logging key, bound by the generic host's own logging configuration, not ServiceConfiguration
         "Logging:EventLog:LogLevel:Default",    // same — EventLog provider logging, host-owned
     };

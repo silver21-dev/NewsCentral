@@ -47,8 +47,11 @@ public sealed class SyncService(
     EntraTeamResolutionService entra,
     IConfiguration configuration,
     ILogger<SyncService> logger,
-    IContentChangedNotifier contentChanged)
+    IContentChangedNotifier contentChanged,
+    TimeProvider? timeProvider = null)
 {
+    private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
+
     private static readonly JsonSerializerOptions Json = JsonDefaults.Options;
 
     // Per-team verification result from the previous cycle. SyncService is a singleton and Worker
@@ -57,6 +60,15 @@ public sealed class SyncService(
     // verification result changed, so a misconfigured team (Unsigned/Disabled) is reported at least
     // once per service start instead of flooding every cycle — or being silent forever.
     private readonly Dictionary<string, VerifyResult> _lastVerifyResult =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    // Per team: the last index-rejection message that was logged at Error and when. A persistent
+    // misconfiguration (wrong or missing key) would otherwise log an Error every poll; instead the
+    // Error is repeated only when the reason changes or RejectionRepeatInterval has passed, and the
+    // message drops to Debug in between. Cleared when the team's index is accepted. Singleton +
+    // sequential cycles, so a plain Dictionary is safe.
+    private static readonly TimeSpan RejectionRepeatInterval = TimeSpan.FromMinutes(60);
+    private readonly Dictionary<string, (string Message, DateTimeOffset LoggedAt)> _lastRejection =
         new(StringComparer.OrdinalIgnoreCase);
 
     // Change-gated across cycles — same rationale as _lastVerifyResult above and _lastSummary in
@@ -188,6 +200,26 @@ public sealed class SyncService(
         return (effective, dynamicTeams);
     }
 
+    // Rejections are never silenced: Error on the first occurrence, on a changed reason, and again once
+    // per RejectionRepeatInterval while unchanged; Debug in between.
+    private void LogIndexRejected(string team, string reason, string suffix = "")
+    {
+        var message = reason + suffix;
+        var now     = _clock.GetUtcNow();
+
+        if (!_lastRejection.TryGetValue(team, out var last)
+            || last.Message != message
+            || now - last.LoggedAt >= RejectionRepeatInterval)
+        {
+            _lastRejection[team] = (message, now);
+            logger.LogError("Team {Team}: index rejected — {Reason}", team, message);
+        }
+        else
+        {
+            logger.LogDebug("Team {Team}: index rejected — {Reason}", team, message);
+        }
+    }
+
     // ── Step 1 — team sync ───────────────────────────────────────────────────
 
     internal async Task<bool> SyncAllTeamsAsync(
@@ -247,7 +279,7 @@ public sealed class SyncService(
 
         var keys          = SigningKeyConfigurationReader.GetPublicKeys(configuration);
         var result        = SignatureGate.Verify(remoteIndex, teamFolder, keys);
-        var requireSigned = configuration.GetValue<bool>("Signing:RequireSignedIndex");
+        var requireSigned = configuration.GetValue("Signing:RequireSignedIndex", true);
 
         // Tracked for rejected results too, so a later recovery (e.g. Invalid → Valid after a key
         // is provisioned) counts as a change and logs at its natural level.
@@ -257,8 +289,7 @@ public sealed class SyncService(
 
         if (SignatureGate.ShouldReject(result, requireSigned, out var reason, remoteIndex))
         {
-            // Security outcome — always Error, never demoted or gated on change.
-            logger.LogError("Team {Team}: index rejected — {Reason}", teamFolder, reason);
+            LogIndexRejected(teamFolder, reason);
             return false;
         }
 
@@ -266,9 +297,11 @@ public sealed class SyncService(
         // or published), even when IndexHash is unchanged — a tampered path must not ride on a stale hash.
         if (!TryValidateImagePaths(teamFolder, remoteIndex, out var pathFailure))
         {
-            logger.LogError("Team {Team}: index rejected — {Reason}; previous cached state kept", teamFolder, pathFailure);
+            LogIndexRejected(teamFolder, pathFailure, "; previous cached state kept");
             return false;
         }
+
+        _lastRejection.Remove(teamFolder);   // accepted: a later rejection must log immediately
 
         var cachedIndex  = await cache.ReadJsonAsync<TeamIndexFile>($"{teamFolder}/index.json");
         var indexChanged = cachedIndex?.IndexHash != remoteIndex.IndexHash;

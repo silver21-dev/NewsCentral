@@ -117,7 +117,7 @@ teams come from the data store, its signing keys from `team-signing.json`). **Ne
 (M3b) for the policy environment catalog below — NewsService and NewsViewer never project it.
 
 - **`teams\`** — list of team folder names (surfaced by `RegistryConfigurationProvider` as `teams:0…N`). Registry-only.
-- **`Signing\`** — `RequireSignedIndex` renders as a normal scalar row in the config table; the per-team keys render here as a sub-table (`Team` · `PublicKey` · `PublicKeyPrevious`). Public keys are **not secret** — show truncated but copyable, as Key Management already does. Each component maintains its own separate `Signing\` subtree.
+- **`Signing\`** — no structural sub-block since M2: `RequireSignedIndex`, `PublicKey` and `PublicKeyPrevious` are ordinary scalar rows in the config table. The two key rows are **not secret** and keep the full-value, visually-truncated, copyable rendering (`KeyCell`, as Key Management does). Each component maintains its own separate `Signing\` subtree. Leftover per-team registry values (`Signing\{team}\PublicKey`) are not manifest keys and the resolver has no notion of unknown registry entries, so they are simply not shown (and never throw); NewsService warns about them at startup.
 - **`Entra\AttributeSchemes\`** (NewsService only) — dictionary of named schemes, each with a `Selector` and a `Mappings\` sub-dictionary (selector value → rule); sub-table of `Scheme` · `Selector` · `Selector value` · `Rule`.
 - **`Entra\GroupTeams\Instances\`** (NewsService only) — dictionary of named instances, each with `InclusionGroup` and optional `ExclusionGroup`; sub-table of `Label` · `InclusionGroup` · `ExclusionGroup`. (The fleet-wide `Entra:GroupTeams:ExclusionGroup` is a normal scalar row, not part of this structural block — see §7.2.) Superseded the single `Entra:GroupTeam` pair and the flat `Entra:Mappings` table this section originally specified; see `docs/entra-dynamic-teams.md` for the current model.
 - **`Environments\`** (NewsCentral only, M3b) — the policy environment catalog: dictionary of named entries (plus an implicit `Default` entry derived from the flat `DataPath`/`Storage\*`/`AzureBlob\*` values when those are set directly at the component root); sub-table of `Name` · `Display name` · `DataPath` · `Mode` · `Target overrides` (only the fields the entry actually sets) · `Implicit`. Read via `EnvironmentCatalogReader.Read` against the same registry-only layer §8 already builds — never the merged layer. Any resolution warnings (a duplicate DataPath, an entry with no DataPath, an explicit `Environments\Default` shadowing the implicit one) are listed below the table. The sibling scalar row `AllowUserEnvironments` (§7.4) is Group-Policy-only and not part of this structural block.
@@ -153,7 +153,9 @@ Hive: `…\NewsCentral\NewsService\`. `RegType`: S=REG_SZ, D=DWORD. `Ovr`: OV/PA
 | `AzureBlob:ContainerName` | `newscentral` | `AzureBlob\ContainerName` | S | OV | text | | container name |
 | `AzureBlob:UseWinHttpProxy` | `false` | `AzureBlob\UseWinHttpProxy` | S | OV | toggle | | `true \| false` (registry: REG_SZ) |
 | `Hmac:SecretKey` | `""` | `Hmac\SecretKey` | S | OV | redacted | ✔ | Base64, 32 bytes; warning: empty REG_SZ is a PRESENT value — overrides appsettings with empty and disables HMAC |
-| `Signing:RequireSignedIndex` | `false` | `Signing\RequireSignedIndex` | S | OV | toggle | | `true \| false` (registry: REG_SZ); ad-hoc read, not on POCO |
+| `Signing:PublicKey` | `""` | `Signing\PublicKey` | S | OV | text | | Base64 SubjectPublicKeyInfo; not secret |
+| `Signing:PublicKeyPrevious` | `""` | `Signing\PublicKeyPrevious` | S | OV | text | | Base64 SubjectPublicKeyInfo; not secret |
+| `Signing:RequireSignedIndex` | `true` | `Signing\RequireSignedIndex` | S | OV | toggle | | `true \| false` (registry: REG_SZ); ad-hoc read, not on POCO |
 | `Entra:Enabled` | `false` | `Entra\Enabled` | S | OV | toggle | | `true \| false` (registry: REG_SZ) |
 | `Entra:GracePeriodMinutes` | `240` | `Entra\GracePeriodMinutes` | S | OV | number | | integer minutes; MUST be REG_SZ (0 = "no grace" is valid; DWORD 0/1 coerce to `False`/`True` → int binder throws) |
 | `Entra:MaxDynamicTeams` | `16` | `Entra\MaxDynamicTeams` | S | OV | number | | integer count; 0 = no cap; MUST be REG_SZ (DWORD 0/1 coerce to `False`/`True` → int binder throws) |
@@ -170,7 +172,7 @@ Hive: `…\NewsCentral\NewsService\`. `RegType`: S=REG_SZ, D=DWORD. `Ovr`: OV/PA
 | `Logging:LogLevel:Default` | `Information` | `Logging\LogLevel\Default` | S | OV | dropdown | | `Trace \| Debug \| Information \| Warning \| Error \| Critical \| None` (registry: REG_SZ); standard .NET logging key, honoured by the generic host |
 | `Logging:EventLog:LogLevel:Default` | `Information` | `Logging\EventLog\LogLevel\Default` | S | OV | dropdown | | `Trace \| Debug \| Information \| Warning \| Error \| Critical \| None` (registry: REG_SZ); standard .NET logging key, honoured by the generic host |
 
-Structural: `Entra\AttributeSchemes\{scheme}\Selector` + `Mappings\{selectorValue}` (dict); `Entra\GroupTeams\Instances\{label}\InclusionGroup` + `ExclusionGroup` (dict); `Signing\{team}\PublicKey` + `PublicKeyPrevious` (RO, **not secret**); `teams\{team}` (RO).
+Structural: `Entra\AttributeSchemes\{scheme}\Selector` + `Mappings\{selectorValue}` (dict); `Entra\GroupTeams\Instances\{label}\InclusionGroup` + `ExclusionGroup` (dict); `teams\{team}` (RO).
 
 ### 7.3 NewsViewer manifest
 
@@ -184,11 +186,13 @@ Hive: `…\NewsCentral\NewsViewer\`.
 | `BypassDailyGate` | `false` | `BypassDailyGate` | D | OV | toggle | | `true \| false` (registry: DWORD 0/1) |
 | `BypassImageIntegrityCheck` | `false` | `BypassImageIntegrityCheck` | D | OV | toggle | | `true \| false` (registry: DWORD 0/1) |
 | `Hmac:SecretKey` | `""` | `Hmac\SecretKey` | S | OV | redacted | ✔ | Base64, 32 bytes; warning: empty REG_SZ is a PRESENT value — overrides appsettings with empty and disables HMAC |
-| `Signing:RequireSignedIndex` | `false` | `Signing\RequireSignedIndex` | S | OV | toggle | | `true \| false` (registry: REG_SZ); ad-hoc read, not on POCO |
+| `Signing:PublicKey` | `""` | `Signing\PublicKey` | S | OV | text | | Base64 SubjectPublicKeyInfo; not secret |
+| `Signing:PublicKeyPrevious` | `""` | `Signing\PublicKeyPrevious` | S | OV | text | | Base64 SubjectPublicKeyInfo; not secret |
+| `Signing:RequireSignedIndex` | `true` | `Signing\RequireSignedIndex` | S | OV | toggle | | `true \| false` (registry: REG_SZ); ad-hoc read, not on POCO |
 | `Delivery:WallpaperStyle` | `Fit` | `Delivery\WallpaperStyle` | S | OV | dropdown | | `Fill \| Fit \| Stretch \| Center \| Tile`; style only — the wallpaper image is NewsService/CSP-owned |
 | `Delivery:WallpaperBackgroundColor` | `0 0 0` | `Delivery\WallpaperBackgroundColor` | S | OV | text | | `"R G B"`, each 0–255 |
 
-Structural: `Signing\{team}\PublicKey` + `PublicKeyPrevious` (RO, **not secret**, own subtree); `teams\{team}` (RO).
+Structural: `teams\{team}` (RO).
 
 ### 7.4 NewsCentral manifest
 

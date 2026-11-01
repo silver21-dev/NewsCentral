@@ -9,9 +9,6 @@ public enum LayerStatus { Found, NotFound, Unreadable }
 /// <summary>One resolved manifest row: descriptor + raw values from each layer (null = absent).</summary>
 public sealed record ConfigRow(ConfigKeyDescriptor Descriptor, string? AppSettingsValue, string? RegistryValue);
 
-/// <summary>A team's signing public keys from the registry Signing hive (spec §6). Not secret.</summary>
-public sealed record SigningTeamKeys(string Team, string? PublicKey, string? PublicKeyPrevious);
-
 /// <summary>One selector→rule mapping within a named attribute scheme (NewsService only).</summary>
 public sealed record EntraSchemeMapping(string Scheme, string Selector, string SelectorValue, string? Rule);
 
@@ -40,7 +37,6 @@ public sealed record ComponentResolution
     public LayerStatus RegistryStatus { get; init; }
     public IReadOnlyList<ConfigRow> Rows { get; init; } = System.Array.Empty<ConfigRow>();
     public IReadOnlyList<string> Teams { get; init; } = System.Array.Empty<string>();
-    public IReadOnlyList<SigningTeamKeys> Signing { get; init; } = System.Array.Empty<SigningTeamKeys>();
     public IReadOnlyList<EntraSchemeMapping> EntraSchemeMappings { get; init; } = System.Array.Empty<EntraSchemeMapping>();
     public IReadOnlyList<EntraGroupTeamInstance> EntraGroupTeamInstances { get; init; } = System.Array.Empty<EntraGroupTeamInstance>();
     public string? EntraGlobalExclusionGroup { get; init; }
@@ -226,7 +222,7 @@ public static class EffectiveConfigResolver
 
     /// <summary>
     /// PURE projection (spec §8 step 5): per manifest key, pair the raw appsettings and registry
-    /// values (null = absent), and project the structural teams / Signing / Entra attribute-scheme
+    /// values (null = absent), and project the structural teams / Entra attribute-scheme
     /// / Entra group-team blocks when the manifest flags them. No I/O — the two layers are supplied
     /// by the caller. Returns RAW values throughout — redaction is a formatting concern
     /// (<see cref="ConfigValueFormatter"/>), not done here; none of the Entra structural values are
@@ -246,13 +242,6 @@ public static class EffectiveConfigResolver
                 .Select(v => v!)
                 .ToList()
             : new List<string>();
-
-        var signing = manifest.HasSigningHive
-            ? registryLayer.GetSection("Signing").GetChildren()
-                .Where(c => !string.Equals(c.Key, "RequireSignedIndex", System.StringComparison.OrdinalIgnoreCase))
-                .Select(team => new SigningTeamKeys(team.Key, team["PublicKey"], team["PublicKeyPrevious"]))
-                .ToList()
-            : new List<SigningTeamKeys>();
 
         // Entra:AttributeSchemes:{scheme}:Selector / Mappings:{selectorValue} → one row per mapping.
         // A scheme with a Selector but no Mappings children emits nothing — the page renders schemes
@@ -287,7 +276,6 @@ public static class EffectiveConfigResolver
             ComponentName = manifest.ComponentName,
             Rows = rows,
             Teams = teams,
-            Signing = signing,
             EntraSchemeMappings = schemeMappings,
             EntraGroupTeamInstances = groupInstances,
             EntraGlobalExclusionGroup = globalExclusion,

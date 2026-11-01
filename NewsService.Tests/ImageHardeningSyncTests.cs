@@ -31,7 +31,7 @@ public sealed class ImageHardeningSyncTests : IDisposable
         var cache = new CacheManager(_root, JsonDefaults.Options);
         var log   = new CapturingLogger();
         var sut = new SyncService(repo, cache, lockScreen: null!, imagePublisher: null!, telemetry: null!,
-                                  entra: null!, configuration: new ConfigurationBuilder().Build(),
+                                  entra: null!, configuration: new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Signing:RequireSignedIndex"] = "false" }).Build(),
                                   logger: log, contentChanged: new NullContentChangedNotifier());
         return (sut, repo, cache, log);
     }

@@ -34,7 +34,7 @@ public sealed class CacheIntegrityHealTests : IDisposable
         var log  = new CapturingLogger();
         var sut  = new SyncService(repo, new CacheManager(_root, JsonDefaults.Options), lockScreen: null!,
                                    imagePublisher: null!, telemetry: null!, entra: null!,
-                                   configuration: new ConfigurationBuilder().Build(), logger: log,
+                                   configuration: new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Signing:RequireSignedIndex"] = "false" }).Build(), logger: log,
                                    contentChanged: new NullContentChangedNotifier());
         return (sut, repo, log);
     }

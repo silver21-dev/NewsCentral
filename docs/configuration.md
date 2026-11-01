@@ -41,11 +41,10 @@ HKLM\Software\[Company]\NewsCentral\NewsService\
 ├── Hmac\
 │       SecretKey   REG_SZ    (Base64-encoded 32-byte key; empty = HMAC disabled)
 ├── Signing\
-│       RequireSignedIndex  REG_SZ    "true" or "false"  (default false; when true, Unsigned/Disabled indexes are rejected)
-│       <teamFolderName>\
-│           PublicKey          REG_SZ   (Base64 SubjectPublicKeyInfo — ECDSA index verification)
-│           PublicKeyPrevious  REG_SZ   (Base64 SPKI; optional — rotation window)
-│       (flat PublicKey / PublicKeyPrevious; surfaced as Signing:PublicKey via RegistryConfigurationProvider)
+│       RequireSignedIndex  REG_SZ    "true" or "false"  (default true; Unsigned/Disabled indexes are rejected unless set to false)
+│       PublicKey           REG_SZ   (Base64 SubjectPublicKeyInfo — ECDSA index verification; one key pair per environment)
+│       PublicKeyPrevious   REG_SZ   (Base64 SPKI; optional — rotation window)
+│       (per-team Signing\{team} subkeys are ignored; NewsService warns once at startup)
 ├── Entra\
 │       Enabled              REG_SZ    "true" or "false"  (default false; gates the whole feature)
 │       GracePeriodMinutes   REG_SZ    (int retention window in minutes for the last resolved team while Graph is unreachable; default 240; MUST be REG_SZ — 0 = "no grace" is deliberate, and DWORD 0/1 coerce to "False"/"True" and the int binder throws)
@@ -107,11 +106,10 @@ HKLM\Software\[Company]\NewsCentral\NewsViewer\
 ├── Hmac\
 │       SecretKey   REG_SZ
 ├── Signing\
-│       RequireSignedIndex  REG_SZ    "true" or "false"  (default false; when true, Unsigned/Disabled indexes are rejected)
-│       <teamFolderName>\
-│           PublicKey          REG_SZ   (Base64 SubjectPublicKeyInfo — ECDSA index verification)
-│           PublicKeyPrevious  REG_SZ   (Base64 SPKI; optional — rotation window)
-│       (flat PublicKey / PublicKeyPrevious; surfaced as Signing:PublicKey via RegistryConfigurationProvider)
+│       RequireSignedIndex  REG_SZ    "true" or "false"  (default true; Unsigned/Disabled indexes are rejected unless set to false)
+│       PublicKey           REG_SZ   (Base64 SubjectPublicKeyInfo — ECDSA index verification; one key pair per environment)
+│       PublicKeyPrevious   REG_SZ   (Base64 SPKI; optional — rotation window)
+│       (per-team Signing\{team} subkeys are ignored; NewsService warns once at startup)
 ├── Delivery\
 │       WallpaperStyle            REG_SZ   (Fill | Fit | Stretch | Center | Tile; default Fit — style only, the image is NewsService/CSP-owned)
 │       WallpaperBackgroundColor  REG_SZ   ("R G B" desktop background for Fit letterbox bars; default "0 0 0")
@@ -199,7 +197,7 @@ HKLM\Software\[Company]\NewsCentral\NewsTester\
 
 **`teams\` sub-hive:** team folder names are the value *names* (not the value data). Value names must match the generated folder name exactly — the sanitized team name with no `team-` prefix (e.g. `cz-its`, not `CZ_ITS`). The provider exposes them as `teams:0`, `teams:1`, … so `IConfiguration.GetSection("teams").GetChildren()` returns one entry per team. Use `TeamConfigurationReader.GetTeams(configuration)` to read them.
 
-**`Signing\` sub-hive:** contains `RequireSignedIndex` (REG_SZ `"true"`/`"false"`, default `"false"`) plus the environment's `PublicKey` and (optionally) `PublicKeyPrevious` (one key pair per environment since M1; per-team subkeys are no longer read) as `REG_SZ` values containing Base64-encoded SubjectPublicKeyInfo. `RegistryConfigurationProvider` surfaces all values via its recursive `WalkKey` traversal: `Signing:RequireSignedIndex`, `Signing:PublicKey`, and `Signing:PublicKeyPrevious`. Use `SigningKeyConfigurationReader.GetPublicKeys(configuration)` to read the key list; use `configuration.GetValue<bool>("Signing:RequireSignedIndex")` to read the flag. When `RequireSignedIndex` is `true`, `SignatureGate.ShouldReject` rejects Unsigned and Disabled indexes in addition to Invalid — enabling fail-closed enforcement. NewsService and NewsViewer each maintain their own separate `Signing\` subtrees.
+**`Signing\` sub-hive:** contains `PublicKey` and (optionally) `PublicKeyPrevious` — the environment's ECDSA public keys (one key pair per environment) as `REG_SZ` values containing Base64-encoded SubjectPublicKeyInfo; not secret — plus `RequireSignedIndex` (REG_SZ `"true"`/`"false"`, **default `"true"`**: with no value present, unsigned indexes and teams with no configured key are rejected, i.e. fail-closed; set `"false"` only for a deliberate pass-through). `RegistryConfigurationProvider` surfaces them as `Signing:PublicKey`, `Signing:PublicKeyPrevious` and `Signing:RequireSignedIndex`. Use `SigningKeyConfigurationReader.GetPublicKeys(configuration)` to read the key list and `configuration.GetValue("Signing:RequireSignedIndex", true)` for the flag (the code default is also `true`, so an absent value is fail-closed too). The signed `KeyId` of an index selects which of the two keys verifies it (`docs/anti-tamper.md` §5). **Per-team subkeys (`Signing\{team}\PublicKey`) from the earlier per-team model are ignored**; NewsService logs one Warning at startup naming them (`Per-team signing keys are ignored: Signing\cz-its. …`) so they can be removed — NewsViewer has no event log and logs nothing. NewsService and NewsViewer each read their own `Signing\` subtree, so the key must be delivered to both.
 
 ## environment.json — secure store, audit log (NewsCentral)
 
@@ -294,7 +292,7 @@ NewsService resolves configuration across the **same three layers as NewsViewer*
     "SecretKey": ""
   },
   "Signing": {
-    "RequireSignedIndex": false
+    "RequireSignedIndex": true
   },
   "Entra": {
     "Enabled": false,
@@ -388,7 +386,7 @@ NewsViewer resolves configuration across three layers (registry always wins):
     "SecretKey": ""
   },
   "Signing": {
-    "RequireSignedIndex": false
+    "RequireSignedIndex": true
   },
   "Delivery": {
     "WallpaperStyle": "Fit",

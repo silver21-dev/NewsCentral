@@ -82,6 +82,7 @@ builder.Services.AddSingleton<IPersonalizationService, PersonalizationService>()
 builder.Services.AddSingleton<IImagePublisher, ImagePublisher>();
 builder.Services.AddSingleton<TelemetryUploader>();
 builder.Services.AddSingleton<IContentChangedNotifier, EventLogContentChangedNotifier>();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SyncService>();
 
 builder.Services.AddHostedService<Worker>();

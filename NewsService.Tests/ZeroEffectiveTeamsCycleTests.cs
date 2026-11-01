@@ -62,7 +62,8 @@ public sealed class ZeroEffectiveTeamsCycleTests : IDisposable
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Delivery:PublishedImagePath"] = _publishRoot
+                ["Delivery:PublishedImagePath"] = _publishRoot,
+                ["Signing:RequireSignedIndex"] = "false"
             })
             .Build();
 

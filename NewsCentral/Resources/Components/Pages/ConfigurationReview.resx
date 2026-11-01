@@ -50,10 +50,6 @@
   <data name="NotOverridable" xml:space="preserve"><value>Not overridable</value></data>
   <data name="RegistryOnly" xml:space="preserve"><value>Registry-only</value></data>
   <data name="Teams" xml:space="preserve"><value>Teams</value></data>
-  <data name="SigningKeys" xml:space="preserve"><value>Signing keys</value></data>
-  <data name="ColTeam" xml:space="preserve"><value>Team</value></data>
-  <data name="ColPublicKey" xml:space="preserve"><value>PublicKey</value></data>
-  <data name="ColPublicKeyPrevious" xml:space="preserve"><value>PublicKeyPrevious</value></data>
   <data name="AttributeSchemes" xml:space="preserve"><value>Attribute Schemes</value></data>
   <data name="ColScheme" xml:space="preserve"><value>Scheme</value></data>
   <data name="ColSelector" xml:space="preserve"><value>Selector</value></data>

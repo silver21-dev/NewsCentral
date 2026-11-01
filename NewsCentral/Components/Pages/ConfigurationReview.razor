@@ -189,32 +189,6 @@
                     </ul>
                 }
 
-                @if (r.Signing.Count > 0)
-                {
-                    <h6 class="mt-4">@Localizer["SigningKeys"]</h6>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-bordered align-middle">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>@Localizer["ColTeam"]</th>
-                                    <th>@Localizer["ColPublicKey"]</th>
-                                    <th>@Localizer["ColPublicKeyPrevious"]</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var s in r.Signing)
-                                {
-                                    <tr>
-                                        <td><code>@s.Team</code></td>
-                                        <td>@KeyCell(s.PublicKey)</td>
-                                        <td>@KeyCell(s.PublicKeyPrevious)</td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
-                    </div>
-                }
-
                 @if (r.EntraSchemeMappings.Count > 0)
                 {
                     <h6 class="mt-4">@Localizer["AttributeSchemes"]</h6>
@@ -427,6 +401,12 @@
     {
         var text = ConfigValueFormatter.ForDisplay(d, raw);
 
+        if (d.CanonicalKey is "Signing:PublicKey" or "Signing:PublicKeyPrevious")
+        {
+            KeyCell(raw)(__builder);
+            return;
+        }
+
         if (d.ControlKind == ControlKind.Toggle && TryBool(raw, out var b))
         {
             <span class="badge @(b ? "bg-success" : "bg-secondary")">@(b ? Localizer["On"] : Localizer["Off"])</span>
@@ -443,7 +423,7 @@
         }
     };
 
-    // Signing public keys are NOT secret: shown in full, visually truncated but copyable (§6).
+    // Signing public keys are NOT secret: shown in full, visually truncated but copyable.
     private RenderFragment KeyCell(string? key) => __builder =>
     {
         if (string.IsNullOrEmpty(key))

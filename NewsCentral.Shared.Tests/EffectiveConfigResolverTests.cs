@@ -92,11 +92,12 @@ public sealed class EffectiveConfigResolverTests
         {
             ComponentName = "Test",
             HasTeamsHive = true,
-            HasSigningHive = true,
             Keys = new[]
             {
                 Desc("Company"),
                 Desc("Service:PollIntervalSeconds"),
+                Desc("Signing:PublicKey"),
+                Desc("Signing:PublicKeyPrevious"),
                 Desc("AzureBlob:ClientSecret", secret: true)   // absent in both layers
             }
         };
@@ -114,9 +115,11 @@ public sealed class EffectiveConfigResolverTests
             ["teams:0"] = "alpha",
             ["teams:1"] = "beta",
             ["Signing:RequireSignedIndex"] = "true",
+            ["Signing:PublicKey"] = "PKCUR",
+            ["Signing:PublicKeyPrevious"] = "PKPREV",
+            // Leftover per-team values from the old model: ignored, and must not throw.
             ["Signing:team-x:PublicKey"] = "PKX",
             ["Signing:team-x:PublicKeyPrevious"] = "PKXP",
-            ["Signing:team-y:PublicKey"] = "PKY",
         }).Build();
 
         var result = EffectiveConfigResolver.Project(manifest, app, reg);
@@ -138,15 +141,13 @@ public sealed class EffectiveConfigResolverTests
         // teams
         Assert.Equal(new[] { "alpha", "beta" }, result.Teams);
 
-        // Signing — excludes RequireSignedIndex; per-team PublicKey/Previous
-        Assert.Equal(2, result.Signing.Count);
-        var tx = result.Signing.Single(s => s.Team == "team-x");
-        Assert.Equal("PKX", tx.PublicKey);
-        Assert.Equal("PKXP", tx.PublicKeyPrevious);
-        var ty = result.Signing.Single(s => s.Team == "team-y");
-        Assert.Equal("PKY", ty.PublicKey);
-        Assert.Null(ty.PublicKeyPrevious);
-        Assert.DoesNotContain(result.Signing, s => s.Team == "RequireSignedIndex");
+        // Signing keys are ordinary flat manifest rows (registry layer only here)
+        var cur = result.Rows.Single(r => r.Descriptor.CanonicalKey == "Signing:PublicKey");
+        Assert.Null(cur.AppSettingsValue);
+        Assert.Equal("PKCUR", cur.RegistryValue);
+        var prev = result.Rows.Single(r => r.Descriptor.CanonicalKey == "Signing:PublicKeyPrevious");
+        Assert.Equal("PKPREV", prev.RegistryValue);
+        Assert.DoesNotContain(result.Rows, r => r.Descriptor.CanonicalKey.Contains("team-x"));
     }
 
     [Fact]
@@ -156,7 +157,6 @@ public sealed class EffectiveConfigResolverTests
         {
             ComponentName = "NoStructure",
             HasTeamsHive = false,
-            HasSigningHive = false,
             Keys = new[] { Desc("Company") }
         };
 
@@ -174,7 +174,6 @@ public sealed class EffectiveConfigResolverTests
         var result = EffectiveConfigResolver.Project(manifest, empty, reg);
 
         Assert.Empty(result.Teams);
-        Assert.Empty(result.Signing);
         Assert.Empty(result.EntraSchemeMappings);
         Assert.Empty(result.EntraGroupTeamInstances);
         Assert.Null(result.EntraGlobalExclusionGroup);

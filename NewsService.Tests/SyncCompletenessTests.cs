@@ -26,7 +26,7 @@ public sealed class SyncCompletenessTests : IDisposable
 
     private (SyncService Sut, FakeRepository Repo, CacheManager Cache, CapturingLogger Log) NewSut()
     {
-        var config = new ConfigurationBuilder().Build();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Signing:RequireSignedIndex"] = "false" }).Build();
         var repo   = new FakeRepository();
         var cache  = new CacheManager(_root, JsonDefaults.Options);
         var log    = new CapturingLogger();

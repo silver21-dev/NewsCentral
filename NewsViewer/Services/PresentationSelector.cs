@@ -109,7 +109,7 @@ public sealed class PresentationSelector
 
             var keys          = SigningKeyConfigurationReader.GetPublicKeys(_configuration);
             var result        = SignatureGate.Verify(index, team, keys);
-            var requireSigned = _configuration.GetValue<bool>("Signing:RequireSignedIndex");
+            var requireSigned = _configuration.GetValue("Signing:RequireSignedIndex", true);
             if (SignatureGate.ShouldReject(result, requireSigned, out var reason, index))
             {
                 System.Diagnostics.Debug.WriteLine($"[Signing] {team}: index rejected — {reason}");

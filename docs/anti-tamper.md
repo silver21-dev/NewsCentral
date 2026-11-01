@@ -20,8 +20,8 @@ when present, **are** signed (stripping or adding one invalidates the record). A
 verifying a notification record or a `source`-marked poster record deserializes without those fields,
 computes a different signature and discards the record as `Invalid` — ship NewsService and NewsViewer
 together (`docs/packaging.md`).
-An empty / unconfigured key makes verification a pass-through (`Disabled`) unless fail-closed
-enforcement is turned on — see §4.
+An empty / unconfigured key makes verification `Disabled`, which is rejected under the default
+fail-closed enforcement (`RequireSignedIndex` = `true`) and a pass-through only when it is set to `false` — see §4.
 
 ## 2. Integrity values
 
@@ -61,14 +61,14 @@ Every anti-tamper-relevant value. Registry paths are under
 |---|---|---|---|---|---|
 | Environment public key | `…\<Component>\Signing\PublicKey` | `REG_SZ` (Base64 SPKI) | — | NewsService, NewsViewer | Verification key for every team's `index.json` (one key pair per environment). Surfaced as `Signing:PublicKey`; read by `SigningKeyConfigurationReader.GetPublicKeys`. |
 | Previous public key | `…\<Component>\Signing\PublicKeyPrevious` | `REG_SZ` (Base64 SPKI) | — | NewsService, NewsViewer | Rotation window — the index `KeyId` selects the current or the previous key. |
-| Require signed index | `…\<Component>\Signing\RequireSignedIndex` | `REG_SZ` `"true"`/`"false"` | `false` | NewsService, NewsViewer | Fail-closed switch — when `true`, `Unsigned` and `Disabled` are rejected in addition to `Invalid` (§4). |
+| Require signed index | `…\<Component>\Signing\RequireSignedIndex` | `REG_SZ` `"true"`/`"false"` | `true` | NewsService, NewsViewer | Fail-closed switch (default `true`, also when no value is present, since M2) — `Unsigned` and `Disabled` are rejected in addition to `Invalid` (§4); set `false` only for a deliberate pass-through. |
 | Bypass image integrity | `…\NewsViewer\BypassImageIntegrityCheck` | `DWORD` (`0`/`1`) | `0` (false) | NewsViewer | `1` skips the display-time image SHA-256 re-check (dev/test). |
 | HMAC secret key | `…\<Component>\Hmac\SecretKey` | `REG_SZ` (Base64 32-byte) | `""` | NewsViewer (sign), NewsService (verify) | Telemetry HMAC key. Empty = HMAC disabled (telemetry treated as `Disabled` and passed through). Not used for index signing. |
 
 **Separate `Signing\` subtrees.** NewsService and NewsViewer each read their **own**
 `…\NewsService\Signing\…` and `…\NewsViewer\Signing\…` subtrees — the public keys and
-`RequireSignedIndex` are configured per component and do not cross over. Deploy a team's public key
-(and the flag) to **both** components if both must verify that team.
+`RequireSignedIndex` are configured per component and do not cross over. Deploy the environment's public key
+(and the flag) to **both** components; under the default a component without `Signing\PublicKey` shows no content.
 
 **Authoring-side key material.** The **private** key (and the current/previous public keys) lives in
 `{SecurePath}\keys\{teamFolderName}\team-signing.json` (`TeamSigningKeys`, same JSON format as before) in
@@ -83,15 +83,16 @@ registry (flat `Signing\PublicKey`, §5); only its fingerprint (`KeyId`) travels
 **`SignatureGate.ShouldReject(result, requireSignedIndex, out reason)`** — the accept/reject matrix,
 identical across both verifiers:
 
-| `VerifyResult` | `RequireSignedIndex = false` (default) | `RequireSignedIndex = true` |
+| `VerifyResult` | `RequireSignedIndex = false` | `RequireSignedIndex = true` (default) |
 |---|---|---|
 | `Valid` | accept | accept |
 | `Invalid` | **reject** | **reject** |
 | `Unsigned` | accept (warning) | **reject** |
 | `Disabled` | accept | **reject** |
 
-`Disabled` means no verification key was configured. `KeyIdMissing`, `KeyIdUnknown` and `TeamMismatch` (§5) are rejected in both modes, regardless of `RequireSignedIndex`. Default `false` preserves phased-rollout pass-through: only a
-present-but-wrong signature (`Invalid`) is rejected.
+`Disabled` means no verification key was configured. `KeyIdMissing`, `KeyIdUnknown` and `TeamMismatch` (§5) are rejected in both modes, regardless of `RequireSignedIndex`. The default is `true` (fail-closed, since M2): with no
+value configured, unsigned indexes and teams with no configured key are rejected. `false` is a deliberate
+pass-through in which only a present-but-wrong signature (`Invalid`) is rejected.
 
 **Per-module reject action:**
 
@@ -301,7 +302,7 @@ code on the strength of an unrelated report.
 ## 8. Image path and image hash hardening (NewsService)
 
 NewsService runs as LocalSystem and builds cache, file-share and blob paths from the `ImagePath` of a
-downloaded `index.json`. Signing alone does not protect that (`RequireSignedIndex` defaults to
+downloaded `index.json`. Signing alone does not protect that (`RequireSignedIndex` can be set to
 `false`), so the path and the image bytes are validated independently of the signature.
 
 **Path rule** (`ImagePathValidator` in `NewsCentral.Shared`; non-throwing, returns a reason for the log).

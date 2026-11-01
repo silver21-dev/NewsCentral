@@ -38,7 +38,8 @@ public sealed class IndexAcceptLoggingTests : IDisposable
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Signing:PublicKey"] = publicKey
+                ["Signing:PublicKey"] = publicKey,
+                ["Signing:RequireSignedIndex"] = "false"
             })
             .Build();
 
@@ -139,7 +140,7 @@ public sealed class IndexAcceptLoggingTests : IDisposable
     }
 
     [Fact]
-    public async Task Rejected_LogsError_EveryCycle_AndNeverCaches()
+    public async Task Rejected_LogsError_ThenDebugWhileUnchanged_AndNeverCaches()
     {
         var (priv, _) = SigningKeyTool.GenerateKeyPair();
         var (_, otherPub) = SigningKeyTool.GenerateKeyPair();
@@ -149,10 +150,12 @@ public sealed class IndexAcceptLoggingTests : IDisposable
         await Sync(sut);
         Assert.Contains(log.Entries, e => e.Level == LogLevel.Error && IsReject(e.Message));
 
-        // Second cycle: identical outcome — rejection is never demoted or gated on change.
+        // Second cycle: identical outcome - still reported (never silent), but at Debug until the hourly
+        // repeat or a changed reason (see RejectionLogThrottleTests).
         log.Entries.Clear();
         await Sync(sut);
-        Assert.Contains(log.Entries, e => e.Level == LogLevel.Error && IsReject(e.Message));
+        Assert.Contains(log.Entries, e => e.Level == LogLevel.Debug && IsReject(e.Message));
+        Assert.DoesNotContain(log.Entries, e => e.Level == LogLevel.Error);
 
         Assert.DoesNotContain(log.Entries, e => IsAccept(e.Message));
         Assert.False(File.Exists(Path.Combine(_root, Team, "index.json")));   // content never trusted

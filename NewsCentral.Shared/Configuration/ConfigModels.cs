@@ -71,7 +71,6 @@ public sealed record ComponentManifest
     public required string ComponentName { get; init; }
     public required IReadOnlyList<ConfigKeyDescriptor> Keys { get; init; }
     public bool HasTeamsHive { get; init; }
-    public bool HasSigningHive { get; init; }
     public bool HasEntraAttributeSchemes { get; init; }
     public bool HasEntraGroupTeams { get; init; }
 

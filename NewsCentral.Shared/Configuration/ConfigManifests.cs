@@ -12,7 +12,6 @@ public static class ConfigManifests
     {
         ComponentName = "NewsService",
         HasTeamsHive = true,
-        HasSigningHive = true,
         HasEntraAttributeSchemes = true,
         HasEntraGroupTeams = true,
         Keys = new[]
@@ -54,7 +53,11 @@ public static class ConfigManifests
                 ControlKind.Redacted, OverridableState.Overridable,
                 "Base64, 32 bytes; warning: an empty REG_SZ is a PRESENT value — creating the registry value with empty data overrides the appsettings key with empty and disables HMAC",
                 isSecret: true),
-            Key("Signing:RequireSignedIndex", "false", @"Signing\RequireSignedIndex", RegistryValueType.RegSz,
+            Key("Signing:PublicKey", "", @"Signing\PublicKey", RegistryValueType.RegSz,
+                ControlKind.Text, OverridableState.Overridable, "Base64 SubjectPublicKeyInfo; not secret"),
+            Key("Signing:PublicKeyPrevious", "", @"Signing\PublicKeyPrevious", RegistryValueType.RegSz,
+                ControlKind.Text, OverridableState.Overridable, "Base64 SubjectPublicKeyInfo; not secret"),
+            Key("Signing:RequireSignedIndex", "true", @"Signing\RequireSignedIndex", RegistryValueType.RegSz,
                 ControlKind.Toggle, OverridableState.Overridable,
                 "true | false (registry: REG_SZ); ad-hoc read, not on POCO"),
             Key("Entra:Enabled", "false", @"Entra\Enabled", RegistryValueType.RegSz,
@@ -113,7 +116,6 @@ public static class ConfigManifests
     {
         ComponentName = "NewsViewer",
         HasTeamsHive = true,
-        HasSigningHive = true,
         Keys = new[]
         {
             Key("Company", SolutionConstants.Company, null, RegistryValueType.None, ControlKind.Text,
@@ -131,7 +133,11 @@ public static class ConfigManifests
                 ControlKind.Redacted, OverridableState.Overridable,
                 "Base64, 32 bytes; warning: an empty REG_SZ is a PRESENT value — creating the registry value with empty data overrides the appsettings key with empty and disables HMAC",
                 isSecret: true),
-            Key("Signing:RequireSignedIndex", "false", @"Signing\RequireSignedIndex", RegistryValueType.RegSz,
+            Key("Signing:PublicKey", "", @"Signing\PublicKey", RegistryValueType.RegSz,
+                ControlKind.Text, OverridableState.Overridable, "Base64 SubjectPublicKeyInfo; not secret"),
+            Key("Signing:PublicKeyPrevious", "", @"Signing\PublicKeyPrevious", RegistryValueType.RegSz,
+                ControlKind.Text, OverridableState.Overridable, "Base64 SubjectPublicKeyInfo; not secret"),
+            Key("Signing:RequireSignedIndex", "true", @"Signing\RequireSignedIndex", RegistryValueType.RegSz,
                 ControlKind.Toggle, OverridableState.Overridable,
                 "true | false (registry: REG_SZ); ad-hoc read, not on POCO"),
             Key("Delivery:WallpaperStyle", "Fit", @"Delivery\WallpaperStyle", RegistryValueType.RegSz,
@@ -167,7 +173,6 @@ public static class ConfigManifests
     {
         ComponentName = "NewsCentral",
         HasTeamsHive = false,
-        HasSigningHive = false,
         HasEnvironmentCatalog = true,
         Keys = new[]
         {

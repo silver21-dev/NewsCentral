@@ -28,7 +28,7 @@ public sealed class ContentChangedCycleTests : IDisposable
         var notifier = new RecordingNotifier(events);
         var sut = new SyncService(repo, new CacheManager(_root, JsonDefaults.Options), lockScreen: null!,
                                   imagePublisher: null!, telemetry: null!, entra: null!,
-                                  configuration: new ConfigurationBuilder().Build(),
+                                  configuration: new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Signing:RequireSignedIndex"] = "false" }).Build(),
                                   logger: new NullLogger(), contentChanged: notifier);
         return (sut, notifier, repo, events);
     }
