@@ -403,7 +403,7 @@
         -Company "Contoso" `
         -ComponentName NewsService `
         -EntraEnabled $true `
-        -EntraGracePeriodMinutes 240 `
+        -EntraGracePeriodMinutes 7200 `
         -EntraMaxDynamicTeams 16 `
         -EntraGroupInstances @{
             "prague-its" = @{ InclusionGroup = "NewsCentral Prague ITS" }

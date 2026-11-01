@@ -47,7 +47,7 @@ HKLM\Software\[Company]\NewsCentral\NewsService\
 │       (per-team Signing\{team} subkeys are ignored; NewsService warns once at startup)
 ├── Entra\
 │       Enabled              REG_SZ    "true" or "false"  (default false; gates the whole feature)
-│       GracePeriodMinutes   REG_SZ    (int retention window in minutes for the last resolved team while Graph is unreachable; default 240; MUST be REG_SZ — 0 = "no grace" is deliberate, and DWORD 0/1 coerce to "False"/"True" and the int binder throws)
+│       GracePeriodMinutes   REG_SZ    (int retention window in minutes for the last resolved team while Graph is unreachable; default 7200; MUST be REG_SZ — 0 = "no grace" is deliberate, and DWORD 0/1 coerce to "False"/"True" and the int binder throws)
 │       MaxDynamicTeams      REG_SZ    (int cap on total dynamic teams written across both sources; 0 = no cap; default 16; MUST be REG_SZ — DWORD 0/1 coerce to "False"/"True" and the int binder throws)
 │       AttributeSchemes\
 │           <schemeName>\
@@ -298,7 +298,7 @@ NewsService resolves configuration across the **same three layers as NewsViewer*
   },
   "Entra": {
     "Enabled": false,
-    "GracePeriodMinutes": 240,
+    "GracePeriodMinutes": 7200,
     "MaxDynamicTeams": 16,
     "AttributeSchemes": {},
     "GroupTeams": {
@@ -466,7 +466,7 @@ The attribute source is **multi-instance**: zero or more independently-configure
 ```json
 "Entra": {
   "Enabled": false,
-  "GracePeriodMinutes": 240,
+  "GracePeriodMinutes": 7200,
   "MaxDynamicTeams": 16,
   "AttributeSchemes": {
     "Fat": {

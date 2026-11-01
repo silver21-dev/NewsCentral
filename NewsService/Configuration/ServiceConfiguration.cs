@@ -104,7 +104,7 @@ public class DeliverySection
 public class EntraOptions
 {
     public bool Enabled { get; set; } = false;
-    public int GracePeriodMinutes { get; set; } = 240;
+    public int GracePeriodMinutes { get; set; } = 7200;
 
     /// <summary>
     /// Upper bound on dynamic teams written to resolved-teams.json. Each dynamic team costs one

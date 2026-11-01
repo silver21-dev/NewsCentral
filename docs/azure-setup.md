@@ -186,7 +186,7 @@ cert to each agent machine's `LocalMachine\My` (via GPO; Local System reads this
 | `AzureBlob:CertificateThumbprint` / `ClientSecret` | credential | §1 / §6 |
 | `AzureBlob:AccountName` / `ContainerName` | storage account / container | §3 |
 | `Entra:Enabled` | `true` to enable dynamic teams | choice |
-| `Entra:GracePeriodMinutes` | grace window (default 240) | choice |
+| `Entra:GracePeriodMinutes` | grace window (default 7200) | choice |
 | `Entra:MaxDynamicTeams` | cap on total dynamic teams written (default 16, `0` = no cap) | choice |
 | `Entra:AttributeSchemes:{scheme}:Selector` / `:Mappings:{value}` | per-scheme selector attribute and selector→rule table | §4a |
 | `Entra:GroupTeams:Instances:{label}:InclusionGroup` / `:ExclusionGroup` | per-instance inclusion/exclusion group display names | §5 |

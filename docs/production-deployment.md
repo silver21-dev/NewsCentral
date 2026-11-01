@@ -232,7 +232,7 @@ membership is evaluated **transitively**, so nested groups count.
 | Value | Default | Effect |
 |---|---|---|
 | `Entra\Enabled` | `false` | Gates the whole feature |
-| `Entra\GracePeriodMinutes` | `240` | How long a team is retained while Graph is *transiently* unreachable. Per instance, against its own last-confirmed time. `0` = no grace (deliberate and valid). |
+| `Entra\GracePeriodMinutes` | `7200` | How long a team is retained while Graph is *transiently* unreachable. Per instance, against its own last-confirmed time. `0` = no grace (deliberate and valid). |
 | `Entra\MaxDynamicTeams` | `16` | Cap on total dynamic teams written across both sources; `0` = no cap. Truncates deterministically **after** the grace merge, with a `Warning` naming the dropped ids. |
 
 > ⚠️ **All three MUST be provisioned as `REG_SZ`, never `REG_DWORD`.** `RegistryConfigurationProvider`
@@ -396,7 +396,7 @@ HKLM\Software\{Company}\NewsCentral\NewsService\
 │
 ├── Entra\                                                (omit entirely if not used)
 │       Enabled                 REG_SZ   "false"
-│       GracePeriodMinutes      REG_SZ   "240"
+│       GracePeriodMinutes      REG_SZ   "7200"
 │       MaxDynamicTeams         REG_SZ   "16"
 │       GroupTeams\ExclusionGroup                     REG_SZ  <display name>
 │       GroupTeams\Instances\{label}\InclusionGroup   REG_SZ  <display name>

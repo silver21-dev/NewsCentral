@@ -170,7 +170,9 @@ across both sources:
 | Classification | Examples | Effect |
 |---|---|---|
 | **Persistent** | 403 (missing consent), device object not found, a group display name not found or ambiguous, an authoritative "no mapping"/"not a member" answer | Clean removal, no grace. A 403 additionally logs at `Error`. |
-| **Transient** | Network/timeout/throttling/5xx, an unreachable device or group check | The affected instance's prior entry rides the grace window (`Entra:GracePeriodMinutes`, default 240) with `State = Grace`, then drops if Graph still hasn't answered by the deadline. |
+| **Transient** | Network/timeout/throttling/5xx, an unreachable device or group check | The affected instance's prior entry rides the grace window (`Entra:GracePeriodMinutes`, default 7200) with `State = Grace`, then drops if Graph still hasn't answered by the deadline. |
+
+The default 5-day grace (7200 minutes) covers transient Graph unreachability only; clean removal (no team) and a 403 remain immediate.
 
 Grace is evaluated **per instance** (per `(Source, SourceId)` key) — a Graph outage graces every
 currently-active instance independently, each against its own `LastConfirmedUtc`; an instance that

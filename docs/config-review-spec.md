@@ -157,7 +157,7 @@ Hive: `…\NewsCentral\NewsService\`. `RegType`: S=REG_SZ, D=DWORD. `Ovr`: OV/PA
 | `Signing:PublicKeyPrevious` | `""` | `Signing\PublicKeyPrevious` | S | OV | text | | Base64 SubjectPublicKeyInfo; not secret |
 | `Signing:RequireSignedIndex` | `true` | `Signing\RequireSignedIndex` | S | OV | toggle | | `true \| false` (registry: REG_SZ); ad-hoc read, not on POCO |
 | `Entra:Enabled` | `false` | `Entra\Enabled` | S | OV | toggle | | `true \| false` (registry: REG_SZ) |
-| `Entra:GracePeriodMinutes` | `240` | `Entra\GracePeriodMinutes` | S | OV | number | | integer minutes; MUST be REG_SZ (0 = "no grace" is valid; DWORD 0/1 coerce to `False`/`True` → int binder throws) |
+| `Entra:GracePeriodMinutes` | `7200` | `Entra\GracePeriodMinutes` | S | OV | number | | integer minutes; MUST be REG_SZ (0 = "no grace" is valid; DWORD 0/1 coerce to `False`/`True` → int binder throws) |
 | `Entra:MaxDynamicTeams` | `16` | `Entra\MaxDynamicTeams` | S | OV | number | | integer count; 0 = no cap; MUST be REG_SZ (DWORD 0/1 coerce to `False`/`True` → int binder throws) |
 | `Entra:GroupTeams:ExclusionGroup` | `""` | `Entra\GroupTeams\ExclusionGroup` | S | OV | text | | fleet-wide exclusion group id/name; suppresses every group instance if set but unresolvable |
 | `Delivery:DefaultLockScreenPath` | `""` | `Delivery\DefaultLockScreenPath` | S | OV | path | | absolute; SYSTEM-readable; warning: empty REG_SZ is a PRESENT value — overrides appsettings with empty; no content + no default CLEARS a value NewsService itself published, leaves a foreign value alone |

@@ -62,7 +62,7 @@ public static class ConfigManifests
                 "true | false (registry: REG_SZ); ad-hoc read, not on POCO"),
             Key("Entra:Enabled", "false", @"Entra\Enabled", RegistryValueType.RegSz,
                 ControlKind.Toggle, OverridableState.Overridable, "true | false (registry: REG_SZ)"),
-            Key("Entra:GracePeriodMinutes", "240", @"Entra\GracePeriodMinutes", RegistryValueType.RegSz,
+            Key("Entra:GracePeriodMinutes", "7200", @"Entra\GracePeriodMinutes", RegistryValueType.RegSz,
                 ControlKind.Number, OverridableState.Overridable,
                 "integer minutes (registry: REG_SZ, NOT DWORD — 0 = \"no grace\" is a deliberate setting; DWORD 0/1 coerce to \"False\"/\"True\" and the int binder throws)"),
             Key("Entra:MaxDynamicTeams", "16", @"Entra\MaxDynamicTeams", RegistryValueType.RegSz,
