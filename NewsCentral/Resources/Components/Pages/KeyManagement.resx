@@ -64,4 +64,18 @@
   <data name="Reload" xml:space="preserve"><value>Reload</value></data>
   <data name="LoadError" xml:space="preserve"><value>Error loading the signing key</value></data>
   <data name="ActionError" xml:space="preserve"><value>The action failed</value></data>
+  <data name="PublishedSection" xml:space="preserve"><value>Published indexes</value></data>
+  <data name="PublishedLoading" xml:space="preserve"><value>Reading the published indexes…</value></data>
+  <data name="PublishedNone" xml:space="preserve"><value>No active teams.</value></data>
+  <data name="PublishedSummary" xml:space="preserve"><value>{0} of {1} teams signed with the current key</value></data>
+  <data name="ColTeam" xml:space="preserve"><value>Team</value></data>
+  <data name="ColStatus" xml:space="preserve"><value>Status</value></data>
+  <data name="StatusCurrent" xml:space="preserve"><value>Current</value></data>
+  <data name="StatusNext" xml:space="preserve"><value>Next</value></data>
+  <data name="StatusPrevious" xml:space="preserve"><value>Previous</value></data>
+  <data name="StatusUnknownKey" xml:space="preserve"><value>Unknown key</value></data>
+  <data name="StatusUnsigned" xml:space="preserve"><value>Unsigned</value></data>
+  <data name="StatusNoIndex" xml:space="preserve"><value>No index</value></data>
+  <data name="StatusUnreadable" xml:space="preserve"><value>Unreadable ({0})</value></data>
+  <data name="RetireBehind" xml:space="preserve"><value>{0} teams are not yet signed with the current key: {1}. Run Index Management → Regenerate all teams first.</value></data>
 </root>

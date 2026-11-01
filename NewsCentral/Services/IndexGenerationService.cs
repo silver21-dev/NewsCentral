@@ -418,6 +418,47 @@ public class IndexGenerationService
         }
     }
 
+    /// <summary>
+    /// What the team's authoring-tier index.json says about its signing: existence, whether it has a signature, and its
+    /// <c>keyId</c>. Read from the same storage as <see cref="ReadIndexAsync"/> (never the distribution target), and
+    /// nothing else is taken from the file. Never throws: a read or parse failure is reported with its reason.
+    /// </summary>
+    public async Task<PublishedIndexObservation> ReadPublishedIndexAsync(string teamFolderName)
+    {
+        try
+        {
+            var json = await _storage.ReadTextAsync(GetIndexFilePath(teamFolderName));
+            if (json == null) return PublishedIndexObservation.None();
+
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return PublishedIndexObservation.Failed("index.json is not a JSON object");
+
+            string? keyId = null;
+            var signed = false;
+            foreach (var property in doc.RootElement.EnumerateObject())
+            {
+                if (property.NameEquals("keyId") || property.Name.Equals("keyId", StringComparison.OrdinalIgnoreCase))
+                    keyId = property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString() : null;
+                else if (property.Name.Equals("signature", StringComparison.OrdinalIgnoreCase))
+                    signed = property.Value.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(property.Value.GetString());
+            }
+            return new PublishedIndexObservation(true, signed, keyId);
+        }
+        catch (JsonException ex)
+        {
+            return PublishedIndexObservation.Failed($"index.json could not be parsed ({ex.Message})");
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return PublishedIndexObservation.Failed("access denied");
+        }
+        catch (Exception ex)
+        {
+            return PublishedIndexObservation.Failed(ex.Message);
+        }
+    }
+
     public async Task<RegenerateAllResult> RegenerateAllIndexesAsync()
     {
         System.Diagnostics.Debug.WriteLine("=== RegenerateAllIndexes ===");

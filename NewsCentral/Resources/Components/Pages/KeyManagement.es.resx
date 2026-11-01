@@ -64,4 +64,18 @@
   <data name="Reload" xml:space="preserve"><value>Recargar</value></data>
   <data name="LoadError" xml:space="preserve"><value>Error al cargar la clave de firma</value></data>
   <data name="ActionError" xml:space="preserve"><value>La acción ha fallado</value></data>
+  <data name="PublishedSection" xml:space="preserve"><value>Índices publicados</value></data>
+  <data name="PublishedLoading" xml:space="preserve"><value>Leyendo los índices publicados…</value></data>
+  <data name="PublishedNone" xml:space="preserve"><value>No hay equipos activos.</value></data>
+  <data name="PublishedSummary" xml:space="preserve"><value>{0} de {1} equipos firmados con la clave actual</value></data>
+  <data name="ColTeam" xml:space="preserve"><value>Equipo</value></data>
+  <data name="ColStatus" xml:space="preserve"><value>Estado</value></data>
+  <data name="StatusCurrent" xml:space="preserve"><value>Actual</value></data>
+  <data name="StatusNext" xml:space="preserve"><value>Siguiente</value></data>
+  <data name="StatusPrevious" xml:space="preserve"><value>Anterior</value></data>
+  <data name="StatusUnknownKey" xml:space="preserve"><value>Clave desconocida</value></data>
+  <data name="StatusUnsigned" xml:space="preserve"><value>Sin firmar</value></data>
+  <data name="StatusNoIndex" xml:space="preserve"><value>Sin índice</value></data>
+  <data name="StatusUnreadable" xml:space="preserve"><value>Ilegible ({0})</value></data>
+  <data name="RetireBehind" xml:space="preserve"><value>{0} equipos aún no están firmados con la clave actual: {1}. Ejecute primero Gestión de índices → Regenerar todos los equipos.</value></data>
 </root>

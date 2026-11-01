@@ -281,32 +281,3 @@ public sealed class SecurePathSettingsTests
         Assert.Equal("E:/keys", applied.SecurePath);
     }
 }
-
-public sealed class FleetExportUnreadableKeyTests
-{
-    private static FleetExportInput Input(params FleetExportTeam[] teams) => new(
-        Company: "Contoso", EnvironmentDisplayName: "Prod", DataPath: "D:/data", GeneratedAtUtc: DateTime.UtcNow,
-        Distribution: new FleetExportDistribution(true, "Local", null, "", "", ""),
-        EffectiveLocalDistributionPath: @"\\srv\share", Teams: teams);
-
-    [Fact]
-    public void UnreadableKey_IsReportedAsNotReadable_NotAsNoKey()
-    {
-        var export = FleetExportBuilder.Build(Input(
-            new FleetExportTeam("cz-its", "CZ ITS", null, null, KeyUnreadableReason: "access denied"),
-            new FleetExportTeam("de-prod", "DE", null, null)));
-
-        Assert.Contains(export.Warnings, w => w.StartsWith("Key not readable: cz-its") && w.Contains("access denied"));
-        Assert.DoesNotContain(export.Warnings, w => w.StartsWith("No signing key: cz-its"));
-        Assert.Contains(export.Warnings, w => w.StartsWith("No signing key: de-prod"));
-    }
-
-    [Fact]
-    public void UnreadableKey_ContributesNoKeyMaterial()
-    {
-        var export = FleetExportBuilder.Build(Input(
-            new FleetExportTeam("cz-its", "CZ ITS", null, null, KeyUnreadableReason: "access denied")));
-
-        Assert.DoesNotContain("TeamPublicKeys", export.PowerShell);
-    }
-}

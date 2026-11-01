@@ -17,6 +17,7 @@
 @inject DistributionStatusTracker DistributionStatus
 @inject AppConfiguration AppConfig
 @inject IndexGenerationService IndexService
+@inject EnvironmentKeyService KeyService
 @inject TeamService TeamService
 @inject IJSRuntime JS
 @implements IDisposable
@@ -1067,12 +1068,23 @@
         exportActiveTab = "powershell";
 
         var allTeams = await TeamService.GetAllTeamsAsync();
-        var exportTeams = new List<FleetExportTeam>();
-        foreach (var team in allTeams)
+        var exportTeams = allTeams.Select(t => new FleetExportTeam(t.FolderName, t.Name)).ToList();
+
+        // The same registry values Key Management shows (GpoTarget), so the export always matches the GPO.
+        var keyLoad = await KeyService.LoadAsync();
+        FleetExportSigning exportSigning;
+        if (keyLoad.Outcome == KeyLoadOutcome.Unreadable)
         {
-            // TODO(M4): the environment key is not per team any more, so the export carries no signing keys until
-            // M4 reworks the export around the environment's PublicKey / PublicKeyPrevious.
-            exportTeams.Add(new FleetExportTeam(team.FolderName, team.Name, null, null));
+            exportSigning = new FleetExportSigning(null, null, keyLoad.Reason ?? "unknown reason");
+        }
+        else if (keyLoad.Keys is { } keys)
+        {
+            var (publicKey, publicKeyPrevious) = EnvironmentKeyService.GpoTarget(keys);
+            exportSigning = new FleetExportSigning(publicKey, publicKeyPrevious);
+        }
+        else
+        {
+            exportSigning = new FleetExportSigning(null, null);
         }
 
         var distribution = effective.Settings.Distribution;
@@ -1091,6 +1103,7 @@
             // Same helper MainLayout/Settings use for display — already resolves the
             // {DataPath}\_distribution fallback for Local mode (ignored by the builder for Azure).
             EffectiveLocalDistributionPath: EnvironmentSettingsService.DescribeDistributionTarget(distribution, EnvironmentContext.DataPath),
+            Signing: exportSigning,
             Teams: exportTeams);
 
         exportResult = FleetExportBuilder.Build(input);

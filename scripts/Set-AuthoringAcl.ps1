@@ -238,7 +238,6 @@ try {
             }
         }
         Write-Host 'Done. If the key file was readable by other users before, rotate the key in NewsCentral (Key Management).' -ForegroundColor Green
-        Write-Host 'Done. Now rotate every team key in NewsCentral (Key Management): the old key files were readable by every author.' -ForegroundColor Green
     }
 }
 catch {

@@ -1,4 +1,6 @@
+using System.Text.RegularExpressions;
 using NewsCentral.Configuration.FleetExport;
+using NewsCentral.Security;
 using Xunit;
 
 namespace NewsCentral.Shared.Tests;
@@ -8,16 +10,18 @@ public sealed class FleetExportBuilderTests
     private static FleetExportInput MakeInput(
         FleetExportDistribution? distribution = null,
         string? effectiveLocalDistributionPath = null,
-        IReadOnlyList<FleetExportTeam>? teams = null) => new(
+        IReadOnlyList<FleetExportTeam>? teams = null,
+        FleetExportSigning? signing = null) => new(
         Company: "Contoso",
         EnvironmentDisplayName: "Pilot",
         DataPath: @"C:\Download\NewsCentral",
         GeneratedAtUtc: new DateTime(2026, 3, 1, 12, 0, 0, DateTimeKind.Utc),
         Distribution: distribution ?? new FleetExportDistribution(true, "Local", null, "", "", "newscentral"),
         EffectiveLocalDistributionPath: effectiveLocalDistributionPath ?? @"\\fileserver\newscentral",
+        Signing: signing ?? new FleetExportSigning("pub-current", null),
         Teams: teams ?? new List<FleetExportTeam>
         {
-            new("cz-its", "CZ ITS", "pubkey-cz", "pubkey-cz-prev")
+            new("cz-its", "CZ ITS")
         });
 
     [Fact]
@@ -75,7 +79,7 @@ public sealed class FleetExportBuilderTests
         Assert.Contains(FleetExportBuilder.CertThumbprintPlaceholder, result.Placeholders);
 
         // The authoring app's ClientId is never even part of the input type, so it structurally
-        // cannot leak into the export — FleetExportDistribution carries no ClientId property.
+        // cannot leak into the export - FleetExportDistribution carries no ClientId property.
         var distributionProperties = typeof(FleetExportDistribution).GetProperties().Select(p => p.Name);
         Assert.DoesNotContain("ClientId", distributionProperties);
     }
@@ -93,64 +97,108 @@ public sealed class FleetExportBuilderTests
         Assert.False(string.IsNullOrWhiteSpace(result.Reg));
     }
 
+    // ── M4: the environment signing key (flat) ───────────────────────────────
+
     [Fact]
-    public void Build_TeamWithCurrentAndPreviousKeys_EmitsBothForBothComponents()
+    public void Build_KeyWithPrevious_EmitsFlatValuesForBothComponents_AndRequiresSignedIndex()
     {
-        var teams = new List<FleetExportTeam> { new("cz-its", "CZ ITS", "pub-current", "pub-previous") };
-        var input = MakeInput(teams: teams);
+        var result = FleetExportBuilder.Build(MakeInput(signing: new FleetExportSigning("pub-current", "pub-previous")));
 
-        var result = FleetExportBuilder.Build(input);
-
-        Assert.Equal(2, CountOccurrences(result.PowerShell, "pub-current"));
-        Assert.Equal(2, CountOccurrences(result.PowerShell, "pub-previous"));
+        Assert.Equal(2, CountOccurrences(result.PowerShell, "SigningPublicKey = 'pub-current'"));
+        Assert.Equal(2, CountOccurrences(result.PowerShell, "SigningPublicKeyPrevious = 'pub-previous'"));
+        Assert.Equal(2, CountOccurrences(result.PowerShell, "RequireSignedIndex = $true"));
+        Assert.Equal(2, CountOccurrences(result.Reg, "\"RequireSignedIndex\"=\"true\""));
         Assert.Equal(2, CountOccurrences(result.Reg, "\"PublicKey\"=\"pub-current\""));
         Assert.Equal(2, CountOccurrences(result.Reg, "\"PublicKeyPrevious\"=\"pub-previous\""));
+        AssertNoPerTeamLayoutOrFalse(result);
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("signing key", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public void Build_TeamWithoutKey_OmittedFromSigningAndWarned()
+    public void Build_KeyWithoutPrevious_MarksPreviousForRemoval()
     {
-        var teams = new List<FleetExportTeam>
+        var result = FleetExportBuilder.Build(MakeInput(signing: new FleetExportSigning("pub-current", null)));
+
+        Assert.Equal(2, CountOccurrences(result.PowerShell, "SigningPublicKeyPrevious = ''"));
+        Assert.Equal(2, CountOccurrences(result.Reg, "\"PublicKeyPrevious\"=-"));
+        Assert.Equal(2, CountOccurrences(result.Reg, "\"PublicKey\"=\"pub-current\""));
+        AssertNoPerTeamLayoutOrFalse(result);
+    }
+
+    [Fact]
+    public void Build_NoKey_OmitsKeyLines_KeepsRequireSignedIndex_AndWarns()
+    {
+        var result = FleetExportBuilder.Build(MakeInput(signing: new FleetExportSigning(null, null)));
+
+        Assert.DoesNotContain("SigningPublicKey", result.PowerShell);
+        Assert.DoesNotContain("\"PublicKey\"", result.Reg);
+        Assert.DoesNotContain("PublicKeyPrevious", result.Reg);
+        Assert.Equal(2, CountOccurrences(result.PowerShell, "RequireSignedIndex = $true"));
+        Assert.Equal(2, CountOccurrences(result.Reg, "\"RequireSignedIndex\"=\"true\""));
+        Assert.Contains(result.Warnings, w =>
+            w == "No environment signing key: devices will show no content (fail-closed). Generate one in Key Management.");
+        AssertNoPerTeamLayoutOrFalse(result);
+    }
+
+    [Fact]
+    public void Build_UnreadableKey_OmitsKeyLines_KeepsRequireSignedIndex_AndWarnsWithReason()
+    {
+        var result = FleetExportBuilder.Build(MakeInput(signing: new FleetExportSigning("ignored", "ignored", "access denied")));
+
+        Assert.DoesNotContain("ignored", result.PowerShell);
+        Assert.DoesNotContain("ignored", result.Reg);
+        Assert.DoesNotContain("SigningPublicKey", result.PowerShell);
+        Assert.Equal(2, CountOccurrences(result.PowerShell, "RequireSignedIndex = $true"));
+        Assert.Equal(2, CountOccurrences(result.Reg, "\"RequireSignedIndex\"=\"true\""));
+        var warning = Assert.Single(result.Warnings, w => w.StartsWith("Signing key not readable"));
+        Assert.Equal(
+            "Signing key not readable (access denied): this export contains no signing key; devices will show " +
+            "no content until it is fixed and the export regenerated", warning);
+        Assert.DoesNotContain(result.Warnings, w => w.StartsWith("No environment signing key"));
+    }
+
+    [Fact]
+    public void Build_NeverContainsPrivateKeyMaterial_AndNoBase64LongerThanASpki()
+    {
+        var (priv, pub) = SigningKeyTool.GenerateKeyPair();
+        var prevPub = SigningKeyTool.GenerateKeyPair().PublicKeyBase64;
+        var result = FleetExportBuilder.Build(MakeInput(signing: new FleetExportSigning(pub, prevPub)));
+
+        foreach (var text in new[] { result.PowerShell, result.Reg })
         {
-            new("cz-its", "CZ ITS", "pub-cz", null),
-            new("de-prod", "DE Prod", null, null)
-        };
-        var input = MakeInput(teams: teams);
-
-        var result = FleetExportBuilder.Build(input);
-
-        Assert.DoesNotContain("de-prod", GetSigningSection(result.Reg));
-        Assert.Contains(result.Warnings, w => w.Contains("No signing key: de-prod"));
-        Assert.Contains("cz-its", result.PowerShell);
-    }
-
-    private static string GetSigningSection(string reg)
-    {
-        var start = reg.IndexOf("Signing]", StringComparison.Ordinal);
-        var teamsExampleStart = reg.IndexOf("Example only", StringComparison.Ordinal);
-        return start >= 0 && teamsExampleStart > start ? reg[start..teamsExampleStart] : reg;
+            Assert.DoesNotContain(priv, text);
+            Assert.DoesNotContain("privateKey", text, StringComparison.OrdinalIgnoreCase);
+            // The longest Base64 run is an SPKI (91 bytes = 124 chars); a PKCS#8 private key is longer.
+            var longest = Regex.Matches(text, "[A-Za-z0-9+/]{40,}={0,2}")
+                .Select(m => m.Value.Length).DefaultIfEmpty(0).Max();
+            Assert.True(longest <= pub.Length, $"found a Base64 run of {longest} chars, longer than an SPKI ({pub.Length})");
+        }
+        Assert.DoesNotContain("PrivateKey", typeof(FleetExportSigning).GetProperties().Select(p => p.Name));
+        Assert.DoesNotContain("PrivateKey", typeof(FleetExportTeam).GetProperties().Select(p => p.Name));
     }
 
     [Fact]
-    public void Build_NoPrivateKeyFieldExists_AndOutputNeverMentionsPrivateKey()
+    public void Build_TeamsCarryNoKeyData()
     {
-        var teams = new List<FleetExportTeam> { new("cz-its", "CZ ITS", "pub-cz", "pub-cz-prev") };
-        var input = MakeInput(teams: teams);
+        Assert.Equal(new[] { "FolderName", "DisplayName" },
+            typeof(FleetExportTeam).GetProperties().Select(p => p.Name).ToArray());
+    }
 
-        var result = FleetExportBuilder.Build(input);
-
-        var teamProperties = typeof(FleetExportTeam).GetProperties().Select(p => p.Name);
-        Assert.DoesNotContain("PrivateKey", teamProperties);
-
-        Assert.DoesNotContain("PrivateKey", result.PowerShell);
-        Assert.DoesNotContain("PrivateKey", result.Reg);
+    private static void AssertNoPerTeamLayoutOrFalse(FleetExport result)
+    {
+        Assert.DoesNotContain("TeamPublicKeys", result.PowerShell);
+        Assert.DoesNotContain("TeamPreviousPublicKeys", result.PowerShell);
+        Assert.DoesNotContain("RequireSignedIndex = $false", result.PowerShell);
+        Assert.DoesNotContain("\"RequireSignedIndex\"=\"false\"", result.Reg);
+        // No per-team Signing subkey: a section header would read ...\Signing\<team>].
+        Assert.DoesNotMatch(@"\\Signing\\", result.Reg);
     }
 
     [Fact]
     public void Build_Reg_EscapesBackslashesAndQuotes_HeaderLineExact_AllValuesRegSz()
     {
-        var teams = new List<FleetExportTeam> { new("cz-its", "CZ ITS", "pub\"with\"quotes", null) };
-        var input = MakeInput(effectiveLocalDistributionPath: @"\\server\share\path", teams: teams);
+        var input = MakeInput(effectiveLocalDistributionPath: @"\\server\share\path",
+            signing: new FleetExportSigning("pub\"with\"quotes", null));
 
         var result = FleetExportBuilder.Build(input);
 
@@ -164,7 +212,7 @@ public sealed class FleetExportBuilderTests
         // An embedded quote is escaped as \".
         Assert.Contains(@"\""with\""", result.Reg);
 
-        // Every value line uses the quoted "name"="value" form (REG_SZ) — never a dword: / hex: prefix.
+        // Every value line uses the quoted "name"="value" form (REG_SZ) or the "=-" removal - never dword:/hex:.
         foreach (var line in result.Reg.Split('\n'))
         {
             var trimmed = line.Trim();
@@ -179,7 +227,7 @@ public sealed class FleetExportBuilderTests
     [Fact]
     public void Build_PowerShell_ApostropheInTeamName_EscapedAndRoundTrips()
     {
-        var teams = new List<FleetExportTeam> { new("o'brien-team", "O'Brien Team", "pub-key", null) };
+        var teams = new List<FleetExportTeam> { new("o'brien-team", "O'Brien Team") };
         var input = MakeInput(teams: teams);
 
         var result = FleetExportBuilder.Build(input);

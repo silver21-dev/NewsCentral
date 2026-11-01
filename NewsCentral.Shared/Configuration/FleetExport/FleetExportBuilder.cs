@@ -20,21 +20,24 @@ public sealed record FleetExportDistribution(
     string ContainerName);
 
 /// <summary>
-/// M6: one team's exportable identity — folder name, display name, and its CURRENT/PREVIOUS
-/// PUBLIC signing keys only. Deliberately has no PrivateKey field: the environment key file's private keys
-/// must never reach this export (see docs/security.md's authoring-tier-only trust boundary).
+/// M6/M4: one team's exportable identity - folder name and display name only. Signing keys are per environment
+/// now (<see cref="FleetExportSigning"/>), never per team.
 /// </summary>
-public sealed record FleetExportTeam(
-    string FolderName,
-    string DisplayName,
-    string? PublicKey,
-    string? PublicKeyPrevious,
-    string? KeyUnreadableReason = null);
+public sealed record FleetExportTeam(string FolderName, string DisplayName);
 
 /// <summary>
-/// M6: pure input to <see cref="FleetExportBuilder.Build"/> — no I/O, no secrets. The caller
+/// M4: the environment's PUBLIC signing keys as the GPO must hold them (from EnvironmentKeyService.GpoTarget, so the
+/// export always matches Key Management). Deliberately has no private-key field: the key file's private keys must
+/// never reach this export (see docs/security.md's authoring-tier-only trust boundary).
+/// <see cref="PublicKeyPrevious"/> null means "remove it". <see cref="KeyUnreadableReason"/> set means the key file
+/// exists but could not be read; the export then carries no key.
+/// </summary>
+public sealed record FleetExportSigning(string? PublicKey, string? PublicKeyPrevious, string? KeyUnreadableReason = null);
+
+/// <summary>
+/// M6: pure input to <see cref="FleetExportBuilder.Build"/> - no I/O, no secrets. The caller
 /// (Environment Management) is responsible for resolving <see cref="EffectiveLocalDistributionPath"/>
-/// (including the {DataPath}\_distribution fallback — see EnvironmentSettingsResolver.Fingerprint /
+/// (including the {DataPath}\_distribution fallback - see EnvironmentSettingsResolver.Fingerprint /
 /// EnvironmentSettingsService.DescribeDistributionTarget) before building this.
 /// </summary>
 public sealed record FleetExportInput(
@@ -44,6 +47,7 @@ public sealed record FleetExportInput(
     DateTime GeneratedAtUtc,
     FleetExportDistribution Distribution,
     string EffectiveLocalDistributionPath,
+    FleetExportSigning Signing,
     IReadOnlyList<FleetExportTeam> Teams);
 
 /// <summary>Result of <see cref="FleetExportBuilder.Build"/>.</summary>
@@ -108,21 +112,30 @@ public static class FleetExportBuilder
                 "Distribution is disabled for this environment; devices will receive nothing until it is enabled.");
         }
 
-        var teamsWithKeys = input.Teams.Where(t => !string.IsNullOrWhiteSpace(t.PublicKey)).ToList();
-
-        // An unreadable key is not a missing key: the team HAS a key that this export could not read, so the
-        // warning must say so (and must not suggest generating one).
-        foreach (var team in input.Teams.Where(t => string.IsNullOrWhiteSpace(t.PublicKey)))
-            warnings.Add(team.KeyUnreadableReason is null
-                ? $"No signing key: {team.FolderName} — its index can't be verified by devices"
-                : $"Key not readable: {team.FolderName} ({team.KeyUnreadableReason}) — it is missing from this export; devices can't verify its index until the key is readable and the export is regenerated");
+        // An unreadable key is not a missing key: the file exists but could not be read, so the warning must say so
+        // (and must not suggest generating one). In both cases the export omits the key lines but still requires
+        // signed indexes (fail-closed).
+        var signing = input.Signing;
+        if (signing.KeyUnreadableReason is not null)
+        {
+            signing = new FleetExportSigning(null, null, signing.KeyUnreadableReason);
+            warnings.Add(
+                $"Signing key not readable ({signing.KeyUnreadableReason}): this export contains no signing key; " +
+                "devices will show no content until it is fixed and the export regenerated");
+        }
+        else if (string.IsNullOrWhiteSpace(signing.PublicKey))
+        {
+            signing = new FleetExportSigning(null, null);
+            warnings.Add(
+                "No environment signing key: devices will show no content (fail-closed). Generate one in Key Management.");
+        }
 
         var headerLines = BuildHeaderLines(input, warnings, placeholders);
 
         return new FleetExport
         {
-            PowerShell = BuildPowerShell(input, isAzure, sharePath, teamsWithKeys, headerLines),
-            Reg = BuildReg(input, isAzure, sharePath, teamsWithKeys, headerLines),
+            PowerShell = BuildPowerShell(input, isAzure, sharePath, signing, headerLines),
+            Reg = BuildReg(input, isAzure, sharePath, signing, headerLines),
             Warnings = warnings,
             Placeholders = placeholders.Distinct(StringComparer.Ordinal).ToList()
         };
@@ -179,7 +192,7 @@ public static class FleetExportBuilder
 
     private static string BuildPowerShell(
         FleetExportInput input, bool isAzure, string sharePath,
-        List<FleetExportTeam> teamsWithKeys, List<string> headerLines)
+        FleetExportSigning signing, List<string> headerLines)
     {
         var sb = new StringBuilder();
         sb.AppendLine("#Requires -RunAsAdministrator");
@@ -207,8 +220,8 @@ public static class FleetExportBuilder
             sb.AppendLine("    StorageMode = 'Share'");
             sb.AppendLine($"    SharePath   = {PsQuote(sharePath)}");
         }
-        sb.AppendLine("    RequireSignedIndex = $false");
-        AppendTeamKeyHashtables(sb, teamsWithKeys);
+        sb.AppendLine("    RequireSignedIndex = $true");
+        AppendSigningParams(sb, signing);
         sb.AppendLine("}");
         sb.AppendLine(".\\Set-RegistryOverrides.ps1 @NewsServiceParams");
         sb.AppendLine();
@@ -216,8 +229,8 @@ public static class FleetExportBuilder
         sb.AppendLine("$NewsViewerParams = @{");
         sb.AppendLine($"    Company       = {PsQuote(input.Company)}");
         sb.AppendLine("    ComponentName = 'NewsViewer'");
-        sb.AppendLine("    RequireSignedIndex = $false");
-        AppendTeamKeyHashtables(sb, teamsWithKeys);
+        sb.AppendLine("    RequireSignedIndex = $true");
+        AppendSigningParams(sb, signing);
         sb.AppendLine("}");
         sb.AppendLine(".\\Set-RegistryOverrides.ps1 @NewsViewerParams");
         sb.AppendLine();
@@ -232,24 +245,14 @@ public static class FleetExportBuilder
         return sb.ToString();
     }
 
-    private static void AppendTeamKeyHashtables(StringBuilder sb, List<FleetExportTeam> teamsWithKeys)
+    private static void AppendSigningParams(StringBuilder sb, FleetExportSigning signing)
     {
-        if (teamsWithKeys.Count == 0)
-            return;
+        if (string.IsNullOrWhiteSpace(signing.PublicKey))
+            return;   // no key (or unreadable): omit the key lines; RequireSignedIndex stays true (fail-closed)
 
-        sb.AppendLine("    TeamPublicKeys = @{");
-        foreach (var team in teamsWithKeys)
-            sb.AppendLine($"        {PsQuote(team.FolderName)} = {PsQuote(team.PublicKey!)}");
-        sb.AppendLine("    }");
-
-        var teamsWithPrevious = teamsWithKeys.Where(t => !string.IsNullOrWhiteSpace(t.PublicKeyPrevious)).ToList();
-        if (teamsWithPrevious.Count > 0)
-        {
-            sb.AppendLine("    TeamPreviousPublicKeys = @{");
-            foreach (var team in teamsWithPrevious)
-                sb.AppendLine($"        {PsQuote(team.FolderName)} = {PsQuote(team.PublicKeyPrevious!)}");
-            sb.AppendLine("    }");
-        }
+        sb.AppendLine($"    SigningPublicKey = {PsQuote(signing.PublicKey)}");
+        // '' removes the value (Set-RegistryOverrides.ps1), so an old previous key does not linger after Retire.
+        sb.AppendLine($"    SigningPublicKeyPrevious = {PsQuote(signing.PublicKeyPrevious ?? string.Empty)}");
     }
 
     /// <summary>Single-quoted PowerShell string literal — embedded <c>'</c> doubled.</summary>
@@ -259,7 +262,7 @@ public static class FleetExportBuilder
 
     private static string BuildReg(
         FleetExportInput input, bool isAzure, string sharePath,
-        List<FleetExportTeam> teamsWithKeys, List<string> headerLines)
+        FleetExportSigning signing, List<string> headerLines)
     {
         var sb = new StringBuilder();
         sb.AppendLine("Windows Registry Editor Version 5.00");
@@ -292,29 +295,28 @@ public static class FleetExportBuilder
             sb.AppendLine();
         }
 
-        AppendSigningSection(sb, serviceBase, teamsWithKeys);
+        AppendSigningSection(sb, serviceBase, signing);
         AppendTeamsExampleComment(sb, serviceBase, input.Teams);
 
-        AppendSigningSection(sb, viewerBase, teamsWithKeys);
+        AppendSigningSection(sb, viewerBase, signing);
         AppendTeamsExampleComment(sb, viewerBase, input.Teams);
 
         return sb.ToString();
     }
 
-    private static void AppendSigningSection(StringBuilder sb, string componentBase, List<FleetExportTeam> teamsWithKeys)
+    private static void AppendSigningSection(StringBuilder sb, string componentBase, FleetExportSigning signing)
     {
         sb.AppendLine($"[{componentBase}\\Signing]");
-        sb.AppendLine("\"RequireSignedIndex\"=\"false\"");
-        sb.AppendLine();
-
-        foreach (var team in teamsWithKeys)
+        sb.AppendLine("\"RequireSignedIndex\"=\"true\"");
+        if (!string.IsNullOrWhiteSpace(signing.PublicKey))
         {
-            sb.AppendLine($"[{componentBase}\\Signing\\{team.FolderName}]");
-            sb.AppendLine($"\"PublicKey\"=\"{RegEscape(team.PublicKey!)}\"");
-            if (!string.IsNullOrWhiteSpace(team.PublicKeyPrevious))
-                sb.AppendLine($"\"PublicKeyPrevious\"=\"{RegEscape(team.PublicKeyPrevious)}\"");
-            sb.AppendLine();
+            sb.AppendLine($"\"PublicKey\"=\"{RegEscape(signing.PublicKey)}\"");
+            // "=-" deletes the value on import, so an old previous key does not linger after Retire.
+            sb.AppendLine(string.IsNullOrWhiteSpace(signing.PublicKeyPrevious)
+                ? "\"PublicKeyPrevious\"=-"
+                : $"\"PublicKeyPrevious\"=\"{RegEscape(signing.PublicKeyPrevious)}\"");
         }
+        sb.AppendLine();
     }
 
     private static void AppendTeamsExampleComment(StringBuilder sb, string componentBase, IReadOnlyList<FleetExportTeam> teams)

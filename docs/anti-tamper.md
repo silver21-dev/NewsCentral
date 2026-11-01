@@ -165,7 +165,7 @@ follow the same sequence, because both verify against the same registry keys.
 | 0. First key | **Generate** (only when no key exists) | `current` | current | *(not set)* | Deploy the values, then Index Management → **Regenerate all teams** |
 | 1. Prepare | **Prepare next key** (needs `current`, no `next`, no previous) | `current` (unchanged) | **next** | **current** | Update the GPO and wait until every machine has it. **Discard next key** abandons the rotation |
 | 2. Activate | **Activate next key** (after the GPO has spread) | **next, now current** | next (now current) — **no GPO change** | old current (now previous) — **no GPO change** | Index Management → **Regenerate all teams**; wait until every machine has picked up the regenerated indexes |
-| 3. Retire | **Retire previous key** (after nothing signed with it remains) | `current` | current | **remove** `PublicKeyPrevious` | Update the GPO |
+| 3. Retire | **Retire previous key** (after nothing signed with it remains: check Key Management → **Published indexes**, where every team should show `Current`; the Retire confirmation lists the teams that do not) | `current` | current | **remove** `PublicKeyPrevious` | Update the GPO |
 
 Why it is safe: after step 1 the fleet trusts both keys, so activating (step 2) changes only what the authoring side
 signs with. The GPO already holds exactly the pair that step 2 produces (`PublicKey` = new current,
@@ -173,6 +173,16 @@ signs with. The GPO already holds exactly the pair that step 2 produces (`Public
 old key once no distributed index uses it. Registry values: `Signing\PublicKey`, `Signing\PublicKeyPrevious` under
 `HKLM\Software\{Company}\NewsCentral\NewsService` and `…\NewsViewer` (see `docs/configuration.md`); the page's values
 come from `EnvironmentKeyService.GpoTarget`.
+
+**Published indexes (M4).** Key Management lists every active team with the `keyId` found in its **authoring-tier**
+`index.json` (read the way `IndexGenerationService` reads it, never from the distribution target; only `keyId` and
+whether a signature exists are taken from the file) and a status: `Current`, `Next` (should be impossible: Next never
+signs), `Previous`, `Unknown key`, `Unsigned`, `No index` or `Unreadable (reason)`, plus a summary such as "2 of 2
+teams signed with the current key". It is read-only, refreshed on load and after each action, and loads after the key
+panel without blocking the actions. When a Previous key exists and any team with an index is not on `Current`, the
+Retire confirmation says "N teams are not yet signed with the current key: <list>. Run Index Management → Regenerate
+all teams first."; the administrator can still proceed (a team may be retired). This view shows what the authoring
+tier holds; it cannot tell whether every machine has already picked the regenerated indexes up.
 
 Rules enforced by the service: each action re-reads the file first, refuses when it is unreadable ("not replaced")
 or when the current key changed since the page loaded (the key was changed by someone else; reload), and is audited

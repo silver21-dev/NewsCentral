@@ -261,8 +261,8 @@ administrator manages it. See `docs/security.md` and `docs/anti-tamper.md` (§6 
 The file never leaves the authoring tier — it is written to the secure store (not the DataPath `IStorageService`) and
 is never distributed via `IBlobDistributionService`. Public keys are **not secret**; treat them as configuration.
 Later rotation is three steps (Prepare next key → Activate next key → Retire previous key), each with exact GPO
-values shown on the page; see `docs/anti-tamper.md` §6. The fleet export carries no signing keys until M4: copy the
-values from Key Management.
+values shown on the page; see `docs/anti-tamper.md` §6. The fleet export (Environment Management) carries the same
+values as Key Management's "Registry values to deploy (GPO)".
 
 > ⚠️ **Rotation trap.** Signing and index regeneration are distinct operations. Regenerating indexes
 > re-signs with the current key but does **not** rotate keys — and because client change detection uses
@@ -337,6 +337,15 @@ app's, so the export never contains the authoring `ClientId` or any credential �
 `<CERT-THUMBPRINT>`) that **must be replaced before use**. Everything outside this surface — Entra,
 Delivery, Telemetry, Logging, Hmac, Display, Ui — is still configured by hand per
 `docs/configuration.md`.
+
+**The export carries the environment signing key (M4).** For both components it writes
+`RequireSignedIndex = true`, `Signing\PublicKey` (the key from `EnvironmentKeyService.GpoTarget`, so it always matches
+Key Management) and `Signing\PublicKeyPrevious`; there are no per-team `Signing\` subkeys. When no previous key is set,
+the previous value is **marked for removal** so an old key does not linger after Retire: `SigningPublicKeyPrevious = ''`
+in the PowerShell output (`Set-RegistryOverrides.ps1`) and `"PublicKeyPrevious"=-` in the `.reg` file. With no key, or
+an unreadable key file, the export omits the key lines, still writes `RequireSignedIndex = true`, and warns that devices
+will show no content (fail-closed) until a key is generated or readable and the export regenerated. The export never
+contains private key material.
 
 ```
 HKLM\Software\{Company}\NewsCentral\NewsService\

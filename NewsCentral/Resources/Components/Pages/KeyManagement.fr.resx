@@ -64,4 +64,18 @@
   <data name="Reload" xml:space="preserve"><value>Recharger</value></data>
   <data name="LoadError" xml:space="preserve"><value>Erreur lors du chargement de la clé de signature</value></data>
   <data name="ActionError" xml:space="preserve"><value>L'action a échoué</value></data>
+  <data name="PublishedSection" xml:space="preserve"><value>Index publiés</value></data>
+  <data name="PublishedLoading" xml:space="preserve"><value>Lecture des index publiés…</value></data>
+  <data name="PublishedNone" xml:space="preserve"><value>Aucune équipe active.</value></data>
+  <data name="PublishedSummary" xml:space="preserve"><value>{0} équipes sur {1} signées avec la clé actuelle</value></data>
+  <data name="ColTeam" xml:space="preserve"><value>Équipe</value></data>
+  <data name="ColStatus" xml:space="preserve"><value>Statut</value></data>
+  <data name="StatusCurrent" xml:space="preserve"><value>Actuelle</value></data>
+  <data name="StatusNext" xml:space="preserve"><value>Suivante</value></data>
+  <data name="StatusPrevious" xml:space="preserve"><value>Précédente</value></data>
+  <data name="StatusUnknownKey" xml:space="preserve"><value>Clé inconnue</value></data>
+  <data name="StatusUnsigned" xml:space="preserve"><value>Non signé</value></data>
+  <data name="StatusNoIndex" xml:space="preserve"><value>Aucun index</value></data>
+  <data name="StatusUnreadable" xml:space="preserve"><value>Illisible ({0})</value></data>
+  <data name="RetireBehind" xml:space="preserve"><value>{0} équipes ne sont pas encore signées avec la clé actuelle : {1}. Lancez d'abord Gestion des index → Régénérer toutes les équipes.</value></data>
 </root>

@@ -6,6 +6,8 @@
 @using Microsoft.Extensions.Localization
 @inject IStringLocalizer<KeyManagement> Localizer
 @inject EnvironmentKeyService KeyService
+@inject IndexGenerationService IndexService
+@inject TeamService TeamService
 @inject AuthenticationService AuthService
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
@@ -114,6 +116,47 @@
             </div>
         </div>
 
+        @* ── Published indexes: which key each team's index.json was signed with (read only) ── *@
+        <div class="card mb-4">
+            <div class="card-header"><h5>@Localizer["PublishedSection"]</h5></div>
+            <div class="card-body">
+                @if (publishedLoading || published == null)
+                {
+                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                    @Localizer["PublishedLoading"]
+                }
+                else if (published.Count == 0)
+                {
+                    <div class="text-muted">@Localizer["PublishedNone"]</div>
+                }
+                else
+                {
+                    <p class="mb-2">@Localizer["PublishedSummary", published.Count(r => r.Status == PublishedIndexStatus.Current), published.Count]</p>
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr>
+                                <th>@Localizer["ColTeam"]</th>
+                                <th>@Localizer["KeyId"]</th>
+                                <th>@Localizer["ColStatus"]</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in published)
+                            {
+                                <tr>
+                                    <td>@row.Team <span class="text-muted">(@row.FolderName)</span></td>
+                                    <td><code>@row.KeyId</code></td>
+                                    <td>
+                                        <span class="@StatusCss(row.Status)">@StatusText(row)</span>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+
         @* ── Actions: only those valid for the current state ─────────────── *@
         <div class="card mb-4">
             <div class="card-header"><h5>@Localizer["ActionsSection"]</h5></div>
@@ -123,6 +166,13 @@
                     <div class="alert alert-warning">
                         <i class="bi bi-exclamation-triangle me-2"></i>@ConfirmText(pendingAction)
                     </div>
+                    @if (pendingAction == "retire" && BehindTeams.Count > 0)
+                    {
+                        @* Explicit warning, but the administrator may still proceed (a team may be retired). *@
+                        <div class="alert alert-danger">
+                            <i class="bi bi-exclamation-octagon me-2"></i>@Localizer["RetireBehind", BehindTeams.Count, string.Join(", ", BehindTeams)]
+                        </div>
+                    }
                     <button class="btn btn-danger me-2" @onclick="ConfirmAsync" disabled="@isBusy">
                         @if (isBusy)
                         {
@@ -211,6 +261,72 @@
     private (string? PublicKey, string? PublicKeyPrevious) gpo =>
         keys == null ? (null, null) : EnvironmentKeyService.GpoTarget(keys);
 
+    // ── Published indexes (read only; refreshed on load and after each action) ──
+    private sealed record PublishedRow(string Team, string FolderName, string? KeyId, PublishedIndexStatus Status, string? Reason);
+    private List<PublishedRow>? published;
+    private bool publishedLoading;
+    private int publishedGeneration;
+
+    private List<string> BehindTeams => published == null
+        ? new List<string>()
+        : published.Where(r => PublishedIndexStatusEvaluator.IsBehindCurrent(r.Status)).Select(r => r.FolderName).ToList();
+
+    private async Task LoadPublishedAsync()
+    {
+        if (keys?.Current == null)
+        {
+            published = null;
+            return;
+        }
+
+        var generation = ++publishedGeneration;
+        publishedLoading = true;
+        await InvokeAsync(StateHasChanged);
+
+        var current = KeyFingerprint.Of(keys.Current.PublicKey);
+        var next = KeyFingerprint.Of(keys.Next?.PublicKey);
+        var previous = KeyFingerprint.Of(keys.PreviousPublicKey);
+        var rows = new List<PublishedRow>();
+        try
+        {
+            var teams = (await TeamService.GetAllTeamsAsync()).Where(t => t.IsActive).OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase);
+            foreach (var team in teams)
+            {
+                var observation = await IndexService.ReadPublishedIndexAsync(team.FolderName);
+                var status = PublishedIndexStatusEvaluator.Evaluate(observation, current, next, previous);
+                rows.Add(new PublishedRow(team.Name, team.FolderName, observation.KeyId, status, observation.UnreadableReason));
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"{Localizer["LoadError"]}: {ex.Message}";
+        }
+
+        if (generation != publishedGeneration) return;   // a newer load superseded this one
+        published = rows;
+        publishedLoading = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private string StatusText(PublishedRow row) => row.Status switch
+    {
+        PublishedIndexStatus.Current => Localizer["StatusCurrent"],
+        PublishedIndexStatus.Next => Localizer["StatusNext"],
+        PublishedIndexStatus.Previous => Localizer["StatusPrevious"],
+        PublishedIndexStatus.UnknownKey => Localizer["StatusUnknownKey"],
+        PublishedIndexStatus.Unsigned => Localizer["StatusUnsigned"],
+        PublishedIndexStatus.NoIndex => Localizer["StatusNoIndex"],
+        _ => Localizer["StatusUnreadable", row.Reason ?? ""]
+    };
+
+    private static string StatusCss(PublishedIndexStatus status) => status switch
+    {
+        PublishedIndexStatus.Current => "badge bg-success",
+        PublishedIndexStatus.NoIndex => "badge bg-secondary",
+        PublishedIndexStatus.Previous => "badge bg-warning text-dark",
+        _ => "badge bg-danger"
+    };
+
     protected override async Task OnInitializedAsync()
     {
         if (AuthService.GetCurrentUser() == null)
@@ -234,6 +350,7 @@
             loadedKeyId = KeyFingerprint.Of(keys?.Current?.PublicKey);
             loadedNextKeyId = KeyFingerprint.Of(keys?.Next?.PublicKey);
             pendingAction = null;
+            _ = LoadPublishedAsync();
         }
         catch (Exception ex)
         {
@@ -270,6 +387,7 @@
             pendingAction = null;
             successMessage = Localizer[successKey];
             showIndexLink = showLink;
+            _ = LoadPublishedAsync();
         }
         catch (Exception ex)
         {

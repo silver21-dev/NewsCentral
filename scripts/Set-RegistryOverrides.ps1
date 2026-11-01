@@ -57,9 +57,8 @@
     │       UseWinHttpProxy        REG_SZ   "true" or "false"
     ├── Signing\
     │       RequireSignedIndex     REG_SZ   "true" or "false"
-    │       <teamFolderName>\
-    │           PublicKey          REG_SZ   (Base64 SPKI)
-    │           PublicKeyPrevious  REG_SZ   (Base64 SPKI; optional)
+    │       PublicKey              REG_SZ   (Base64 SPKI of the environment signing key)
+    │       PublicKeyPrevious      REG_SZ   (Base64 SPKI; optional, rotation window)
     ├── Entra\
     │       Enabled                REG_SZ   "true" or "false"
     │       GracePeriodMinutes     REG_SZ
@@ -106,7 +105,7 @@
     │       WallpaperBackgroundColor    REG_SZ
     ├── Signing\
     │       RequireSignedIndex      REG_SZ   "true" or "false"
-    │       <teamFolderName>\PublicKey, PublicKeyPrevious
+    │       PublicKey, PublicKeyPrevious   REG_SZ   (flat: one environment key, not per team)
     ├── Hmac\
     │       SecretKey   REG_SZ
     └── teams\
@@ -198,15 +197,16 @@
     When $true, index.json verification rejects Unsigned and Disabled results in
     addition to Invalid (fail-closed). Default false. NewsService and NewsViewer.
 
-.PARAMETER TeamPublicKeys
-    Hashtable of team folder name -> Base64 SubjectPublicKeyInfo. Authoritatively
-    replaces every per-team subkey under Signing\ — a team omitted from this
-    hashtable when the parameter is bound loses its pinned key. RequireSignedIndex
-    (a sibling value at Signing\'s root) is preserved across the replace.
+.PARAMETER SigningPublicKey
+    The environment signing key's public half (Base64 SubjectPublicKeyInfo, P-256, 91 bytes), written as
+    REG_SZ to Signing\PublicKey. Validated before anything is written; an invalid value exits 1 and leaves
+    the registry untouched. The value is the one Key Management shows under "Registry values to deploy (GPO)".
+    When bound, any per-team subkeys left under Signing\ by the old layout are removed (they are no longer
+    read). NewsService and NewsViewer.
 
-.PARAMETER TeamPreviousPublicKeys
-    Hashtable of team folder name -> Base64 SubjectPublicKeyInfo, written as
-    PublicKeyPrevious for each team's rotation window.
+.PARAMETER SigningPublicKeyPrevious
+    The previous key's public half (same format), written as REG_SZ to Signing\PublicKeyPrevious for the
+    rotation window. Pass '' to REMOVE the value (after Retire previous key). NewsService and NewsViewer.
 
 .PARAMETER EntraEnabled
     Gates the whole Entra dynamic-team feature. Default false. NewsService only.
@@ -410,16 +410,14 @@
         }
 
 .EXAMPLE
-    # NewsViewer on a pilot box — pinned team signing keys plus display/wallpaper settings
+    # NewsViewer on a pilot box — the environment signing key (copy it from Key Management) plus display/wallpaper settings
     .\Set-RegistryOverrides.ps1 `
         -Company "Contoso" `
         -ComponentName NewsViewer `
         -Teams "cz-its","de-prod" `
         -RequireSignedIndex $true `
-        -TeamPublicKeys @{
-            "cz-its"  = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEreplace-with-real-spki-bytes"
-            "de-prod" = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEreplace-with-real-spki-bytes"
-        } `
+        -SigningPublicKey "<PublicKey from Key Management>" `
+        -SigningPublicKeyPrevious "" `
         -LogicalDayStartHour 5 `
         -Theme Dark `
         -Active $true
@@ -515,8 +513,8 @@ param(
 
     # ── Signing (NewsService, NewsViewer) ────────────────────────────────────────
     [Nullable[bool]] $RequireSignedIndex,
-    [hashtable] $TeamPublicKeys,
-    [hashtable] $TeamPreviousPublicKeys,
+    [string] $SigningPublicKey,
+    [string] $SigningPublicKeyPrevious,
 
     # ── Entra (NewsService only) ──────────────────────────────────────────────────
     [Nullable[bool]] $EntraEnabled,
@@ -613,7 +611,7 @@ $base = "HKLM:\Software\$Company\NewsCentral\$ComponentName"
 # Parameters introduced by this change. NewsCentral and NewsTester remain entirely
 # out of scope for them; only NewsService and NewsViewer may bind any of these.
 $newParameterNames = @(
-    "RequireSignedIndex", "TeamPublicKeys", "TeamPreviousPublicKeys",
+    "RequireSignedIndex", "SigningPublicKey", "SigningPublicKeyPrevious",
     "EntraEnabled", "EntraGracePeriodMinutes", "EntraMaxDynamicTeams",
     "EntraGlobalExclusionGroup", "EntraGroupInstances", "EntraAttributeSchemes",
     "DefaultLockScreenPath", "PublishedImagePath", "LockScreenEnabled", "WallpaperEnabled",
@@ -629,7 +627,7 @@ $newParameterNames = @(
 $componentAllowedParams = @{
     NewsService = @(
         "Teams", "CacheRootPath", "HmacSecretKey", "RequireSignedIndex",
-        "TeamPublicKeys", "TeamPreviousPublicKeys",
+        "SigningPublicKey", "SigningPublicKeyPrevious",
         "AzureTenantId", "AzureClientId", "AzureAccountName", "AzureContainerName",
         "AzureAuthMode", "AzureCertificateThumbprint", "AzureClientSecret", "AzureUseWinHttpProxy",
         "EntraEnabled", "EntraGracePeriodMinutes", "EntraMaxDynamicTeams",
@@ -642,7 +640,7 @@ $componentAllowedParams = @{
     )
     NewsViewer = @(
         "Teams", "CacheRootPath", "HmacSecretKey", "RequireSignedIndex",
-        "TeamPublicKeys", "TeamPreviousPublicKeys",
+        "SigningPublicKey", "SigningPublicKeyPrevious",
         "AzureTenantId", "AzureClientId", "AzureAccountName", "AzureContainerName",
         "AzureAuthMode", "AzureCertificateThumbprint", "AzureClientSecret", "AzureUseWinHttpProxy",
         "BypassDailyGate", "BypassImageIntegrityCheck", "LogicalDayStartHour", "Theme",
@@ -700,37 +698,32 @@ function Test-Base64String {
     }
 }
 
-function Assert-TeamKeyHashtable {
-    param([hashtable]$Table, [string]$ParamName)
-    foreach ($key in $Table.Keys) {
-        if ([string]::IsNullOrWhiteSpace($key)) {
-            throw "-$ParamName contains an empty team folder name key."
-        }
-        $value = $Table[$key]
-        if ([string]::IsNullOrWhiteSpace($value)) {
-            throw "-$ParamName['$key'] is empty; expected a Base64-encoded SubjectPublicKeyInfo key."
-        }
-        if (-not (Test-Base64String -Value $value)) {
-            throw "-$ParamName['$key'] is not valid Base64: '$value'"
-        }
+# A P-256 SubjectPublicKeyInfo is 91 bytes (26-byte header + 65-byte uncompressed point). The length check is
+# enough to catch a pasted private key, a truncated key or a wrong value before the registry is touched.
+function Assert-SpkiKey {
+    param([string]$Value, [string]$ParamName)
+    if (-not (Test-Base64String -Value $Value)) {
+        throw "-$ParamName is not valid Base64: '$Value'"
+    }
+    $length = [Convert]::FromBase64String($Value).Length
+    if ($length -ne 91) {
+        throw "-$ParamName does not decode to a P-256 SubjectPublicKeyInfo (expected 91 bytes, got $length). Copy the public key from Key Management."
     }
 }
 
-if ($PSBoundParameters.ContainsKey("TeamPublicKeys")) {
-    Assert-TeamKeyHashtable -Table $TeamPublicKeys -ParamName "TeamPublicKeys"
+if ($PSBoundParameters.ContainsKey("SigningPublicKey")) {
+    $SigningPublicKey = "$SigningPublicKey".Trim()
+    if ([string]::IsNullOrWhiteSpace($SigningPublicKey)) {
+        throw "-SigningPublicKey is empty; expected the Base64 public key from Key Management. (Only -SigningPublicKeyPrevious may be '' to remove a value.)"
+    }
+    Assert-SpkiKey -Value $SigningPublicKey -ParamName "SigningPublicKey"
 }
-if ($PSBoundParameters.ContainsKey("TeamPreviousPublicKeys")) {
-    Assert-TeamKeyHashtable -Table $TeamPreviousPublicKeys -ParamName "TeamPreviousPublicKeys"
-}
-
-if ($PSBoundParameters.ContainsKey("TeamPublicKeys") -and $PSBoundParameters.ContainsKey("Teams")) {
-    foreach ($key in $TeamPublicKeys.Keys) {
-        if ($key -notin $Teams) {
-            Write-Warning "-TeamPublicKeys contains '$key', which is not present in -Teams. Valid for a dynamic (Entra-resolved) team with a pinned registry key, otherwise likely a typo."
-        }
+if ($PSBoundParameters.ContainsKey("SigningPublicKeyPrevious")) {
+    $SigningPublicKeyPrevious = "$SigningPublicKeyPrevious".Trim()
+    if ($SigningPublicKeyPrevious -ne "") {
+        Assert-SpkiKey -Value $SigningPublicKeyPrevious -ParamName "SigningPublicKeyPrevious"
     }
 }
-
 if ($PSBoundParameters.ContainsKey("EntraGroupInstances")) {
     $knownInstanceKeys = @("InclusionGroup", "ExclusionGroup")
     foreach ($label in $EntraGroupInstances.Keys) {
@@ -925,31 +918,27 @@ if ($PSBoundParameters.ContainsKey("RequireSignedIndex")) {
     Set-RegValue -Path "$base\Signing" -Name "RequireSignedIndex" -Value $val -Type String
 }
 
-if ($PSBoundParameters.ContainsKey("TeamPublicKeys")) {
+if ($PSBoundParameters.ContainsKey("SigningPublicKey")) {
+    # The old layout kept one subkey per team under Signing\. Clients no longer read them, so remove them
+    # (honours -WhatIf); the values at Signing\ itself are left alone.
     $signingPath = "$base\Signing"
-    Set-AuthoritativeChildKeys -ParentPath $signingPath
-    foreach ($team in $TeamPublicKeys.Keys) {
-        Set-RegValue -Path "$signingPath\$team" -Name "PublicKey" -Value $TeamPublicKeys[$team] -Type String
-        if ($PSBoundParameters.ContainsKey("TeamPreviousPublicKeys") -and $TeamPreviousPublicKeys.ContainsKey($team)) {
-            Set-RegValue -Path "$signingPath\$team" -Name "PublicKeyPrevious" -Value $TeamPreviousPublicKeys[$team] -Type String
-        }
-    }
-    if ($PSBoundParameters.ContainsKey("TeamPreviousPublicKeys")) {
-        foreach ($team in $TeamPreviousPublicKeys.Keys) {
-            if (-not $TeamPublicKeys.ContainsKey($team)) {
-                Set-RegValue -Path "$signingPath\$team" -Name "PublicKeyPrevious" -Value $TeamPreviousPublicKeys[$team] -Type String
+    if (Test-Path $signingPath) {
+        foreach ($child in Get-ChildItem -Path $signingPath -ErrorAction SilentlyContinue) {
+            if ($PSCmdlet.ShouldProcess($child.PSPath, "Remove old per-team signing subkey")) {
+                Remove-Item -Path $child.PSPath -Recurse -Force
             }
         }
     }
+    Set-RegValue -Path $signingPath -Name "PublicKey" -Value $SigningPublicKey -Type String
 }
-elseif ($PSBoundParameters.ContainsKey("TeamPreviousPublicKeys")) {
-    # TeamPreviousPublicKeys bound without TeamPublicKeys — write alongside whatever
-    # per-team subkeys already exist, without an authoritative replace.
-    foreach ($team in $TeamPreviousPublicKeys.Keys) {
-        Set-RegValue -Path "$base\Signing\$team" -Name "PublicKeyPrevious" -Value $TeamPreviousPublicKeys[$team] -Type String
+if ($PSBoundParameters.ContainsKey("SigningPublicKeyPrevious")) {
+    if ($SigningPublicKeyPrevious -eq "") {
+        Remove-RegValue -Path "$base\Signing" -Name "PublicKeyPrevious"
+    }
+    else {
+        Set-RegValue -Path "$base\Signing" -Name "PublicKeyPrevious" -Value $SigningPublicKeyPrevious -Type String
     }
 }
-
 # ── Entra\ ───────────────────────────────────────────────────────────────────
 if ($PSBoundParameters.ContainsKey("EntraEnabled")) {
     $val = if ($EntraEnabled) { "true" } else { "false" }
@@ -1179,3 +1168,6 @@ function Show-RegKey {
 
 Show-RegKey -Path $base
 Write-Host ""
+
+# Explicit exit code on the success path (-WhatIf included); every error path throws, which exits 1.
+exit 0
