@@ -213,14 +213,14 @@ public static class MauiProgram
             sp.GetRequiredService<AuditContext>(),
             log: message => System.Diagnostics.Debug.WriteLine($"[Audit] {message}")));
 
-        // Team signing keys live in the per-environment secure store (SecurePath), not under DataPath. The
+        // The environment signing key lives in the per-environment secure store (SecurePath), not under DataPath. The
         // root is re-resolved on every call so an environment switch or a settings save takes effect at once.
+        // The key actions are limited to system administrators; the user is looked up lazily on every call.
         builder.Services.AddSingleton(sp =>
         {
             var environment = sp.GetRequiredService<EnvironmentContext>();
             var settings = sp.GetRequiredService<EnvironmentSettingsService>();
-            return new TeamKeyService(
-                () => environment.DataPath,
+            return new EnvironmentKeyService(
                 async () =>
                 {
                     var effective = await settings.GetAsync();
@@ -229,6 +229,7 @@ public static class MauiProgram
                         : new SecureRootResult(
                             EnvironmentSettingsResolver.EffectiveSecurePath(effective.Settings, environment.DataPath), null);
                 },
+                () => sp.GetRequiredService<AuthenticationService>().IsSystemAdmin(),
                 audit: sp.GetRequiredService<IAuditLog>());
         });
 

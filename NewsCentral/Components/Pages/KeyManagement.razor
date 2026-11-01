@@ -1,14 +1,11 @@
 @page "/key-management"
-@using NewsCentral.Services
+@using NewsCentral.Configuration
 @using NewsCentral.Models
 @using NewsCentral.Security
 @using NewsCentral.Components.Shared
 @using Microsoft.Extensions.Localization
 @inject IStringLocalizer<KeyManagement> Localizer
-@inject IndexGenerationService IndexService
-@inject TeamKeyService KeyService
-@inject TeamService TeamService
-@inject TeamContextService TeamContext
+@inject EnvironmentKeyService KeyService
 @inject AuthenticationService AuthService
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
@@ -21,14 +18,6 @@
         <p class="page-description">@Localizer["PageDescription"]</p>
     </div>
 
-    @if (!hasTeamSelected)
-    {
-        <div class="alert alert-info">
-            @Localizer["NoTeamSelected"]
-        </div>
-        return;
-    }
-
     @if (!isAuthorized)
     {
         <div class="alert alert-danger">
@@ -40,185 +29,155 @@
 
     <AclDriftWarnings />
 
-    @* ── Current keys ─────────────────────────────────────────────────────── *@
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5>@Localizer["CurrentKeysSection"]</h5>
-        </div>
-        <div class="card-body">
-            <div class="mb-3">
-                <strong>@Localizer["CurrentTeam"]:</strong> @currentTeamName (@currentTeamFolder)
-            </div>
-
-            @* TODO(i18n): the unreadable-key and migration texts are English-only for now. *@
-            @if (keyUnreadable)
-            {
-                <div class="alert alert-danger">
-                    <i class="bi bi-lock me-2"></i>
-                    <strong>Key not readable.</strong>
-                    The signing key for this team exists or may exist, but could not be read: @keyLoad!.Reason.
-                    Publishing for this team is blocked until access is restored. A new key is not offered, because
-                    replacing an unreadable key would leave every device that trusts it unable to verify this team.
-                </div>
-            }
-            else if (currentKeys == null ||
-                 (string.IsNullOrEmpty(currentKeys.PublicKey) && string.IsNullOrEmpty(currentKeys.PrivateKey)))
-            {
-                <div class="alert alert-warning">
-                    <i class="bi bi-exclamation-triangle me-2"></i>
-                    @Localizer["NoKeyConfigured"]
-                </div>
-            }
-            else
-            {
-                <div class="mb-3">
-                    <label class="form-label fw-bold">@Localizer["CurrentPublicKey"]</label>
-                    <div class="input-group">
-                        <input type="text" class="form-control font-monospace"
-                               readonly value="@currentKeys.PublicKey" />
-                        <button class="btn btn-outline-secondary"
-                                @onclick="() => CopyToClipboardAsync(currentKeys!.PublicKey!)">
-                            <i class="bi bi-clipboard me-1"></i>@Localizer["CopyForGPO"]
-                        </button>
-                    </div>
-                </div>
-
-                <div class="mb-3">
-                    <label class="form-label fw-bold">@Localizer["CurrentPrivateKey"]</label>
-                    <input type="text" class="form-control font-monospace" readonly
-                           value="@SigningKeyTool.Truncate(currentKeys.PrivateKey)" />
-                    <div class="form-text">@Localizer["PrivateKeyTruncatedHint"]</div>
-                </div>
-
-                @if (!string.IsNullOrEmpty(currentKeys.PublicKeyPrevious))
-                {
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">@Localizer["PreviousPublicKey"]</label>
-                        <div class="input-group">
-                            <input type="text" class="form-control font-monospace"
-                                   readonly value="@currentKeys.PublicKeyPrevious" />
-                            <button class="btn btn-outline-secondary"
-                                    @onclick="() => CopyToClipboardAsync(currentKeys!.PublicKeyPrevious!)">
-                                <i class="bi bi-clipboard me-1"></i>@Localizer["CopyForGPO"]
-                            </button>
-                        </div>
-                    </div>
-                }
-            }
-
-            @if (!string.IsNullOrEmpty(copyFeedback))
-            {
-                <div class="alert alert-info py-1 mt-2">
-                    <i class="bi bi-check me-1"></i>@copyFeedback
-                </div>
-            }
-        </div>
-    </div>
-
-    @if (migrationIssues.Count > 0)
+    @if (keyUnreadable)
     {
-        <div class="alert alert-warning">
-            <i class="bi bi-exclamation-triangle me-2"></i>
-            <strong>Key migration needs attention.</strong>
-            <ul class="mb-0">
-                @foreach (var issue in migrationIssues)
-                {
-                    <li>@issue</li>
-                }
-            </ul>
+        @* Unreadable is never offered as "no key": replacing it would orphan every device that trusts it. *@
+        <div class="alert alert-danger">
+            <i class="bi bi-lock me-2"></i>
+            <strong>@Localizer["UnreadableTitle"]</strong>
+            @Localizer["UnreadableMessage", keyLoad!.Reason ?? ""]
+        </div>
+        <button class="btn btn-outline-secondary" @onclick="ReloadAsync" disabled="@isBusy">
+            <i class="bi bi-arrow-clockwise me-2"></i>@Localizer["Reload"]
+        </button>
+    }
+    else if (keys?.Current == null)
+    {
+        <div class="card mb-4">
+            <div class="card-header"><h5>@Localizer["NoKeySection"]</h5></div>
+            <div class="card-body">
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle me-2"></i>@Localizer["NoKeyConfigured"]
+                </div>
+                <p>@Localizer["GenerateDescription"]</p>
+                <button class="btn btn-primary" @onclick='() => RunAsync(KeyService.GenerateAsync, "GeneratedOk")' disabled="@isBusy">
+                    <i class="bi bi-plus-circle me-2"></i>@Localizer["Generate"]
+                </button>
+            </div>
         </div>
     }
-
-    @* ── Generate / Apply ──────────────────────────────────────────────────── *@
-    @if (!keyUnreadable)
+    else
     {
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5>@Localizer["GenerateSection"]</h5>
+        @* ── Keys ─────────────────────────────────────────────────────────── *@
+        <div class="card mb-4">
+            <div class="card-header"><h5>@Localizer["CurrentKey"]</h5></div>
+            <div class="card-body">
+                @KeySummary(keys.Current.PublicKey, keys.Current.CreatedAt)
+            </div>
         </div>
-        <div class="card-body">
-            <p>@Localizer["GenerateDescription"]</p>
 
-            <button class="btn btn-secondary" @onclick="GenerateNewKeyPair" disabled="@isBusy">
-                <i class="bi bi-plus-circle me-2"></i>@Localizer["GenerateNewKeyPair"]
-            </button>
+        if (keys.Next != null)
+        {
+            <div class="card mb-4">
+                <div class="card-header"><h5>@Localizer["NextKey"]</h5></div>
+                <div class="card-body">
+                    @KeySummary(keys.Next.PublicKey, keys.Next.CreatedAt)
+                </div>
+            </div>
+        }
 
-            @if (pendingPublicKey != null)
-            {
-                <div class="mt-3 p-3 border rounded bg-light">
-                    <div class="d-flex align-items-center mb-3">
-                        <span class="badge bg-warning text-dark me-2">@Localizer["NotYetApplied"]</span>
-                        <small class="text-muted">@Localizer["NotYetAppliedHint"]</small>
-                    </div>
+        if (!string.IsNullOrEmpty(keys.PreviousPublicKey))
+        {
+            <div class="card mb-4">
+                <div class="card-header"><h5>@Localizer["PreviousKey"]</h5></div>
+                <div class="card-body">
+                    <div class="mb-1"><strong>@Localizer["KeyId"]:</strong> <code>@KeyFingerprint.Of(keys.PreviousPublicKey)</code></div>
+                    <div class="text-muted">@Age(keys.PreviousCreatedAt)</div>
+                </div>
+            </div>
+        }
 
+        @* ── Registry values ─────────────────────────────────────────────── *@
+        <div class="card mb-4">
+            <div class="card-header"><h5>@Localizer["GpoSection"]</h5></div>
+            <div class="card-body">
+                <p class="mb-3">@StepExplanation()</p>
+                @foreach (var component in new[] { "NewsService", "NewsViewer" })
+                {
+                    <h6 class="font-monospace">HKLM\Software\@SolutionConstants.Company\NewsCentral\@component\Signing</h6>
                     <div class="mb-3">
-                        <label class="form-label fw-bold">@Localizer["NewPublicKey"]</label>
-                        <div class="input-group">
-                            <input type="text" class="form-control font-monospace"
-                                   readonly value="@pendingPublicKey" />
-                            <button class="btn btn-outline-secondary"
-                                    @onclick="() => CopyToClipboardAsync(pendingPublicKey!)">
-                                <i class="bi bi-clipboard me-1"></i>@Localizer["CopyForGPO"]
-                            </button>
-                        </div>
+                        <label class="form-label fw-bold">PublicKey</label>
+                        @GpoValue(gpo.PublicKey)
                     </div>
-
                     <div class="mb-3">
-                        <label class="form-label fw-bold">@Localizer["NewPrivateKey"]</label>
-                        <input type="text" class="form-control font-monospace" readonly
-                               value="@SigningKeyTool.Truncate(pendingPrivateKey)" />
-                        <div class="form-text">@Localizer["PrivateKeyTruncatedHint"]</div>
-                    </div>
-
-                    <button class="btn btn-primary" @onclick="ApplyNewKeyPairAsync" disabled="@isBusy">
-                        @if (isBusy && busyAction == "apply")
+                        <label class="form-label fw-bold">PublicKeyPrevious</label>
+                        @if (gpo.PublicKeyPrevious == null)
                         {
-                            <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                            @Localizer["Applying"]
+                            <div class="text-muted">@Localizer["GpoRemovePrevious"]</div>
                         }
                         else
                         {
-                            <i class="bi bi-check-lg me-2"></i>
-                            @Localizer["Apply"]
+                            @GpoValue(gpo.PublicKeyPrevious)
                         }
-                    </button>
-                </div>
-            }
-        </div>
-    </div>
-    }
-
-    @* ── Republish ─────────────────────────────────────────────────────────── *@
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5>@Localizer["RepublishSection"]</h5>
-        </div>
-        <div class="card-body">
-            <div class="alert alert-info mb-3">
-                <i class="bi bi-info-circle me-2"></i>@Localizer["RepublishReminder"]
+                    </div>
+                }
             </div>
+        </div>
 
-            <button class="btn btn-warning" @onclick="RepublishIndexAsync" disabled="@isBusy">
-                @if (isBusy && busyAction == "republish")
+        @* ── Actions: only those valid for the current state ─────────────── *@
+        <div class="card mb-4">
+            <div class="card-header"><h5>@Localizer["ActionsSection"]</h5></div>
+            <div class="card-body">
+                @if (pendingAction != null)
                 {
-                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                    @Localizer["Republishing"]
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle me-2"></i>@ConfirmText(pendingAction)
+                    </div>
+                    <button class="btn btn-danger me-2" @onclick="ConfirmAsync" disabled="@isBusy">
+                        @if (isBusy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                        }
+                        @Localizer["Confirm"]
+                    </button>
+                    <button class="btn btn-outline-secondary" @onclick="() => pendingAction = null" disabled="@isBusy">
+                        @Localizer["Cancel"]
+                    </button>
                 }
                 else
                 {
-                    <i class="bi bi-arrow-repeat me-2"></i>
-                    @Localizer["RepublishIndex"]
+                    if (CanPrepare)
+                    {
+                        <button class="btn btn-secondary me-2" @onclick='() => pendingAction = "prepare"' disabled="@isBusy">
+                            <i class="bi bi-plus-circle me-2"></i>@Localizer["PrepareNext"]
+                        </button>
+                    }
+                    if (keys.Next != null)
+                    {
+                        <button class="btn btn-warning me-2" @onclick='() => pendingAction = "activate"' disabled="@(isBusy || !CanActivate)">
+                            <i class="bi bi-arrow-repeat me-2"></i>@Localizer["ActivateNext"]
+                        </button>
+                        <button class="btn btn-outline-secondary me-2" @onclick='() => pendingAction = "discard"' disabled="@isBusy">
+                            <i class="bi bi-x-circle me-2"></i>@Localizer["DiscardNext"]
+                        </button>
+                    }
+                    if (!string.IsNullOrEmpty(keys.PreviousPublicKey))
+                    {
+                        <button class="btn btn-outline-danger me-2" @onclick='() => pendingAction = "retire"' disabled="@isBusy">
+                            <i class="bi bi-trash me-2"></i>@Localizer["RetirePrevious"]
+                        </button>
+                    }
                 }
-            </button>
+            </div>
         </div>
-    </div>
+    }
 
-    @* ── Feedback alerts ──────────────────────────────────────────────────── *@
+    @if (!string.IsNullOrEmpty(copyFeedback))
+    {
+        <div class="alert alert-info py-1 mt-2">
+            <i class="bi bi-check me-1"></i>@copyFeedback
+        </div>
+    }
+
     @if (!string.IsNullOrEmpty(successMessage))
     {
         <div class="alert alert-success alert-dismissible fade show" role="alert">
             <i class="bi bi-check-circle me-2"></i>
             @successMessage
+            @if (showIndexLink)
+            {
+                <a href="index-management" class="alert-link ms-2">@Localizer["GoToIndexManagement"]</a>
+            }
             <button type="button" class="btn-close" @onclick="() => successMessage = null"></button>
         </div>
     }
@@ -231,65 +190,48 @@
             <button type="button" class="btn-close" @onclick="() => errorMessage = null"></button>
         </div>
     }
-
-    @* M5a: distinct from errorMessage — the index itself republished fine, only distribution failed. TODO(i18n). *@
-    @if (!string.IsNullOrEmpty(warningMessage))
-    {
-        <div class="alert alert-warning alert-dismissible fade show" role="alert">
-            <i class="bi bi-exclamation-triangle me-2"></i>
-            @warningMessage
-            <button type="button" class="btn-close" @onclick="() => warningMessage = null"></button>
-        </div>
-    }
 </div>
 
 @code {
-    private bool hasTeamSelected;
     private bool isAuthorized;
-    private string? currentTeamFolder;
-    private string? currentTeamName;
-    private TeamKeyLoadResult? keyLoad;
-    private TeamSigningKeys? currentKeys => keyLoad?.Keys;
-    private bool keyUnreadable => keyLoad?.Outcome == KeyLoadOutcome.Unreadable;
-    private IReadOnlyList<string> migrationIssues = Array.Empty<string>();
-    private string? pendingPrivateKey;
-    private string? pendingPublicKey;
+    private SigningKeyLoadResult? keyLoad;
+    private EnvironmentSigningKeys? keys;
+    private string? loadedKeyId;      // fingerprint of Current when the page loaded; every action sends it back
     private bool isBusy;
-    private string? busyAction;
+    private string? pendingAction;    // prepare, activate, discard or retire: waiting for confirmation
     private string? copyFeedback;
     private string? successMessage;
+    private bool showIndexLink;
     private string? errorMessage;
-    private string? warningMessage;
+
+    private bool keyUnreadable => keyLoad?.Outcome == KeyLoadOutcome.Unreadable;
+    private bool CanPrepare => keys?.Current != null && keys.Next == null && string.IsNullOrEmpty(keys.PreviousPublicKey);
+    private bool CanActivate => keys?.Next != null && string.IsNullOrEmpty(keys.PreviousPublicKey);
+    private (string? PublicKey, string? PublicKeyPrevious) gpo =>
+        keys == null ? (null, null) : EnvironmentKeyService.GpoTarget(keys);
 
     protected override async Task OnInitializedAsync()
     {
-        var currentUser = AuthService.GetCurrentUser();
-        if (currentUser == null)
+        if (AuthService.GetCurrentUser() == null)
         {
             Navigation.NavigateTo("/login");
             return;
         }
 
-        hasTeamSelected = TeamContext.HasTeamSelected();
-        if (!hasTeamSelected) return;
-
-        isAuthorized = AuthService.HasRole(TeamContext.GetCurrentTeamId()!, "TeamAdmin");
+        isAuthorized = AuthService.IsSystemAdmin();
         if (!isAuthorized) return;
 
-        currentTeamFolder = TeamContext.GetCurrentTeamFolderName()!;
-        var team = await TeamService.GetTeamByFolderNameAsync(currentTeamFolder);
-        currentTeamName = team?.Name ?? currentTeamFolder;
-
-        await LoadCurrentKeysAsync();
+        await ReloadAsync();
     }
 
-    private async Task LoadCurrentKeysAsync()
+    private async Task ReloadAsync()
     {
         try
         {
-            keyLoad = await IndexService.LoadTeamSigningKeysAsync(currentTeamFolder!);
-            // Migration problems are an administrator concern (the old file is exposed until it is migrated).
-            migrationIssues = AuthService.IsSystemAdmin() ? KeyService.Issues : Array.Empty<string>();
+            keyLoad = await KeyService.LoadAsync();
+            keys = keyLoad.Keys;
+            loadedKeyId = KeyFingerprint.Of(keys?.Current?.PublicKey);
+            pendingAction = null;
         }
         catch (Exception ex)
         {
@@ -297,92 +239,92 @@
         }
     }
 
-    private void GenerateNewKeyPair()
+    private async Task ConfirmAsync()
     {
-        var (priv, pub) = SigningKeyTool.GenerateKeyPair();
-        pendingPrivateKey = priv;
-        pendingPublicKey  = pub;
-        successMessage    = null;
-        errorMessage      = null;
-    }
-
-    private async Task ApplyNewKeyPairAsync()
-    {
-        if (pendingPrivateKey == null || pendingPublicKey == null || isBusy) return;
-
-        try
+        switch (pendingAction)
         {
-            isBusy     = true;
-            busyAction = "apply";
-            successMessage = null;
-            errorMessage   = null;
-            StateHasChanged();
-
-            var newKeys = new TeamSigningKeys
-            {
-                PrivateKey        = pendingPrivateKey,
-                PublicKey         = pendingPublicKey,
-                PublicKeyPrevious = currentKeys?.PublicKey
-            };
-
-            await IndexService.SaveTeamSigningKeysAsync(currentTeamFolder!, newKeys);
-
-            pendingPrivateKey = null;
-            pendingPublicKey  = null;
-
-            await LoadCurrentKeysAsync();
-
-            successMessage = $"{Localizer["ApplySuccess"]} — {Localizer["RotationReminder"]}";
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"{Localizer["ApplyError"]}: {ex.Message}";
-        }
-        finally
-        {
-            isBusy     = false;
-            busyAction = null;
-            StateHasChanged();
+            case "prepare": await RunAsync(KeyService.PrepareNextAsync, "PreparedOk"); break;
+            case "activate": await RunAsync(KeyService.ActivateNextAsync, "ActivatedOk", showLink: true); break;
+            case "discard": await RunAsync(KeyService.DiscardNextAsync, "DiscardedOk"); break;
+            case "retire": await RunAsync(KeyService.RetirePreviousAsync, "RetiredOk"); break;
         }
     }
 
-    private async Task RepublishIndexAsync()
+    private async Task RunAsync(Func<string?, Task<EnvironmentSigningKeys>> action, string successKey, bool showLink = false)
     {
         if (isBusy) return;
 
         try
         {
-            isBusy     = true;
-            busyAction = "republish";
+            isBusy = true;
             successMessage = null;
-            errorMessage   = null;
-            warningMessage = null;
+            errorMessage = null;
             StateHasChanged();
 
-            var result = await IndexService.GenerateAndSaveIndexAsync(currentTeamFolder!);
-
-            if (result.DistributionSucceeded)
-            {
-                successMessage = Localizer["RepublishSuccess", currentTeamName ?? currentTeamFolder!];
-            }
-            else
-            {
-                warningMessage =
-                    $"Republished the index for {currentTeamName ?? currentTeamFolder!}, but distribution failed: " +
-                    $"{result.DistributionError?.TrimEnd('.')}. Clients will not receive it until this is resolved and republished again.";
-            }
+            keys = await action(loadedKeyId);
+            keyLoad = SigningKeyLoadResult.Loaded(keys);
+            loadedKeyId = KeyFingerprint.Of(keys.Current?.PublicKey);
+            pendingAction = null;
+            successMessage = Localizer[successKey];
+            showIndexLink = showLink;
         }
         catch (Exception ex)
         {
-            errorMessage = $"{Localizer["RepublishError"]}: {ex.Message}";
+            errorMessage = $"{Localizer["ActionError"]}: {ex.Message}";
+            await ReloadAsync();   // show what is actually on disk now
         }
         finally
         {
-            isBusy     = false;
-            busyAction = null;
+            isBusy = false;
             StateHasChanged();
         }
     }
+
+    private string StepExplanation() => keys switch
+    {
+        { Next: not null } => Localizer["StepNextPrepared"],
+        { PreviousPublicKey: not null } => Localizer["StepPreviousKept"],
+        _ => Localizer["StepCurrentOnly"]
+    };
+
+    private string ConfirmText(string action) => action switch
+    {
+        "prepare" => Localizer["PrepareConfirm"],
+        "activate" => Localizer["ActivateConfirm"],
+        "discard" => Localizer["DiscardConfirm"],
+        _ => Localizer["RetireConfirm"]
+    };
+
+    private string Age(DateTime? createdUtc)
+    {
+        if (createdUtc is null) return Localizer["AgeUnknown"];
+        var days = Math.Max(0, (int)(DateTime.UtcNow - createdUtc.Value).TotalDays);
+        var date = createdUtc.Value.ToString("yyyy-MM-dd");
+        return days switch
+        {
+            0 => Localizer["AgeToday", date],
+            1 => Localizer["AgeOneDay", date],
+            _ => Localizer["AgeDays", date, days]
+        };
+    }
+
+    private RenderFragment KeySummary(string? publicKey, DateTime? createdAt) => __builder =>
+    {
+        <div class="mb-1"><strong>@Localizer["KeyId"]:</strong> <code>@KeyFingerprint.Of(publicKey)</code></div>
+        <div class="text-muted mb-3">@Age(createdAt)</div>
+        <label class="form-label fw-bold">@Localizer["PublicKey"]</label>
+        @GpoValue(publicKey)
+    };
+
+    private RenderFragment GpoValue(string? value) => __builder =>
+    {
+        <div class="input-group">
+            <input type="text" class="form-control font-monospace" readonly value="@value" />
+            <button class="btn btn-outline-secondary" @onclick="() => CopyToClipboardAsync(value!)">
+                <i class="bi bi-clipboard me-1"></i>@Localizer["CopyForGPO"]
+            </button>
+        </div>
+    };
 
     private async Task CopyToClipboardAsync(string text)
     {

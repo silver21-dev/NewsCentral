@@ -24,7 +24,7 @@
 - Storage backend (local file share vs. Azure Blob Storage) is switchable via registry without code changes.
 - Local/file share mode is the **primary development and testing configuration**. No Azure dependency is required for full functional testing.
 - HMAC-SHA256 anti-tamper for session telemetry — NewsViewer signs, NewsService verifies; `index.json` signing moved to ECDSA (see below).
-- ECDSA P-256 `index.json` signing, per-environment key, `KeyId`, team binding (M1: verification only): signing core in `NewsCentral.Shared`, `IndexGenerationService` sets the signed `KeyId` and signs, `SyncService` and `PresentationSelector` verify via `SignatureGate.Verify` with the flat keys from `SigningKeyConfigurationReader`; missing/unknown `KeyId` or a team mismatch always rejects, and `Signing:RequireSignedIndex` defaults to `true` (M2: fail-closed, no key means no content). Rotation uses `PublicKeyPrevious` (`docs/anti-tamper.md`). Key storage and Key Management stay per-team until M3. B2 (Key Management page) complete; D (registry scripts) implemented in `scripts/Set-RegistryOverrides.ps1` at dev/pilot scope, GPO owns fleet configuration; see `docs/security.md`.
+- ECDSA P-256 `index.json` signing, per-environment key, `KeyId`, team binding: signing core in `NewsCentral.Shared`, `IndexGenerationService` sets the signed `KeyId` and signs, `SyncService` and `PresentationSelector` verify via `SignatureGate.Verify` with the flat keys from `SigningKeyConfigurationReader`; missing/unknown `KeyId` or a team mismatch always rejects, and `Signing:RequireSignedIndex` defaults to `true` (M2: fail-closed, no key means no content). The one environment key (`environment-signing.json`: current/next/previous) is managed only by SystemAdmins in Key Management and rotated in three steps — Prepare next (GPO trusts both keys), Activate, Retire previous (`PublicKeyPrevious`; runbook in `docs/anti-tamper.md`). D (registry scripts) implemented in `scripts/Set-RegistryOverrides.ps1` at dev/pilot scope, GPO owns fleet configuration; see `docs/security.md`.
 - All domain models live in **NewsCentral.Shared** — no model duplication across projects.
 - NativeAOT migration path is preserved for NewsViewer: new P/Invoke code uses `LibraryImport`, while the legacy `NativeMethods.cs` and `WallpaperService.cs` still use `DllImport` (blittable, AOT-compatible) until they are migrated; `AllowUnsafeBlocks` is enabled only for the generated stubs; no hand-written unsafe code; no COM.
 - Fleet components ship **framework-dependent** — .NET 10 Desktop Runtime (x64) required on every target machine (declared prerequisite, not bundled). See `docs/packaging.md`.
@@ -147,6 +147,7 @@ These are not auto-loaded. Read the ones a task touches; a prompt's READ FIRST l
 | docs/config-review-spec.md | the config review page in NewsCentral |
 | docs/configuration.md | any registry/appsettings key or its type |
 | docs/data-model.md | models, index.json, resolved-teams.json schema, JSON serialization option sets |
+| docs/disaster-recovery.md | backing up and recovering the signing key |
 | docs/entra-dynamic-teams.md | Entra attribute/group team resolution, Graph mechanics, grace/cap/logging, key-trust and status |
 | docs/future.md | deferred work, NewsTester |
 | docs/newscentral-spec.md | authoring app services, pages, roles |

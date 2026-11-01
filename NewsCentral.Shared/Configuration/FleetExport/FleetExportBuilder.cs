@@ -21,7 +21,7 @@ public sealed record FleetExportDistribution(
 
 /// <summary>
 /// M6: one team's exportable identity — folder name, display name, and its CURRENT/PREVIOUS
-/// PUBLIC signing keys only. Deliberately has no PrivateKey field: team-signing.json's private key
+/// PUBLIC signing keys only. Deliberately has no PrivateKey field: the environment key file's private keys
 /// must never reach this export (see docs/security.md's authoring-tier-only trust boundary).
 /// </summary>
 public sealed record FleetExportTeam(

@@ -509,7 +509,20 @@
 
             var result = await IndexService.RegenerateAllIndexesAsync();
 
-            if (result.DistributionFailures.Count > 0 || result.Failures.Count > 0)
+            if (result.KeyUnreadableReason != null)
+            {
+                // The environment key is shared by every team, so the run stopped at the first team: reported once.
+                // TODO(i18n): English-only, like the other failure texts on this page.
+                allErrorMessage =
+                    $"The environment signing key could not be read: {result.KeyUnreadableReason}. " +
+                    $"Regeneration stopped; {result.Regenerated} of {allTeamsInfo.Count} team indexes were regenerated, " +
+                    "and no index was replaced by an unsigned one. Ask a system administrator to restore access to the key. " +
+                    $"Not processed: {string.Join(", ", result.NotProcessed)}.";
+                if (result.DistributionFailures.Count > 0 || result.Failures.Count > 0)
+                    allDistributionFailures = result.DistributionFailures
+                        .Concat(result.Failures.Select(f => $"not regenerated - {f}")).ToList();
+            }
+            else if (result.DistributionFailures.Count > 0 || result.Failures.Count > 0)
             {
                 allDistributionFailures = result.DistributionFailures
                     .Concat(result.Failures.Select(f => $"not regenerated - {f}")).ToList();

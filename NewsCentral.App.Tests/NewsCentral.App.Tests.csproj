@@ -46,6 +46,9 @@
     <Compile Include="..\NewsCentral\Services\SigningKeyUnreadableException.cs" Link="App\SigningKeyUnreadableException.cs" />
     <Compile Include="..\NewsCentral\Services\UserNotices.cs" Link="App\UserNotices.cs" />
     <Compile Include="..\NewsCentral\Services\BackgroundIndexRegeneration.cs" Link="App\BackgroundIndexRegeneration.cs" />
+    <Compile Include="..\NewsCentral\Services\IndexRegeneration.cs" Link="App\IndexRegeneration.cs" />
+    <Compile Include="..\NewsCentral\Services\IndexSigner.cs" Link="App\IndexSigner.cs" />
+    <Compile Include="..\NewsCentral\Configuration\JsonConfiguration.cs" Link="App\JsonConfiguration.cs" />
     <Compile Include="..\NewsCentral\Services\UserPreferenceStore.cs" Link="App\UserPreferenceStore.cs" />
     <Compile Include="..\NewsCentral\Services\WindowsIdentityService.cs" Link="App\WindowsIdentityService.cs" />
     <Compile Include="..\NewsCentral\Services\IStorageService.cs" Link="App\IStorageService.cs" />

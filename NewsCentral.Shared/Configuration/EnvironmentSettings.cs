@@ -18,7 +18,7 @@ public sealed class EnvironmentSettings
     public DistributionSettings Distribution { get; set; } = new();
 
     /// <summary>
-    /// Root of the secure store for team signing keys (<c>{SecurePath}\keys\{team}\team-signing.json</c>).
+    /// Root of the secure store for the environment signing key (<c>{SecurePath}\keys\environment-signing.json</c>).
     /// Null or empty = <c>{DataPath}\secure</c> - see <see cref="EnvironmentSettingsResolver.EffectiveSecurePath"/>.
     /// Changing it does not move existing keys. NTFS ACLs on it are applied by scripts/Set-AuthoringAcl.ps1, never by the app.
     /// </summary>

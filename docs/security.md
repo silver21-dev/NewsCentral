@@ -48,7 +48,7 @@
 
 **Canonical payload:** Identical approach to `HmacService` — `Signature` temporarily nulled, non-indented camelCase JSON with `JsonStringEnumConverter`. Signed bytes are byte-for-byte consistent across both services.
 
-**Key material — `TeamSigningKeys`:** Stored in the per-environment **secure store** at `{SecurePath}\keys\{teamFolderName}\team-signing.json` (S02; `SecurePath` in `environment.json`, default `{DataPath}\secure`) on the authoring tier only — it used to sit in `{teamFolderName}/team-signing.json` under the shared DataPath, where every author could read it. Must never be written through `IBlobDistributionService` or synced to client machines. See **Authoring-tier hardening (S02)** below.
+**Key material — `EnvironmentSigningKeys`:** Stored in the per-environment **secure store** at `{SecurePath}\keys\environment-signing.json` (M3; `SecurePath` in `environment.json`, default `{DataPath}\secure`) on the authoring tier only. One file per environment holds `current`, `next` and `previousPublicKey`, each with a `createdAt`. (Before M3 each team had its own `team-signing.json`; those files are ignored and must be deleted by the administrator. Before S02 they sat under the shared DataPath, where every author could read them.) Must never be written through `IBlobDistributionService` or synced to client machines. See **Authoring-tier hardening (S02)** and **M3** below.
 
 | Field | Type | Used by |
 |---|---|---|
@@ -122,19 +122,17 @@ team's private signing key and `config/users.json` (password hashes, `TeamRoles`
 exact ACL table: `docs/anti-tamper.md` §9. The app never sets ACLs; `scripts/Set-AuthoringAcl.ps1` does, and the
 app only warns about drift.
 
-- **Secure key store.** Team keys live under `{SecurePath}\keys\{team}\team-signing.json`, behind their own
+- **Secure key store.** The environment key lives at `{SecurePath}\keys\environment-signing.json`, behind its own
   storage abstraction (not the DataPath `IStorageService`). Loading has three outcomes — `NotConfigured`,
-  `Loaded`, `Unreadable` (with a reason). `Unreadable` **fails** index generation/publish and the fleet export
-  reports "key not readable"; it is never treated as "no key", and Key Management does not offer to generate a key
-  over it. Keys are migrated from the old location with a verified copy (byte-for-byte) before the old file is
-  deleted; a failure keeps the old file in use and tells the administrator; a conflict never overwrites.
-  **Rotate every team key after migration**: the old files were exposed.
-  Where the user sees an unreadable key: a failed publish shows "Signing key for <team> could not be read: <reason>.
-  Nothing was published ..." at the top of the Assignments page (single publish) or in the bulk result (bulk publish);
-  when the index regeneration that follows an assignment delete or a presentation update/delete hits it, the operation
-  still completes and a banner on every page says "The distributed index for <team> was not updated because its signing
-  key could not be read." (also audited as `IndexRegenerationFailed`). The old index stays; an unsigned one is never
-  written.
+  `Loaded`, `Unreadable` (with a reason). `Unreadable` **fails** index generation/publish; it is never treated as
+  "no key", and Key Management does not offer to generate a key over it. Per-team keys, their DataPath migration and
+  the login migration pass were removed in M3 (see below).
+  Where the user sees an unreadable key: a failed publish shows "The environment signing key could not be read:
+  <reason>. Nothing was published ..." at the top of the Assignments page (single publish) or in the bulk result (bulk
+  publish); when the index regeneration that follows an assignment delete or a presentation update/delete hits it, the
+  operation still completes and a banner on every page says "Distributed indexes are not being updated because the
+  environment signing key could not be read." (also audited per team as `IndexRegenerationFailed`). The old index
+  stays; an unsigned one is never written.
 - **users.json.** Administrator-writable only after provisioning. Login's `LastLogin` write is best effort, the UI
   language lives in a per-user local store, and the password page explains that an administrator must change it.
   User management (create/update/UPN/team membership/roles/delete) requires a SystemAdmin, enforced in
@@ -159,11 +157,22 @@ One ECDSA key pair per environment replaces per-team keys; M1 changes **verifica
 - Team binding: with one key for every team, an index signed for team A would otherwise verify in team B's folder.
 - Registry: `Signing\PublicKey` and `Signing\PublicKeyPrevious` are flat; `Signing\{team}\...` is no longer read.
 - Authoring self-check runs `SignatureGate.Verify(reloaded, teamFolderName, [publicKey])` and requires `Valid` before anything is written.
-- Still per-team until M3: key storage (`team-signing.json`) and the Key Management page. Registry tooling, manifests and the `RequireSignedIndex` default change in M2.
+- Key storage and the Key Management page were still per-team at this point; M3 (below) made them per-environment. Registry tooling, manifests and the `RequireSignedIndex` default change in M2.
 
 ## M2 - client configuration for the single key
 
 - `Signing:RequireSignedIndex` now defaults to `true` everywhere: both `appsettings.json` templates, both manifests, and the code (`GetValue("Signing:RequireSignedIndex", true)`), so an absent value is fail-closed. A machine without `Signing\PublicKey` (in both `NewsService\Signing` and `NewsViewer\Signing`) shows no content.
 - Index rejections still reach the log every cycle but at Debug unless it is the first rejection for the team, the reason changed, or 60 minutes passed since the last Error for that reason (`SyncService`, injected `TimeProvider`); state is cleared when the team's index is accepted. Rejections stay Error-level.
 - NewsService warns once at startup about per-team `Signing\{team}\PublicKey` / `PublicKeyPrevious` subkeys, which are no longer read.
-- `ConfigManifests` gained `Signing:PublicKey` and `Signing:PublicKeyPrevious` (both components); `ComponentManifest.HasSigningHive`, `SigningTeamKeys` and `ComponentResolution.Signing` were removed, and Configuration Review shows the keys as ordinary rows with the copyable full-value rendering. `FleetExportBuilder` and `Set-RegistryOverrides.ps1` still emit the old per-team layout and `RequireSignedIndex = false` until M4; the authoring key store and Key Management stay per-team until M3.
+- `ConfigManifests` gained `Signing:PublicKey` and `Signing:PublicKeyPrevious` (both components); `ComponentManifest.HasSigningHive`, `SigningTeamKeys` and `ComponentResolution.Signing` were removed, and Configuration Review shows the keys as ordinary rows with the copyable full-value rendering. `FleetExportBuilder` and `Set-RegistryOverrides.ps1` still emit the old per-team layout and `RequireSignedIndex = false` until M4; the authoring key store and Key Management stayed per-team until M3.
+
+## M3 - one environment signing key, three-step rotation, SystemAdmin-only Key Management
+
+- **Storage.** `{SecurePath}\keys\environment-signing.json` (`EnvironmentSigningKeys`: `current`, `next`, `previousPublicKey` and their `createdAt`) replaces the per-team `team-signing.json`, `TeamKeyStore`, `TeamKeyService`, `TeamKeyMigrator` and `TeamSigningKeys`. Old per-team files are ignored; code never deletes them (`docs/disaster-recovery.md` tells the administrator to).
+- **Signing.** Every index is signed with `current` only (`KeyId = KeyFingerprint.Of(current.PublicKey)`, self-check with `current.PublicKey`). A prepared `next` key never signs. No change to `SignatureGate`, the `KeyId` format, canonical JSON or the clients.
+- **Rotation** (`EnvironmentKeyService`, runbook with the exact GPO values per step in `docs/anti-tamper.md` §6): Generate (first key) -> Prepare next (GPO: `PublicKey` = next, `PublicKeyPrevious` = current) -> Activate next (no GPO change: it already holds exactly these two keys; then Regenerate all teams) -> Retire previous (GPO removes `PublicKeyPrevious`). Registry values come from `EnvironmentKeyService.GpoTarget`.
+- **Authorization and integrity.** Every action requires a SystemAdmin (`UnauthorizedAccessException` otherwise, enforced in the service as well as the page), re-loads the file first, refuses over an unreadable file ("not replaced"), and refuses when the current key changed since the page loaded (optimistic check on the `KeyId` the page displayed). Audited as `KeyGenerated`, `KeyPrepared`, `KeyDiscarded`, `KeyRotated`, `KeyRetired` with public fingerprints only; `KeyMigrated` was removed. Key material never reaches audit lines, logs, notices or exceptions.
+- **Key Management** is SystemAdmin-only, has no team context, shows the private key nowhere (not even truncated), and shows the age of each key from `createdAt`.
+- **ACL.** `Set-AuthoringAcl.ps1` lost `-TeamSigners` and the per-team folder handling; `keys\` gets AuthorsGroup Read (authors' sessions sign with the key) on top of the administrators' Full control. `AuthoringAclChecks` checks `keys\` and `keys\environment-signing.json` for read by broad identities (Users, Everyone, Authenticated Users, INTERACTIVE); AuthorsGroup read is expected and not a warning. Residual exposure: any author can read the environment private key by design (trusted authors); rotate it if the file was ever broadly readable.
+- **Failure behaviour.** An unreadable key stops publishing and "Regenerate all teams" at the first team (reported once, with the teams not processed); the background regeneration raises one environment-wide notice.
+- **Not changed / open.** The fleet export carries no signing keys until M4 (it no longer reads a per-team store). `Set-RegistryOverrides.ps1`, NewsService, NewsViewer and `ConfigManifests` are untouched. Azure Key Vault for the private key remains the flagged preventive measure.

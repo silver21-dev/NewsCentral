@@ -20,7 +20,7 @@
 3. [Step 3 — Storage account and RBAC](#step-3--storage-account-and-rbac)
 4. [Step 4 — Certificate](#step-4--certificate)
 5. [Step 5 — Entra device data](#step-5--entra-device-data)
-6. [Step 6 — Team signing keys](#step-6--team-signing-keys)
+6. [Step 6 — Environment signing key](#step-6--environment-signing-key)
 7. [Step 7 — Registry configuration to push](#step-7--registry-configuration-to-push)
 8. [Step 8 — Validation and cutover](#step-8--validation-and-cutover)
 9. [Upgrading an existing installation](#upgrading-an-existing-installation)
@@ -242,23 +242,27 @@ membership is evaluated **transitively**, so nested groups count.
 
 ---
 
-## Step 6 — Team signing keys
+## Step 6 — Environment signing key
 
-Each team owns an ECDSA P-256 key pair. The private key lives only in the authoring tier; the public key
-is what gets deployed. See `docs/security.md` and `docs/anti-tamper.md`.
+The environment owns **one** ECDSA P-256 key pair, shared by all teams. The private key lives only in the authoring
+tier (`{SecurePath}\keys\environment-signing.json`); the public key is what gets deployed. Only a system
+administrator manages it. See `docs/security.md` and `docs/anti-tamper.md` (§6 has the full rotation runbook).
 
-1. In NewsCentral, sign in as a **TeamAdmin** (SystemAdmin passes automatically) and open **Key
-   Management**.
-2. Select the team. **Generate** a new ECDSA P-256 key pair — held in page state until applied.
-3. **Apply.** This sets `PublicKeyPrevious` to the outgoing `PublicKey` (rotation continuity) and writes
-   `team-signing.json` into the environment's **secure store** (`{SecurePath}\keys\{team}\`, default `{DataPath}\secure`; S02).
-4. Copy the **full public key** from the page — it is rendered copyable specifically for GPO deployment.
-5. **Republish** — a separate deliberate action that re-signs and saves `index.json`, with the self-verify
-   guard running at publish time.
-6. Repeat per team. Record each team's public key against its **exact team folder name**.
+**The first key is generated in Key Management, and its values feed the GPO:**
 
-`team-signing.json` never leaves the authoring tier — it is written to the secure store (not the DataPath `IStorageService`) and is never
-distributed via `IBlobDistributionService`. Public keys are **not secret**; treat them as configuration.
+1. In NewsCentral, sign in as a **SystemAdmin** and open **Key Management**.
+2. **Generate key.** The page shows the key as Current and the **Registry values to deploy (GPO)**.
+3. Copy the **full public key** from the page (rendered copyable for this purpose) into `Signing\PublicKey` for
+   **both** `NewsService` and `NewsViewer` (the same value in both; the Step 4/5 GPO or
+   `scripts/Set-RegistryOverrides.ps1` at pilot scope). Leave `PublicKeyPrevious` unset.
+4. Index Management → **Regenerate all teams** to sign every team's index with the key.
+5. Back up `environment-signing.json` (`docs/disaster-recovery.md`).
+
+The file never leaves the authoring tier — it is written to the secure store (not the DataPath `IStorageService`) and
+is never distributed via `IBlobDistributionService`. Public keys are **not secret**; treat them as configuration.
+Later rotation is three steps (Prepare next key → Activate next key → Retire previous key), each with exact GPO
+values shown on the page; see `docs/anti-tamper.md` §6. The fleet export carries no signing keys until M4: copy the
+values from Key Management.
 
 > ⚠️ **Rotation trap.** Signing and index regeneration are distinct operations. Regenerating indexes
 > re-signs with the current key but does **not** rotate keys — and because client change detection uses
@@ -266,7 +270,7 @@ distributed via `IBlobDistributionService`. Public keys are **not secret**; trea
 > force clients to re-sync. `PublicKeyPrevious` must remain in the registry until an actual content
 > change has propagated to every machine.
 
-> ⚠️ **Private signing keys live in `team-signing.json` in the authoring tier's secure store (S02; see 6.1).** Azure Key
+> ⚠️ **The private keys live in `environment-signing.json` in the authoring tier's secure store (see 6.1).** Azure Key
 > Vault migration is the flagged highest-priority preventive measure. Until then, the authoring tier's
 > backup and access control *is* the key protection.
 
@@ -276,24 +280,24 @@ DataPath is shared by every author, so by itself it protects nothing from them. 
 environment administrator does, once, with `scripts/Set-AuthoringAcl.ps1` (elevated, 64-bit PowerShell,
 `-WhatIf` supported, exit `0`/`1`). Order matters:
 
-1. **Create the groups**: administrators, authors, and one signer group per team that signs (for example
-   `NC-Admins`, `NC-Authors`, `NC-cz-its-Signers`). Make sure the administrators are in the administrators group
-   and in `NC-Authors` only if they author too.
-2. **Sign in to NewsCentral as a system administrator once.** That login migrates every team key from
-   `{DataPath}\{team}\team-signing.json` into the secure store (verified copy, then delete). Check that no
-   `{DataPath}\*\team-signing.json` is left and that Key Management / the main layout show no migration warning.
-   The script **refuses** (exit 1, listing the files) while any remain.
-3. **Preview, then apply**:
+1. **Create the groups**: administrators and authors (for example `NC-Admins`, `NC-Authors`). Make sure the
+   administrators are in the administrators group and in `NC-Authors` only if they author too. There are no
+   per-team signer groups: one environment key is read by all authors and changed only by administrators.
+2. **Preview, then apply**:
    ```powershell
-   .\scripts\Set-AuthoringAcl.ps1 -DataPath <DataPath> -AdminsGroup <DOMAIN\NC-Admins> -AuthorsGroup <DOMAIN\NC-Authors> `
-       -TeamSigners @{ 'cz-its' = '<DOMAIN\NC-cz-its-Signers>' } -WhatIf
-   .\scripts\Set-AuthoringAcl.ps1 -DataPath <DataPath> -AdminsGroup <DOMAIN\NC-Admins> -AuthorsGroup <DOMAIN\NC-Authors> `
-       -TeamSigners @{ 'cz-its' = '<DOMAIN\NC-cz-its-Signers>' }
+   .\scripts\Set-AuthoringAcl.ps1 -DataPath <DataPath> -AdminsGroup <DOMAIN\NC-Admins> -AuthorsGroup <DOMAIN\NC-Authors> -WhatIf
+   .\scripts\Set-AuthoringAcl.ps1 -DataPath <DataPath> -AdminsGroup <DOMAIN\NC-Admins> -AuthorsGroup <DOMAIN\NC-Authors>
    ```
    Add `-SecurePath` / `-AuditPath` if `environment.json` sets non-default locations. The script prints the resulting
-   ACLs (`icacls`). Administrators and signers must log off and on again for new group membership to apply.
-4. **Rotate every team key** (Key Management → Generate → Apply → deploy the new public key per Step 7 →
-   Republish). The old key files were readable by every author before step 3; treat them as copied.
+   ACLs (`icacls`). `SecurePath\keys` gets AuthorsGroup **Read** (authors' sessions sign with the key) on top of the
+   administrators' Full control; existing `keys\<team>` folders are left untouched. Administrators and authors must
+   log off and on again for new group membership to apply.
+3. **Delete the old per-team key files yourself.** Code never deletes under `keys\`: remove any
+   `{SecurePath}\keys\<team>\` folders and any `{DataPath}\<team>\team-signing.json` left from before the
+   environment key (see `docs/disaster-recovery.md`).
+4. **Rotate the key if `environment-signing.json` may have been readable by other users before step 2** (Key
+   Management → Prepare next key → deploy → Activate → Regenerate all teams → Retire previous; see
+   `docs/anti-tamper.md` §6).
 5. Confirm the **folder-permission warnings** on Key Management and Environment Management are gone. They are
    warnings only; the audit-folder check can over-report on a folder that was not provisioned by the script.
 
@@ -479,7 +483,7 @@ HKLM\Software\{Company}\NewsCentral\NewsViewer\
 |---|---|---|
 | `Company` | Build-time constant in `Directory.Build.props` | It defines the hive path and cannot be read from the path it defines |
 | `NEWSSERVICE_AZURE_CLIENTSECRET` | Machine-scope environment variable | Only when `AuthMode=ClientSecretEnv`. The single configuration item that does not arrive through GPO. **Machine scope is required** — Local System does not see user variables. |
-| Team **private** signing keys | `team-signing.json` in the secure store (`{SecurePath}\keys\{team}\`), authoring tier only | Never distributed; public keys only reach the fleet |
+| Environment **private** signing keys | `environment-signing.json` in the secure store (`{SecurePath}\keys\`), authoring tier only | Never distributed; public keys only reach the fleet |
 
 > ⚠️ **`ClientSecretEnv` is a convenience delivery, not a secure one.** A machine environment variable is
 > clear text readable by any SYSTEM process, exactly like a registry `REG_SZ` secret. Do not present it

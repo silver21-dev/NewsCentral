@@ -18,37 +18,50 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <data name="PageTitle" xml:space="preserve"><value>Key Management</value></data>
-  <data name="PageDescription" xml:space="preserve"><value>Generate, view, and rotate the signing key pair for the current team.</value></data>
-  <data name="NoTeamSelected" xml:space="preserve"><value>Select a team first.</value></data>
+  <data name="PageDescription" xml:space="preserve"><value>Manage the environment signing key: generate it and rotate it in three steps without clients rejecting new content.</value></data>
   <data name="AccessDenied" xml:space="preserve"><value>Access Denied</value></data>
-  <data name="AccessDeniedMessage" xml:space="preserve"><value>You must be a Team Administrator for this team to manage signing keys.</value></data>
-  <data name="CurrentKeysSection" xml:space="preserve"><value>Current Keys</value></data>
-  <data name="CurrentTeam" xml:space="preserve"><value>Current Team</value></data>
-  <data name="NoKeyConfigured" xml:space="preserve"><value>No signing key configured for this team.</value></data>
-  <data name="CurrentPublicKey" xml:space="preserve"><value>Current Public Key</value></data>
+  <data name="AccessDeniedMessage" xml:space="preserve"><value>Only a system administrator can manage the signing key.</value></data>
+  <data name="NoKeySection" xml:space="preserve"><value>Environment signing key</value></data>
+  <data name="NoKeyConfigured" xml:space="preserve"><value>No environment signing key exists yet. Indexes are published unsigned until one is generated.</value></data>
+  <data name="GenerateDescription" xml:space="preserve"><value>Generate the first key. Afterwards copy its public key into the registry values shown on this page.</value></data>
+  <data name="Generate" xml:space="preserve"><value>Generate key</value></data>
+  <data name="CurrentKey" xml:space="preserve"><value>Current key</value></data>
+  <data name="NextKey" xml:space="preserve"><value>Next key (prepared, not used for signing yet)</value></data>
+  <data name="PreviousKey" xml:space="preserve"><value>Previous key (public part only, still trusted by clients)</value></data>
+  <data name="KeyId" xml:space="preserve"><value>Key ID</value></data>
+  <data name="PublicKey" xml:space="preserve"><value>Public key</value></data>
+  <data name="AgeUnknown" xml:space="preserve"><value>creation date unknown</value></data>
+  <data name="AgeToday" xml:space="preserve"><value>created {0}, today</value></data>
+  <data name="AgeOneDay" xml:space="preserve"><value>created {0}, 1 day ago</value></data>
+  <data name="AgeDays" xml:space="preserve"><value>created {0}, {1} days ago</value></data>
   <data name="CopyForGPO" xml:space="preserve"><value>Copy for GPO</value></data>
   <data name="Copied" xml:space="preserve"><value>Copied to clipboard.</value></data>
   <data name="CopyFailed" xml:space="preserve"><value>Copy failed — please copy the text manually.</value></data>
-  <data name="CurrentPrivateKey" xml:space="preserve"><value>Current Private Key</value></data>
-  <data name="PrivateKeyTruncatedHint" xml:space="preserve"><value>The private key is shown truncated and is never displayed in full.</value></data>
-  <data name="PreviousPublicKey" xml:space="preserve"><value>Previous Public Key</value></data>
-  <data name="GenerateSection" xml:space="preserve"><value>Generate New Key Pair</value></data>
-  <data name="GenerateDescription" xml:space="preserve"><value>Generate a new ECDSA key pair. It is held locally and is not saved until you apply it.</value></data>
-  <data name="GenerateNewKeyPair" xml:space="preserve"><value>Generate New Key Pair</value></data>
-  <data name="NotYetApplied" xml:space="preserve"><value>New key pair generated — not yet applied. Click Apply to save it.</value></data>
-  <data name="NotYetAppliedHint" xml:space="preserve"><value>Held in memory — not saved to disk until you click Apply.</value></data>
-  <data name="NewPublicKey" xml:space="preserve"><value>New Public Key</value></data>
-  <data name="NewPrivateKey" xml:space="preserve"><value>New Private Key</value></data>
-  <data name="Applying" xml:space="preserve"><value>Applying...</value></data>
-  <data name="Apply" xml:space="preserve"><value>Apply</value></data>
-  <data name="ApplySuccess" xml:space="preserve"><value>New key pair applied and saved.</value></data>
-  <data name="RotationReminder" xml:space="preserve"><value>Remember to deploy the new public key to clients before republishing.</value></data>
-  <data name="ApplyError" xml:space="preserve"><value>Failed to apply the new key pair</value></data>
-  <data name="RepublishSection" xml:space="preserve"><value>Republish</value></data>
-  <data name="RepublishReminder" xml:space="preserve"><value>Deploy the new public key to clients (and keep the previous one) before republishing, or clients will reject the index until they receive the new key.</value></data>
-  <data name="Republishing" xml:space="preserve"><value>Republishing...</value></data>
-  <data name="RepublishIndex" xml:space="preserve"><value>Republish Index</value></data>
-  <data name="RepublishSuccess" xml:space="preserve"><value>Index republished successfully for {0}.</value></data>
-  <data name="RepublishError" xml:space="preserve"><value>Failed to republish the index</value></data>
-  <data name="LoadError" xml:space="preserve"><value>Error loading signing keys</value></data>
+  <data name="GpoSection" xml:space="preserve"><value>Registry values to deploy (GPO)</value></data>
+  <data name="GpoRemovePrevious" xml:space="preserve"><value>remove PublicKeyPrevious</value></data>
+  <data name="StepCurrentOnly" xml:space="preserve"><value>Clients trust the current key only. To rotate, prepare a next key.</value></data>
+  <data name="StepNextPrepared" xml:space="preserve"><value>A next key is prepared. Deploy these values so clients trust both keys, then activate the next key. Signing still uses the current key.</value></data>
+  <data name="StepPreviousKept" xml:space="preserve"><value>The next key is active and the old key is kept as previous. These values are already deployed. After every team has been regenerated and picked up, retire the previous key and remove PublicKeyPrevious.</value></data>
+  <data name="ActionsSection" xml:space="preserve"><value>Actions</value></data>
+  <data name="PrepareNext" xml:space="preserve"><value>Prepare next key</value></data>
+  <data name="ActivateNext" xml:space="preserve"><value>Activate next key</value></data>
+  <data name="DiscardNext" xml:space="preserve"><value>Discard next key</value></data>
+  <data name="RetirePrevious" xml:space="preserve"><value>Retire previous key</value></data>
+  <data name="Confirm" xml:space="preserve"><value>Confirm</value></data>
+  <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="PrepareConfirm" xml:space="preserve"><value>Create a next key. Signing continues with the current key until you activate the next one.</value></data>
+  <data name="ActivateConfirm" xml:space="preserve"><value>Only activate after every machine has received the registry values above. Then run Index Management → Regenerate all teams.</value></data>
+  <data name="DiscardConfirm" xml:space="preserve"><value>Discard the prepared next key. Its private key is deleted and cannot be recovered.</value></data>
+  <data name="RetireConfirm" xml:space="preserve"><value>Only retire after all teams have been regenerated with the current key and every machine has picked them up.</value></data>
+  <data name="GeneratedOk" xml:space="preserve"><value>Key generated. Deploy its public key to the registry values below, then regenerate all teams.</value></data>
+  <data name="PreparedOk" xml:space="preserve"><value>Next key prepared. Deploy the registry values below; signing still uses the current key.</value></data>
+  <data name="ActivatedOk" xml:space="preserve"><value>Next key activated. Now regenerate all team indexes so they are signed with it.</value></data>
+  <data name="DiscardedOk" xml:space="preserve"><value>Next key discarded.</value></data>
+  <data name="RetiredOk" xml:space="preserve"><value>Previous key retired. Remove PublicKeyPrevious from the registry values.</value></data>
+  <data name="GoToIndexManagement" xml:space="preserve"><value>Go to Index Management</value></data>
+  <data name="UnreadableTitle" xml:space="preserve"><value>Key not readable.</value></data>
+  <data name="UnreadableMessage" xml:space="preserve"><value>The environment signing key exists or may exist, but could not be read: {0}. Publishing is blocked until access is restored. No action is offered, because replacing an unreadable key would leave every device that trusts it unable to verify content.</value></data>
+  <data name="Reload" xml:space="preserve"><value>Reload</value></data>
+  <data name="LoadError" xml:space="preserve"><value>Error loading the signing key</value></data>
+  <data name="ActionError" xml:space="preserve"><value>The action failed</value></data>
 </root>

@@ -18,37 +18,50 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <data name="PageTitle" xml:space="preserve"><value>Gestión de claves</value></data>
-  <data name="PageDescription" xml:space="preserve"><value>Genere, visualice y rote el par de claves de firma del equipo actual.</value></data>
-  <data name="NoTeamSelected" xml:space="preserve"><value>Seleccione primero un equipo.</value></data>
+  <data name="PageDescription" xml:space="preserve"><value>Gestione la clave de firma del entorno: genérela y rótela en tres pasos sin que los clientes rechacen contenido nuevo.</value></data>
   <data name="AccessDenied" xml:space="preserve"><value>Acceso denegado</value></data>
-  <data name="AccessDeniedMessage" xml:space="preserve"><value>Debe ser administrador del equipo para gestionar las claves de firma.</value></data>
-  <data name="CurrentKeysSection" xml:space="preserve"><value>Claves actuales</value></data>
-  <data name="CurrentTeam" xml:space="preserve"><value>Equipo actual</value></data>
-  <data name="NoKeyConfigured" xml:space="preserve"><value>No hay ninguna clave de firma configurada para este equipo.</value></data>
-  <data name="CurrentPublicKey" xml:space="preserve"><value>Clave pública actual</value></data>
+  <data name="AccessDeniedMessage" xml:space="preserve"><value>Solo un administrador del sistema puede gestionar la clave de firma.</value></data>
+  <data name="NoKeySection" xml:space="preserve"><value>Clave de firma del entorno</value></data>
+  <data name="NoKeyConfigured" xml:space="preserve"><value>Todavía no existe una clave de firma del entorno. Los índices se publican sin firmar hasta que se genere una.</value></data>
+  <data name="GenerateDescription" xml:space="preserve"><value>Genere la primera clave. Después copie su clave pública en los valores del registro que se muestran en esta página.</value></data>
+  <data name="Generate" xml:space="preserve"><value>Generar clave</value></data>
+  <data name="CurrentKey" xml:space="preserve"><value>Clave actual</value></data>
+  <data name="NextKey" xml:space="preserve"><value>Clave siguiente (preparada, aún no se usa para firmar)</value></data>
+  <data name="PreviousKey" xml:space="preserve"><value>Clave anterior (solo la parte pública, los clientes aún confían en ella)</value></data>
+  <data name="KeyId" xml:space="preserve"><value>ID de clave</value></data>
+  <data name="PublicKey" xml:space="preserve"><value>Clave pública</value></data>
+  <data name="AgeUnknown" xml:space="preserve"><value>fecha de creación desconocida</value></data>
+  <data name="AgeToday" xml:space="preserve"><value>creada el {0}, hoy</value></data>
+  <data name="AgeOneDay" xml:space="preserve"><value>creada el {0}, hace 1 día</value></data>
+  <data name="AgeDays" xml:space="preserve"><value>creada el {0}, hace {1} días</value></data>
   <data name="CopyForGPO" xml:space="preserve"><value>Copiar para GPO</value></data>
   <data name="Copied" xml:space="preserve"><value>Copiado al portapapeles.</value></data>
   <data name="CopyFailed" xml:space="preserve"><value>Error al copiar — copie el texto manualmente.</value></data>
-  <data name="CurrentPrivateKey" xml:space="preserve"><value>Clave privada actual</value></data>
-  <data name="PrivateKeyTruncatedHint" xml:space="preserve"><value>La clave privada se muestra truncada y nunca se muestra completa.</value></data>
-  <data name="PreviousPublicKey" xml:space="preserve"><value>Clave pública anterior</value></data>
-  <data name="GenerateSection" xml:space="preserve"><value>Generar nuevo par de claves</value></data>
-  <data name="GenerateDescription" xml:space="preserve"><value>Genere un nuevo par de claves ECDSA. Se conserva localmente y no se guarda hasta que lo aplique.</value></data>
-  <data name="GenerateNewKeyPair" xml:space="preserve"><value>Generar nuevo par de claves</value></data>
-  <data name="NotYetApplied" xml:space="preserve"><value>Par de claves generado — aún no aplicado. Haga clic en Aplicar para guardarlo.</value></data>
-  <data name="NotYetAppliedHint" xml:space="preserve"><value>Retenido en memoria — no se guarda en disco hasta que haga clic en Aplicar.</value></data>
-  <data name="NewPublicKey" xml:space="preserve"><value>Nueva clave pública</value></data>
-  <data name="NewPrivateKey" xml:space="preserve"><value>Nueva clave privada</value></data>
-  <data name="Applying" xml:space="preserve"><value>Aplicando...</value></data>
-  <data name="Apply" xml:space="preserve"><value>Aplicar</value></data>
-  <data name="ApplySuccess" xml:space="preserve"><value>Nuevo par de claves aplicado y guardado.</value></data>
-  <data name="RotationReminder" xml:space="preserve"><value>Recuerde implementar la nueva clave pública en los clientes antes de volver a publicar.</value></data>
-  <data name="ApplyError" xml:space="preserve"><value>Error al aplicar el nuevo par de claves</value></data>
-  <data name="RepublishSection" xml:space="preserve"><value>Volver a publicar</value></data>
-  <data name="RepublishReminder" xml:space="preserve"><value>Implemente la nueva clave pública en los clientes (y conserve la anterior) antes de volver a publicar, o los clientes rechazarán el índice hasta recibir la nueva clave.</value></data>
-  <data name="Republishing" xml:space="preserve"><value>Volviendo a publicar...</value></data>
-  <data name="RepublishIndex" xml:space="preserve"><value>Volver a publicar el índice</value></data>
-  <data name="RepublishSuccess" xml:space="preserve"><value>Índice vuelto a publicar correctamente para {0}.</value></data>
-  <data name="RepublishError" xml:space="preserve"><value>Error al volver a publicar el índice</value></data>
-  <data name="LoadError" xml:space="preserve"><value>Error al cargar las claves de firma</value></data>
+  <data name="GpoSection" xml:space="preserve"><value>Valores del registro que se deben distribuir (GPO)</value></data>
+  <data name="GpoRemovePrevious" xml:space="preserve"><value>eliminar PublicKeyPrevious</value></data>
+  <data name="StepCurrentOnly" xml:space="preserve"><value>Los clientes confían solo en la clave actual. Para rotar, prepare una clave siguiente.</value></data>
+  <data name="StepNextPrepared" xml:space="preserve"><value>Hay una clave siguiente preparada. Distribuya estos valores para que los clientes confíen en ambas claves y después active la clave siguiente. La firma sigue usando la clave actual.</value></data>
+  <data name="StepPreviousKept" xml:space="preserve"><value>La clave siguiente está activa y la antigua se conserva como anterior. Estos valores ya están distribuidos. Cuando todos los equipos se hayan regenerado y los clientes los hayan recogido, retire la clave anterior y elimine PublicKeyPrevious.</value></data>
+  <data name="ActionsSection" xml:space="preserve"><value>Acciones</value></data>
+  <data name="PrepareNext" xml:space="preserve"><value>Preparar clave siguiente</value></data>
+  <data name="ActivateNext" xml:space="preserve"><value>Activar clave siguiente</value></data>
+  <data name="DiscardNext" xml:space="preserve"><value>Descartar clave siguiente</value></data>
+  <data name="RetirePrevious" xml:space="preserve"><value>Retirar clave anterior</value></data>
+  <data name="Confirm" xml:space="preserve"><value>Confirmar</value></data>
+  <data name="Cancel" xml:space="preserve"><value>Cancelar</value></data>
+  <data name="PrepareConfirm" xml:space="preserve"><value>Crear una clave siguiente. La firma continúa con la clave actual hasta que active la siguiente.</value></data>
+  <data name="ActivateConfirm" xml:space="preserve"><value>Active solo después de que todos los equipos hayan recibido los valores del registro indicados arriba. Después ejecute Gestión de índices → Regenerar todos los equipos.</value></data>
+  <data name="DiscardConfirm" xml:space="preserve"><value>Descartar la clave siguiente preparada. Su clave privada se elimina y no se puede recuperar.</value></data>
+  <data name="RetireConfirm" xml:space="preserve"><value>Retire solo después de que todos los equipos se hayan regenerado con la clave actual y todas las máquinas los hayan recogido.</value></data>
+  <data name="GeneratedOk" xml:space="preserve"><value>Clave generada. Distribuya su clave pública en los valores del registro de abajo y después regenere todos los equipos.</value></data>
+  <data name="PreparedOk" xml:space="preserve"><value>Clave siguiente preparada. Distribuya los valores del registro de abajo; la firma sigue usando la clave actual.</value></data>
+  <data name="ActivatedOk" xml:space="preserve"><value>Clave siguiente activada. Ahora regenere todos los índices de equipo para que se firmen con ella.</value></data>
+  <data name="DiscardedOk" xml:space="preserve"><value>Clave siguiente descartada.</value></data>
+  <data name="RetiredOk" xml:space="preserve"><value>Clave anterior retirada. Elimine PublicKeyPrevious de los valores del registro.</value></data>
+  <data name="GoToIndexManagement" xml:space="preserve"><value>Ir a Gestión de índices</value></data>
+  <data name="UnreadableTitle" xml:space="preserve"><value>Clave no legible.</value></data>
+  <data name="UnreadableMessage" xml:space="preserve"><value>La clave de firma del entorno existe o puede existir, pero no se pudo leer: {0}. La publicación queda bloqueada hasta que se restablezca el acceso. No se ofrece ninguna acción, porque reemplazar una clave ilegible dejaría a todos los dispositivos que confían en ella sin poder verificar el contenido.</value></data>
+  <data name="Reload" xml:space="preserve"><value>Recargar</value></data>
+  <data name="LoadError" xml:space="preserve"><value>Error al cargar la clave de firma</value></data>
+  <data name="ActionError" xml:space="preserve"><value>La acción ha fallado</value></data>
 </root>

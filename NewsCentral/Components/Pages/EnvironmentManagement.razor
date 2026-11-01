@@ -1070,12 +1070,9 @@
         var exportTeams = new List<FleetExportTeam>();
         foreach (var team in allTeams)
         {
-            // Public keys only — team-signing.json's PrivateKey is never read here.
-            // An unreadable key is reported as such, never as "no key".
-            var load = await IndexService.LoadTeamSigningKeysAsync(team.FolderName);
-            exportTeams.Add(new FleetExportTeam(
-                team.FolderName, team.Name, load.Keys?.PublicKey, load.Keys?.PublicKeyPrevious,
-                KeyUnreadableReason: load.Outcome == KeyLoadOutcome.Unreadable ? load.Reason ?? "unknown reason" : null));
+            // TODO(M4): the environment key is not per team any more, so the export carries no signing keys until
+            // M4 reworks the export around the environment's PublicKey / PublicKeyPrevious.
+            exportTeams.Add(new FleetExportTeam(team.FolderName, team.Name, null, null));
         }
 
         var distribution = effective.Settings.Distribution;

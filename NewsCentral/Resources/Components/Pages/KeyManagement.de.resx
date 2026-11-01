@@ -18,37 +18,50 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <data name="PageTitle" xml:space="preserve"><value>Schlüsselverwaltung</value></data>
-  <data name="PageDescription" xml:space="preserve"><value>Signaturschlüsselpaar des aktuellen Teams generieren, anzeigen und rotieren.</value></data>
-  <data name="NoTeamSelected" xml:space="preserve"><value>Wählen Sie zuerst ein Team aus.</value></data>
+  <data name="PageDescription" xml:space="preserve"><value>Den Signaturschlüssel der Umgebung verwalten: erzeugen und in drei Schritten rotieren, ohne dass Clients neue Inhalte ablehnen.</value></data>
   <data name="AccessDenied" xml:space="preserve"><value>Zugriff verweigert</value></data>
-  <data name="AccessDeniedMessage" xml:space="preserve"><value>Sie müssen Team-Administrator sein, um Signaturschlüssel verwalten zu können.</value></data>
-  <data name="CurrentKeysSection" xml:space="preserve"><value>Aktuelle Schlüssel</value></data>
-  <data name="CurrentTeam" xml:space="preserve"><value>Aktuelles Team</value></data>
-  <data name="NoKeyConfigured" xml:space="preserve"><value>Für dieses Team ist kein Signaturschlüssel konfiguriert.</value></data>
-  <data name="CurrentPublicKey" xml:space="preserve"><value>Aktueller öffentlicher Schlüssel</value></data>
+  <data name="AccessDeniedMessage" xml:space="preserve"><value>Nur ein Systemadministrator kann den Signaturschlüssel verwalten.</value></data>
+  <data name="NoKeySection" xml:space="preserve"><value>Signaturschlüssel der Umgebung</value></data>
+  <data name="NoKeyConfigured" xml:space="preserve"><value>Es gibt noch keinen Signaturschlüssel für die Umgebung. Indizes werden unsigniert veröffentlicht, bis einer erzeugt wird.</value></data>
+  <data name="GenerateDescription" xml:space="preserve"><value>Den ersten Schlüssel erzeugen. Danach den öffentlichen Schlüssel in die auf dieser Seite gezeigten Registrywerte übernehmen.</value></data>
+  <data name="Generate" xml:space="preserve"><value>Schlüssel erzeugen</value></data>
+  <data name="CurrentKey" xml:space="preserve"><value>Aktueller Schlüssel</value></data>
+  <data name="NextKey" xml:space="preserve"><value>Nächster Schlüssel (vorbereitet, noch nicht zum Signieren verwendet)</value></data>
+  <data name="PreviousKey" xml:space="preserve"><value>Vorheriger Schlüssel (nur öffentlicher Teil, Clients vertrauen ihm weiterhin)</value></data>
+  <data name="KeyId" xml:space="preserve"><value>Schlüssel-ID</value></data>
+  <data name="PublicKey" xml:space="preserve"><value>Öffentlicher Schlüssel</value></data>
+  <data name="AgeUnknown" xml:space="preserve"><value>Erstellungsdatum unbekannt</value></data>
+  <data name="AgeToday" xml:space="preserve"><value>erstellt am {0}, heute</value></data>
+  <data name="AgeOneDay" xml:space="preserve"><value>erstellt am {0}, vor 1 Tag</value></data>
+  <data name="AgeDays" xml:space="preserve"><value>erstellt am {0}, vor {1} Tagen</value></data>
   <data name="CopyForGPO" xml:space="preserve"><value>Für GPO kopieren</value></data>
   <data name="Copied" xml:space="preserve"><value>In die Zwischenablage kopiert.</value></data>
-  <data name="CopyFailed" xml:space="preserve"><value>Kopieren fehlgeschlagen — bitte kopieren Sie den Text manuell.</value></data>
-  <data name="CurrentPrivateKey" xml:space="preserve"><value>Aktueller privater Schlüssel</value></data>
-  <data name="PrivateKeyTruncatedHint" xml:space="preserve"><value>Der private Schlüssel wird gekürzt angezeigt und niemals vollständig dargestellt.</value></data>
-  <data name="PreviousPublicKey" xml:space="preserve"><value>Vorheriger öffentlicher Schlüssel</value></data>
-  <data name="GenerateSection" xml:space="preserve"><value>Neues Schlüsselpaar generieren</value></data>
-  <data name="GenerateDescription" xml:space="preserve"><value>Generieren Sie ein neues ECDSA-Schlüsselpaar. Es wird lokal gehalten und erst gespeichert, wenn Sie es anwenden.</value></data>
-  <data name="GenerateNewKeyPair" xml:space="preserve"><value>Neues Schlüsselpaar generieren</value></data>
-  <data name="NotYetApplied" xml:space="preserve"><value>Neues Schlüsselpaar generiert — noch nicht angewendet. Klicken Sie auf Anwenden, um es zu speichern.</value></data>
-  <data name="NotYetAppliedHint" xml:space="preserve"><value>Im Speicher gehalten — wird erst auf den Datenträger geschrieben, wenn Sie auf Anwenden klicken.</value></data>
-  <data name="NewPublicKey" xml:space="preserve"><value>Neuer öffentlicher Schlüssel</value></data>
-  <data name="NewPrivateKey" xml:space="preserve"><value>Neuer privater Schlüssel</value></data>
-  <data name="Applying" xml:space="preserve"><value>Wird angewendet...</value></data>
-  <data name="Apply" xml:space="preserve"><value>Anwenden</value></data>
-  <data name="ApplySuccess" xml:space="preserve"><value>Neues Schlüsselpaar angewendet und gespeichert.</value></data>
-  <data name="RotationReminder" xml:space="preserve"><value>Denken Sie daran, den neuen öffentlichen Schlüssel vor der Neuveröffentlichung auf die Clients zu verteilen.</value></data>
-  <data name="ApplyError" xml:space="preserve"><value>Fehler beim Anwenden des neuen Schlüsselpaars</value></data>
-  <data name="RepublishSection" xml:space="preserve"><value>Neu veröffentlichen</value></data>
-  <data name="RepublishReminder" xml:space="preserve"><value>Verteilen Sie den neuen öffentlichen Schlüssel (und behalten Sie den alten) auf die Clients, bevor Sie neu veröffentlichen, oder die Clients lehnen den Index ab, bis sie den neuen Schlüssel erhalten.</value></data>
-  <data name="Republishing" xml:space="preserve"><value>Wird neu veröffentlicht...</value></data>
-  <data name="RepublishIndex" xml:space="preserve"><value>Index neu veröffentlichen</value></data>
-  <data name="RepublishSuccess" xml:space="preserve"><value>Index für {0} erfolgreich neu veröffentlicht.</value></data>
-  <data name="RepublishError" xml:space="preserve"><value>Fehler beim Neu-Veröffentlichen des Index</value></data>
-  <data name="LoadError" xml:space="preserve"><value>Fehler beim Laden der Signaturschlüssel</value></data>
+  <data name="CopyFailed" xml:space="preserve"><value>Kopieren fehlgeschlagen — bitte den Text manuell kopieren.</value></data>
+  <data name="GpoSection" xml:space="preserve"><value>Zu verteilende Registrywerte (GPO)</value></data>
+  <data name="GpoRemovePrevious" xml:space="preserve"><value>PublicKeyPrevious entfernen</value></data>
+  <data name="StepCurrentOnly" xml:space="preserve"><value>Clients vertrauen nur dem aktuellen Schlüssel. Für eine Rotation einen nächsten Schlüssel vorbereiten.</value></data>
+  <data name="StepNextPrepared" xml:space="preserve"><value>Ein nächster Schlüssel ist vorbereitet. Diese Werte verteilen, damit Clients beiden Schlüsseln vertrauen, dann den nächsten Schlüssel aktivieren. Signiert wird weiterhin mit dem aktuellen Schlüssel.</value></data>
+  <data name="StepPreviousKept" xml:space="preserve"><value>Der nächste Schlüssel ist aktiv, der alte bleibt als vorheriger erhalten. Diese Werte sind bereits verteilt. Nachdem alle Teams neu erzeugt und abgeholt wurden, den vorherigen Schlüssel zurückziehen und PublicKeyPrevious entfernen.</value></data>
+  <data name="ActionsSection" xml:space="preserve"><value>Aktionen</value></data>
+  <data name="PrepareNext" xml:space="preserve"><value>Nächsten Schlüssel vorbereiten</value></data>
+  <data name="ActivateNext" xml:space="preserve"><value>Nächsten Schlüssel aktivieren</value></data>
+  <data name="DiscardNext" xml:space="preserve"><value>Nächsten Schlüssel verwerfen</value></data>
+  <data name="RetirePrevious" xml:space="preserve"><value>Vorherigen Schlüssel zurückziehen</value></data>
+  <data name="Confirm" xml:space="preserve"><value>Bestätigen</value></data>
+  <data name="Cancel" xml:space="preserve"><value>Abbrechen</value></data>
+  <data name="PrepareConfirm" xml:space="preserve"><value>Einen nächsten Schlüssel erstellen. Signiert wird mit dem aktuellen Schlüssel, bis der nächste aktiviert wird.</value></data>
+  <data name="ActivateConfirm" xml:space="preserve"><value>Erst aktivieren, wenn alle Rechner die oben gezeigten Registrywerte erhalten haben. Danach in der Indexverwaltung „Alle Teams neu erzeugen“ ausführen.</value></data>
+  <data name="DiscardConfirm" xml:space="preserve"><value>Den vorbereiteten nächsten Schlüssel verwerfen. Sein privater Schlüssel wird gelöscht und kann nicht wiederhergestellt werden.</value></data>
+  <data name="RetireConfirm" xml:space="preserve"><value>Erst zurückziehen, wenn alle Teams mit dem aktuellen Schlüssel neu erzeugt wurden und alle Rechner sie abgeholt haben.</value></data>
+  <data name="GeneratedOk" xml:space="preserve"><value>Schlüssel erzeugt. Den öffentlichen Schlüssel in die unten gezeigten Registrywerte übernehmen und danach alle Teams neu erzeugen.</value></data>
+  <data name="PreparedOk" xml:space="preserve"><value>Nächster Schlüssel vorbereitet. Die unten gezeigten Registrywerte verteilen; signiert wird weiterhin mit dem aktuellen Schlüssel.</value></data>
+  <data name="ActivatedOk" xml:space="preserve"><value>Nächster Schlüssel aktiviert. Jetzt alle Team-Indizes neu erzeugen, damit sie damit signiert werden.</value></data>
+  <data name="DiscardedOk" xml:space="preserve"><value>Nächster Schlüssel verworfen.</value></data>
+  <data name="RetiredOk" xml:space="preserve"><value>Vorheriger Schlüssel zurückgezogen. PublicKeyPrevious aus den Registrywerten entfernen.</value></data>
+  <data name="GoToIndexManagement" xml:space="preserve"><value>Zur Indexverwaltung</value></data>
+  <data name="UnreadableTitle" xml:space="preserve"><value>Schlüssel nicht lesbar.</value></data>
+  <data name="UnreadableMessage" xml:space="preserve"><value>Der Signaturschlüssel der Umgebung existiert oder könnte existieren, konnte aber nicht gelesen werden: {0}. Das Veröffentlichen ist gesperrt, bis der Zugriff wiederhergestellt ist. Es wird keine Aktion angeboten, da das Ersetzen eines nicht lesbaren Schlüssels dazu führen würde, dass alle Geräte, die ihm vertrauen, Inhalte nicht mehr prüfen können.</value></data>
+  <data name="Reload" xml:space="preserve"><value>Neu laden</value></data>
+  <data name="LoadError" xml:space="preserve"><value>Fehler beim Laden des Signaturschlüssels</value></data>
+  <data name="ActionError" xml:space="preserve"><value>Die Aktion ist fehlgeschlagen</value></data>
 </root>

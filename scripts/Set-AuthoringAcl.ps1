@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Applies the NTFS permissions that protect NewsCentral's team signing keys, users.json and audit log.
+    Applies the NTFS permissions that protect NewsCentral's environment signing key, users.json and audit log.
 
 .DESCRIPTION
     NewsCentral never sets ACLs itself: the app runs as each author's own Windows account, so ACLs can only keep
@@ -9,8 +9,10 @@
 
       SecurePath (default <DataPath>\secure)
         inheritance disabled; SYSTEM, Administrators and AdminsGroup: Full control. Nothing else.
-        keys\<team>   TeamSigners[team]: Modify (on top of the administrators it inherits). Nothing else.
-        Folders under keys\ for teams NOT in -TeamSigners lose any explicit ACE (administrators only).
+        keys\         AuthorsGroup: Read (ReadAndExecute, this folder and files), on top of the administrators it
+                      inherits. Authors' sessions sign indexes with the environment key, so they must read
+                      keys\environment-signing.json; only administrators can change it.
+        Existing keys\<team> folders from before the environment key are left untouched: delete them yourself.
 
       <DataPath>\config   (the folder: users.json, teams.json, environment.json, environments.json)
         inheritance disabled; SYSTEM, Administrators and AdminsGroup: Full control (folder and files);
@@ -34,12 +36,11 @@
                       Synchronize - the same reason, for the month folders an author creates (see NOTES).
         No CREATOR OWNER ACE.
 
-    The script REFUSES (exit 1, listing the files) while any <DataPath>\<team>\team-signing.json still exists:
-    an administrator must log in to NewsCentral first, which migrates every team key into the secure store.
-    After provisioning, rotate every team key (the old files were readable by every author).
+    If environment-signing.json was readable by other users before this script ran, rotate the key afterwards
+    (NewsCentral, Key Management).
 
     Run it from 64-bit PowerShell, elevated. -WhatIf shows what would change and still performs the read-only
-    checks (the team-signing.json guard, group name resolution).
+    checks (group name resolution).
 
     Exit code: 0 = applied (or previewed), 1 = refused or failed. Nothing is changed before the checks pass.
 
@@ -58,9 +59,6 @@
 .PARAMETER AuthorsGroup
     Group of everyone who authors content (and so signs in to NewsCentral without being an administrator).
 
-.PARAMETER TeamSigners
-    Hashtable of team folder name -> group allowed to sign for that team, e.g. @{ 'cz-its' = 'NC-cz-its-Signers' }.
-
 .NOTES
     config\ folder: authors lose write access to it. What that changes for them: the last-login time is no longer
     recorded, the shared environment directory (environments.json) is read but never written by their sessions, and
@@ -70,8 +68,7 @@
     so an author who creates a month folder could otherwise re-ACL it and delete the audit files inside.
 
 .EXAMPLE
-    .\Set-AuthoringAcl.ps1 -DataPath D:\NewsCentral -AdminsGroup CONTOSO\NC-Admins -AuthorsGroup CONTOSO\NC-Authors `
-        -TeamSigners @{ 'cz-its' = 'CONTOSO\NC-cz-its-Signers' } -WhatIf
+    .\Set-AuthoringAcl.ps1 -DataPath D:\NewsCentral -AdminsGroup CONTOSO\NC-Admins -AuthorsGroup CONTOSO\NC-Authors -WhatIf
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -79,8 +76,7 @@ param(
     [string]$SecurePath,
     [string]$AuditPath,
     [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$AdminsGroup,
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$AuthorsGroup,
-    [hashtable]$TeamSigners = @{}
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$AuthorsGroup
 )
 
 $ErrorActionPreference = "Stop"
@@ -138,18 +134,6 @@ try {
     }
     if (-not (Test-Path -LiteralPath $DataPath -PathType Container)) { throw "DataPath '$DataPath' does not exist." }
 
-    # ---- Guard: keys must be migrated first -----------------------------------
-    $legacy = @(Get-ChildItem -LiteralPath $DataPath -Directory -ErrorAction SilentlyContinue |
-        ForEach-Object { Join-Path $_.FullName 'team-signing.json' } |
-        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
-    if ($legacy.Count -gt 0) {
-        Write-Host 'REFUSED: team signing keys still exist under the data path. Nothing was changed.' -ForegroundColor Red
-        Write-Host '  Sign in to NewsCentral as a system administrator first (this migrates every team key into the secure store),' -ForegroundColor Red
-        Write-Host '  then run this script again. Files:' -ForegroundColor Red
-        $legacy | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
-        exit 1
-    }
-
     $usersFile = Join-Path (Join-Path $DataPath 'config') 'users.json'
     if (-not (Test-Path -LiteralPath $usersFile -PathType Leaf)) {
         throw "'$usersFile' does not exist. Initialize the environment in NewsCentral first."
@@ -161,11 +145,6 @@ try {
     $ownerRights = New-Object System.Security.Principal.SecurityIdentifier('S-1-3-4')
     $admins  = Resolve-Sid -Name $AdminsGroup  -What '-AdminsGroup'
     $authors = Resolve-Sid -Name $AuthorsGroup -What '-AuthorsGroup'
-    $signers = @{}
-    foreach ($team in $TeamSigners.Keys) {
-        if ($team -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "-TeamSigners key '$team' is not a valid team folder name." }
-        $signers[[string]$team] = Resolve-Sid -Name ([string]$TeamSigners[$team]) -What "-TeamSigners['$team']"
-    }
 
     $fullControlSids = @($system, $builtinAdmins, $admins)
     $containerFlags = $Inh::ContainerInherit -bor $Inh::ObjectInherit
@@ -186,29 +165,14 @@ try {
         if (-not (Test-Path -LiteralPath $keysRoot)) { New-Item -ItemType Directory -Path $keysRoot -Force | Out-Null }
     }
 
-    foreach ($team in $signers.Keys) {
-        $teamDir = Join-Path $keysRoot $team
-        if ($PSCmdlet.ShouldProcess($teamDir, "Grant Modify to $($TeamSigners[$team])")) {
-            if (-not (Test-Path -LiteralPath $teamDir)) { New-Item -ItemType Directory -Path $teamDir -Force | Out-Null }
-            $acl = Get-Acl -LiteralPath $teamDir
-            Clear-Acl -Acl $acl -Protect $false
-            $acl.SetAccessRuleProtection($false, $false)
-            $acl.AddAccessRule((New-Rule $signers[$team] $FS::Modify $containerFlags $Prop::None))
-            Set-Acl -LiteralPath $teamDir -AclObject $acl
-        }
-    }
-
-    if (Test-Path -LiteralPath $keysRoot) {
-        foreach ($dir in @(Get-ChildItem -LiteralPath $keysRoot -Directory -ErrorAction SilentlyContinue)) {
-            if (-not $signers.ContainsKey($dir.Name)) {
-                if ($PSCmdlet.ShouldProcess($dir.FullName, 'Remove explicit ACEs (team is not in -TeamSigners)')) {
-                    $acl = Get-Acl -LiteralPath $dir.FullName
-                    Clear-Acl -Acl $acl -Protect $false
-                    $acl.SetAccessRuleProtection($false, $false)
-                    Set-Acl -LiteralPath $dir.FullName -AclObject $acl
-                }
-            }
-        }
+    # keys\ : explicit rule for AuthorsGroup on top of the inherited SYSTEM/Administrators/AdminsGroup Full control.
+    # Existing keys\<team> folders are not touched.
+    if ($PSCmdlet.ShouldProcess($keysRoot, 'Grant AuthorsGroup Read (ReadAndExecute, folder and files)')) {
+        $acl = Get-Acl -LiteralPath $keysRoot
+        Clear-Acl -Acl $acl -Protect $false
+        $acl.SetAccessRuleProtection($false, $false)
+        $acl.AddAccessRule((New-Rule $authors $FS::ReadAndExecute $containerFlags $Prop::None))
+        Set-Acl -LiteralPath $keysRoot -AclObject $acl
     }
 
     # ---- config folder ----------------------------------------------------------
@@ -273,13 +237,7 @@ try {
                 & icacls.exe $target | Out-Host
             }
         }
-        foreach ($team in $signers.Keys) {
-            $teamDir = Join-Path (Join-Path $SecurePath 'keys') $team
-            Write-Host ''
-            Write-Host "icacls `"$teamDir`"" -ForegroundColor Cyan
-            & icacls.exe $teamDir | Out-Host
-        }
-        Write-Host ''
+        Write-Host 'Done. If the key file was readable by other users before, rotate the key in NewsCentral (Key Management).' -ForegroundColor Green
         Write-Host 'Done. Now rotate every team key in NewsCentral (Key Management): the old key files were readable by every author.' -ForegroundColor Green
     }
 }

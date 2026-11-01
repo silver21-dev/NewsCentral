@@ -256,20 +256,28 @@ public class TeamRole { public string TeamID; public List<string> Roles; }
 public class UsersCollection : IEntity { public List<User> Users { get; set; } }
 ```
 
-## TeamSigningKeys
+## EnvironmentSigningKeys
 
-Stored at `{teamFolderName}/team-signing.json` on the authoring tier only. Must never be written through `IBlobDistributionService` or synced to client machines.
+Stored at `{SecurePath}\keys\environment-signing.json` on the authoring tier only (one file per environment). Must never be written through `IBlobDistributionService` or synced to client machines. camelCase JSON, nulls omitted, indented.
 
 ```csharp
-public sealed class TeamSigningKeys
+public sealed class SigningKeyPair
 {
-    public string? PrivateKey { get; set; }         // Base64 PKCS#8 — authoring side only
-    public string? PublicKey { get; set; }           // Base64 SubjectPublicKeyInfo
-    public string? PublicKeyPrevious { get; set; }   // Base64 SPKI; optional; retained for the rotation window
+    public string? PrivateKey { get; set; }   // Base64 PKCS#8 — authoring side only
+    public string? PublicKey { get; set; }    // Base64 SubjectPublicKeyInfo
+    public DateTime? CreatedAt { get; set; }  // UTC; the Key Management page shows the age
+}
+
+public sealed class EnvironmentSigningKeys
+{
+    public SigningKeyPair? Current { get; set; }     // signs every index
+    public SigningKeyPair? Next { get; set; }        // prepared successor; never signs until activated
+    public string? PreviousPublicKey { get; set; }   // Base64 SPKI of the replaced key; kept for the rotation window
+    public DateTime? PreviousCreatedAt { get; set; }
 }
 ```
 
-Trust assumption: team content authors are trusted, and their processes are granted access to the team private key by design. `PublicKey` and `PublicKeyPrevious` are distributed to verifying components (NewsService, NewsViewer); `PrivateKey` stays on the authoring tier.
+Trust assumption: authors' sessions read this file to sign (AuthorsGroup read) and are trusted with it by design; only system administrators change it. The distributed values are the registry `Signing\PublicKey` / `Signing\PublicKeyPrevious`, derived by `EnvironmentKeyService.GpoTarget`; private keys stay on the authoring tier. Rotation: `docs/anti-tamper.md` §6.
 
 ## TeamIndexFile (index.json per team)
 

@@ -6,7 +6,7 @@ namespace NewsCentral.Security;
 public sealed record AclDriftWarning(string Area, string Path, string Message);
 
 /// <summary>
-/// Detects when the permissions scripts/Set-AuthoringAcl.ps1 should have applied are missing: the key store readable,
+/// Detects when the permissions scripts/Set-AuthoringAcl.ps1 should have applied are missing: the environment key readable,
 /// users.json writable, the config folder writable, or the audit log tamperable by a broad identity (Users, Everyone, Authenticated Users,
 /// INTERACTIVE - see <see cref="AclExposureEvaluator"/>). The app only WARNS; it never blocks and never sets an ACL.
 ///
@@ -74,16 +74,18 @@ public static class AuthoringAclChecks
     {
         var warnings = new List<AclDriftWarning>();
 
-        // Keys: the keys folder, and each team folder in it (a broad ACE on one team folder exposes that team's key).
+        // Keys: the keys folder and the environment key file. AuthorsGroup read is expected; only broad identities warn.
         var keysRoot = Path.Combine(securePath, "keys");
-        foreach (var folder in KeyFolders(securePath, keysRoot))
+        var keyFile = Path.Combine(keysRoot, EnvironmentKeyStore.FileName);
+        foreach (var target in new[] { keysRoot, keyFile })
         {
-            var exposure = Safe(() => KeysReadableByBroadIdentity(AclExposureEvaluator.Read(folder)));
+            if (!Directory.Exists(target) && !File.Exists(target)) continue;
+            var exposure = Safe(() => KeysReadableByBroadIdentity(AclExposureEvaluator.Read(target)));
             if (exposure != null)
             {
-                warnings.Add(new AclDriftWarning(AreaKeys, folder,
-                    $"The signing key folder {folder} can be read by {exposure.Identity}. Any author could copy a team's private key. " +
-                    "Run scripts/Set-AuthoringAcl.ps1, then rotate the team keys."));
+                warnings.Add(new AclDriftWarning(AreaKeys, target,
+                    $"The signing key {target} can be read by {exposure.Identity}. Any user could copy the environment private key. " +
+                    "Run scripts/Set-AuthoringAcl.ps1, then rotate the key."));
                 break;   // one warning for the keys area is enough
             }
         }
@@ -118,22 +120,6 @@ public static class AuthoringAclChecks
         }
 
         return warnings;
-    }
-
-    private static IEnumerable<string> KeyFolders(string securePath, string keysRoot)
-    {
-        if (Directory.Exists(keysRoot))
-        {
-            yield return keysRoot;
-            string[] teams;
-            try { teams = Directory.GetDirectories(keysRoot); }
-            catch { yield break; }
-            foreach (var team in teams) yield return team;
-        }
-        else if (Directory.Exists(securePath))
-        {
-            yield return securePath;
-        }
     }
 
     private static T? Safe<T>(Func<T?> read)

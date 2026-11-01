@@ -206,7 +206,7 @@ administrator) carries three settings beyond distribution:
 
 | Field | Default | Meaning |
 |---|---|---|
-| `securePath` | `{DataPath}\secure` | Root of the secure key store. Team signing keys live at `{securePath}\keys\{team}\team-signing.json`. Must be an absolute path. Changing it does **not** move existing keys. An environment without `environment.json` uses the default. |
+| `securePath` | `{DataPath}\secure` | Root of the secure key store. The environment signing key lives at `{securePath}\keys\environment-signing.json`. Must be an absolute path. Changing it does **not** move existing keys. An environment without `environment.json` uses the default. |
 | `auditPath` | `{DataPath}\audit` | Root of the audit log (`{auditPath}\{yyyy-MM}\{yyyy-MM-dd}_{MACHINE}_{windowsUser}.jsonl`). Must be an absolute path. |
 | `audit.enabled` | `true` | Whether events are recorded. The registry value `Audit\Enabled` (DWORD) overrides it; when the registry value is present the Environment Management toggle is locked ("set by policy"). |
 

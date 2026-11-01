@@ -113,7 +113,7 @@ Path-defining rows (`Company`) render their Default cell as `Contoso (build cons
 Non-scalar registry subtrees, rendered as sub-blocks below the config table.
 
 **NewsService and NewsViewer only** for teams/Signing/Entra — NewsCentral has none of those (its
-teams come from the data store, its signing keys from `team-signing.json`). **NewsCentral only**
+teams come from the data store, its signing keys from `environment-signing.json`). **NewsCentral only**
 (M3b) for the policy environment catalog below — NewsService and NewsViewer never project it.
 
 - **`teams\`** — list of team folder names (surfaced by `RegistryConfigurationProvider` as `teams:0…N`). Registry-only.

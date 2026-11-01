@@ -163,14 +163,16 @@ public sealed class AuthoringAclChecksTests : IDisposable
         var data = Path.Combine(_root, "data");
         var secure = Path.Combine(data, "secure");
         var audit = Path.Combine(data, "audit");
-        var keysTeam = Path.Combine(secure, "keys", "cz-its");
-        Directory.CreateDirectory(keysTeam);
+        var keysDir = Path.Combine(secure, "keys");
+        Directory.CreateDirectory(keysDir);
+        var keyFile = Path.Combine(keysDir, "environment-signing.json");
+        File.WriteAllText(keyFile, "{}");
         Directory.CreateDirectory(audit);
         Directory.CreateDirectory(Path.Combine(data, "config"));
         var usersFile = Path.Combine(data, "config", "users.json");
         File.WriteAllText(usersFile, "{}");
 
-        GrantUsers(new DirectoryInfo(keysTeam), FileSystemRights.ReadData);
+        GrantUsers(new FileInfo(keyFile), FileSystemRights.ReadData);
         GrantUsers(new FileInfo(usersFile), FileSystemRights.WriteData);
         GrantUsers(new DirectoryInfo(Path.Combine(data, "config")), FileSystemRights.CreateFiles);
         GrantUsers(new DirectoryInfo(audit), FileSystemRights.Delete);
@@ -180,10 +182,57 @@ public sealed class AuthoringAclChecksTests : IDisposable
         Assert.Equal(
             new[] { AuthoringAclChecks.AreaKeys, AuthoringAclChecks.AreaUsers, AuthoringAclChecks.AreaConfig, AuthoringAclChecks.AreaAudit },
             warnings.Select(w => w.Area).ToArray());
-        Assert.Contains("cz-its", warnings[0].Path);
+        Assert.Contains("environment-signing.json", warnings[0].Path);
+        Assert.Contains("environment private key", warnings[0].Message);
         Assert.All(warnings, w => Assert.Contains("Set-AuthoringAcl.ps1", w.Message));
     }
 
+
+    [Fact]
+    public void Check_AuthorsGroupReadOnKeys_IsNotAWarning_ButUsersReadIs()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var secure = Path.Combine(_root, "data2", "secure");
+        var keysDir = Path.Combine(secure, "keys");
+        Directory.CreateDirectory(keysDir);
+        var keyFile = Path.Combine(keysDir, "environment-signing.json");
+        File.WriteAllText(keyFile, "{}");
+        var me = WindowsIdentity.GetCurrent().User!;   // a named account that is not a broad identity
+
+        // A named account/group (stand-in for AuthorsGroup) reading the key is expected: no warning.
+        var info = new FileInfo(keyFile);
+        var sec = info.GetAccessControl();
+        sec.AddAccessRule(new FileSystemAccessRule(me, FileSystemRights.ReadAndExecute, AccessControlType.Allow));
+        info.SetAccessControl(sec);
+        var data = Path.Combine(_root, "data2");
+        Assert.DoesNotContain(
+            AuthoringAclChecks.Check(data, secure, Path.Combine(data, "audit")), x => x.Area == AuthoringAclChecks.AreaKeys);
+
+        // BUILTIN\Users reading it is a warning.
+        GrantUsers(new FileInfo(keyFile), FileSystemRights.ReadData);
+        var warnings = AuthoringAclChecks.Check(Path.Combine(_root, "data2"), secure, Path.Combine(_root, "data2", "audit"));
+
+        var w = Assert.Single(warnings, x => x.Area == AuthoringAclChecks.AreaKeys);
+        Assert.Equal(keyFile, w.Path);
+        Assert.StartsWith($"The signing key {keyFile} can be read by ", w.Message);
+        Assert.EndsWith("Run scripts/Set-AuthoringAcl.ps1, then rotate the key.", w.Message);
+    }
+
+    [Fact]
+    public void Check_LeftoverTeamKeyFolders_AreNoLongerEnumerated()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var secure = Path.Combine(_root, "data3", "secure");
+        var oldTeam = Path.Combine(secure, "keys", "cz-its");
+        Directory.CreateDirectory(oldTeam);
+        GrantUsers(new DirectoryInfo(oldTeam), FileSystemRights.ReadData);
+
+        var warnings = AuthoringAclChecks.Check(Path.Combine(_root, "data3"), secure, Path.Combine(_root, "data3", "audit"));
+
+        Assert.DoesNotContain(warnings, x => x.Path.Contains("cz-its"));
+    }
     [Fact]
     public void Check_MissingAssets_ProduceNoWarnings_AndDoNotThrow()
     {

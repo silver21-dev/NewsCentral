@@ -18,37 +18,50 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <data name="PageTitle" xml:space="preserve"><value>Gestion des clés</value></data>
-  <data name="PageDescription" xml:space="preserve"><value>Générez, consultez et faites pivoter la paire de clés de signature de l'équipe actuelle.</value></data>
-  <data name="NoTeamSelected" xml:space="preserve"><value>Sélectionnez d'abord une équipe.</value></data>
+  <data name="PageDescription" xml:space="preserve"><value>Gérez la clé de signature de l'environnement : générez-la et faites-la pivoter en trois étapes sans que les clients rejettent le nouveau contenu.</value></data>
   <data name="AccessDenied" xml:space="preserve"><value>Accès refusé</value></data>
-  <data name="AccessDeniedMessage" xml:space="preserve"><value>Vous devez être administrateur de l'équipe pour gérer les clés de signature.</value></data>
-  <data name="CurrentKeysSection" xml:space="preserve"><value>Clés actuelles</value></data>
-  <data name="CurrentTeam" xml:space="preserve"><value>Équipe actuelle</value></data>
-  <data name="NoKeyConfigured" xml:space="preserve"><value>Aucune clé de signature configurée pour cette équipe.</value></data>
-  <data name="CurrentPublicKey" xml:space="preserve"><value>Clé publique actuelle</value></data>
+  <data name="AccessDeniedMessage" xml:space="preserve"><value>Seul un administrateur système peut gérer la clé de signature.</value></data>
+  <data name="NoKeySection" xml:space="preserve"><value>Clé de signature de l'environnement</value></data>
+  <data name="NoKeyConfigured" xml:space="preserve"><value>Aucune clé de signature de l'environnement n'existe encore. Les index sont publiés sans signature tant qu'aucune n'est générée.</value></data>
+  <data name="GenerateDescription" xml:space="preserve"><value>Générez la première clé. Copiez ensuite sa clé publique dans les valeurs de registre affichées sur cette page.</value></data>
+  <data name="Generate" xml:space="preserve"><value>Générer la clé</value></data>
+  <data name="CurrentKey" xml:space="preserve"><value>Clé actuelle</value></data>
+  <data name="NextKey" xml:space="preserve"><value>Clé suivante (préparée, pas encore utilisée pour signer)</value></data>
+  <data name="PreviousKey" xml:space="preserve"><value>Clé précédente (partie publique uniquement, toujours approuvée par les clients)</value></data>
+  <data name="KeyId" xml:space="preserve"><value>ID de clé</value></data>
+  <data name="PublicKey" xml:space="preserve"><value>Clé publique</value></data>
+  <data name="AgeUnknown" xml:space="preserve"><value>date de création inconnue</value></data>
+  <data name="AgeToday" xml:space="preserve"><value>créée le {0}, aujourd'hui</value></data>
+  <data name="AgeOneDay" xml:space="preserve"><value>créée le {0}, il y a 1 jour</value></data>
+  <data name="AgeDays" xml:space="preserve"><value>créée le {0}, il y a {1} jours</value></data>
   <data name="CopyForGPO" xml:space="preserve"><value>Copier pour GPO</value></data>
   <data name="Copied" xml:space="preserve"><value>Copié dans le presse-papiers.</value></data>
   <data name="CopyFailed" xml:space="preserve"><value>Échec de la copie — veuillez copier le texte manuellement.</value></data>
-  <data name="CurrentPrivateKey" xml:space="preserve"><value>Clé privée actuelle</value></data>
-  <data name="PrivateKeyTruncatedHint" xml:space="preserve"><value>La clé privée est affichée tronquée et n'est jamais affichée en entier.</value></data>
-  <data name="PreviousPublicKey" xml:space="preserve"><value>Clé publique précédente</value></data>
-  <data name="GenerateSection" xml:space="preserve"><value>Générer une nouvelle paire de clés</value></data>
-  <data name="GenerateDescription" xml:space="preserve"><value>Générez une nouvelle paire de clés ECDSA. Elle est conservée localement et n'est pas enregistrée tant que vous ne l'appliquez pas.</value></data>
-  <data name="GenerateNewKeyPair" xml:space="preserve"><value>Générer une nouvelle paire de clés</value></data>
-  <data name="NotYetApplied" xml:space="preserve"><value>Nouvelle paire de clés générée — pas encore appliquée. Cliquez sur Appliquer pour l'enregistrer.</value></data>
-  <data name="NotYetAppliedHint" xml:space="preserve"><value>Conservée en mémoire — pas enregistrée sur le disque tant que vous ne cliquez pas sur Appliquer.</value></data>
-  <data name="NewPublicKey" xml:space="preserve"><value>Nouvelle clé publique</value></data>
-  <data name="NewPrivateKey" xml:space="preserve"><value>Nouvelle clé privée</value></data>
-  <data name="Applying" xml:space="preserve"><value>Application en cours...</value></data>
-  <data name="Apply" xml:space="preserve"><value>Appliquer</value></data>
-  <data name="ApplySuccess" xml:space="preserve"><value>Nouvelle paire de clés appliquée et enregistrée.</value></data>
-  <data name="RotationReminder" xml:space="preserve"><value>N'oubliez pas de déployer la nouvelle clé publique sur les clients avant de republier.</value></data>
-  <data name="ApplyError" xml:space="preserve"><value>Échec de l'application de la nouvelle paire de clés</value></data>
-  <data name="RepublishSection" xml:space="preserve"><value>Republier</value></data>
-  <data name="RepublishReminder" xml:space="preserve"><value>Déployez la nouvelle clé publique sur les clients (et conservez l'ancienne) avant de republier, sinon les clients rejetteront l'index jusqu'à ce qu'ils reçoivent la nouvelle clé.</value></data>
-  <data name="Republishing" xml:space="preserve"><value>Republication en cours...</value></data>
-  <data name="RepublishIndex" xml:space="preserve"><value>Republier l'index</value></data>
-  <data name="RepublishSuccess" xml:space="preserve"><value>Index republié avec succès pour {0}.</value></data>
-  <data name="RepublishError" xml:space="preserve"><value>Échec de la republication de l'index</value></data>
-  <data name="LoadError" xml:space="preserve"><value>Erreur lors du chargement des clés de signature</value></data>
+  <data name="GpoSection" xml:space="preserve"><value>Valeurs de registre à déployer (GPO)</value></data>
+  <data name="GpoRemovePrevious" xml:space="preserve"><value>supprimer PublicKeyPrevious</value></data>
+  <data name="StepCurrentOnly" xml:space="preserve"><value>Les clients ne font confiance qu'à la clé actuelle. Pour effectuer une rotation, préparez une clé suivante.</value></data>
+  <data name="StepNextPrepared" xml:space="preserve"><value>Une clé suivante est préparée. Déployez ces valeurs pour que les clients approuvent les deux clés, puis activez la clé suivante. La signature utilise toujours la clé actuelle.</value></data>
+  <data name="StepPreviousKept" xml:space="preserve"><value>La clé suivante est active et l'ancienne est conservée comme précédente. Ces valeurs sont déjà déployées. Une fois toutes les équipes régénérées et récupérées, retirez la clé précédente et supprimez PublicKeyPrevious.</value></data>
+  <data name="ActionsSection" xml:space="preserve"><value>Actions</value></data>
+  <data name="PrepareNext" xml:space="preserve"><value>Préparer la clé suivante</value></data>
+  <data name="ActivateNext" xml:space="preserve"><value>Activer la clé suivante</value></data>
+  <data name="DiscardNext" xml:space="preserve"><value>Abandonner la clé suivante</value></data>
+  <data name="RetirePrevious" xml:space="preserve"><value>Retirer la clé précédente</value></data>
+  <data name="Confirm" xml:space="preserve"><value>Confirmer</value></data>
+  <data name="Cancel" xml:space="preserve"><value>Annuler</value></data>
+  <data name="PrepareConfirm" xml:space="preserve"><value>Créer une clé suivante. La signature continue avec la clé actuelle jusqu'à l'activation de la suivante.</value></data>
+  <data name="ActivateConfirm" xml:space="preserve"><value>N'activez qu'une fois que toutes les machines ont reçu les valeurs de registre ci-dessus. Lancez ensuite Gestion des index → Régénérer toutes les équipes.</value></data>
+  <data name="DiscardConfirm" xml:space="preserve"><value>Abandonner la clé suivante préparée. Sa clé privée est supprimée et ne peut pas être récupérée.</value></data>
+  <data name="RetireConfirm" xml:space="preserve"><value>Ne retirez qu'une fois toutes les équipes régénérées avec la clé actuelle et récupérées par toutes les machines.</value></data>
+  <data name="GeneratedOk" xml:space="preserve"><value>Clé générée. Déployez sa clé publique dans les valeurs de registre ci-dessous, puis régénérez toutes les équipes.</value></data>
+  <data name="PreparedOk" xml:space="preserve"><value>Clé suivante préparée. Déployez les valeurs de registre ci-dessous ; la signature utilise toujours la clé actuelle.</value></data>
+  <data name="ActivatedOk" xml:space="preserve"><value>Clé suivante activée. Régénérez maintenant tous les index d'équipe pour qu'ils soient signés avec elle.</value></data>
+  <data name="DiscardedOk" xml:space="preserve"><value>Clé suivante abandonnée.</value></data>
+  <data name="RetiredOk" xml:space="preserve"><value>Clé précédente retirée. Supprimez PublicKeyPrevious des valeurs de registre.</value></data>
+  <data name="GoToIndexManagement" xml:space="preserve"><value>Aller à la gestion des index</value></data>
+  <data name="UnreadableTitle" xml:space="preserve"><value>Clé illisible.</value></data>
+  <data name="UnreadableMessage" xml:space="preserve"><value>La clé de signature de l'environnement existe ou peut exister, mais n'a pas pu être lue : {0}. La publication est bloquée jusqu'au rétablissement de l'accès. Aucune action n'est proposée, car remplacer une clé illisible empêcherait tous les appareils qui lui font confiance de vérifier le contenu.</value></data>
+  <data name="Reload" xml:space="preserve"><value>Recharger</value></data>
+  <data name="LoadError" xml:space="preserve"><value>Erreur lors du chargement de la clé de signature</value></data>
+  <data name="ActionError" xml:space="preserve"><value>L'action a échoué</value></data>
 </root>

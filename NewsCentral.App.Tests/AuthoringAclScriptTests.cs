@@ -67,30 +67,15 @@ public sealed class AuthoringAclScriptTests : IDisposable
         $"-DataPath '{_data}' -AdminsGroup 'BUILTIN\\Administrators' -AuthorsGroup 'BUILTIN\\Users'";
 
     [Fact]
-    public void RefusesWhileATeamSigningKeyIsStillUnderTheDataPath_AndChangesNothing()
-    {
-        if (_powershell is null) return;
-        var legacy = Path.Combine(_data, "cz-its", "team-signing.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(legacy)!);
-        File.WriteAllText(legacy, "{}");
-
-        var (code, output) = Run(Common);
-
-        Assert.Equal(1, code);
-        Assert.Contains(legacy, output);
-        Assert.False(Directory.Exists(Path.Combine(_data, "secure")));
-        Assert.False(Directory.Exists(Path.Combine(_data, "audit")));
-    }
-
-    [Fact]
     public void WhatIf_ExitsZero_AndCreatesNothing()
     {
         if (_powershell is null) return;
 
-        var (code, output) = Run(Common + " -TeamSigners @{ 'cz-its' = 'BUILTIN\\Users' } -WhatIf");
+        var (code, output) = Run(Common + " -WhatIf");
 
         Assert.Equal(0, code);
         Assert.Contains("What if", output);
+        Assert.Contains("Grant AuthorsGroup Read", output);
         Assert.False(Directory.Exists(Path.Combine(_data, "secure")));
         Assert.False(Directory.Exists(Path.Combine(_data, "audit")));
     }

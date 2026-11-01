@@ -5,16 +5,17 @@ using NewsCentral.Security;
 
 namespace NewsCentral.Shared.Tests;
 
-/// <summary>Key events carry the public-key fingerprint only - never any key material.</summary>
+/// <summary>Key events written to the real audit log carry public-key fingerprints only - never any key material.</summary>
 public sealed class KeyAuditTests : SecureStoreTestBase
 {
     private string AuditRoot => Path.Combine(Root, "audit");
 
-    private TeamKeyService Service(Func<string, ISecureStorage>? factory = null)
+    private EnvironmentKeyService Service(Func<string, ISecureStorage>? factory = null)
     {
         var settings = new AuditSettings(true, AuditRoot, false, "env");
         var audit = new AuditLog(() => Task.FromResult(settings), new AuditContext { AppUser = "admin" }, "ws01", "jdoe");
-        return new TeamKeyService(() => DataPath, () => Task.FromResult(new SecureRootResult(SecurePath, null)), factory, audit);
+        return new EnvironmentKeyService(
+            () => Task.FromResult(new SecureRootResult(SecurePath, null)), () => true, factory, audit);
     }
 
     private List<JsonElement> Events() =>
@@ -28,61 +29,51 @@ public sealed class KeyAuditTests : SecureStoreTestBase
         string.Join("\n", Directory.GetFiles(AuditRoot, "*.jsonl", SearchOption.AllDirectories).SelectMany(File.ReadAllLines));
 
     [Fact]
-    public async Task FirstKey_IsKeyGenerated_ReplacingItIsKeyRotated_FingerprintOnly()
+    public async Task Lifecycle_IsRecordedInTheAuditFile_FingerprintOnly()
     {
         var svc = Service();
-
-        await svc.SaveAsync("cz-its", Keys("one"));
-        await svc.SaveAsync("cz-its", Keys("two"));
+        var generated = await svc.GenerateAsync(null);
+        var id = KeyFingerprint.Of(generated.Current!.PublicKey);
+        var prepared = await svc.PrepareNextAsync(id);
+        var rotated = await svc.ActivateNextAsync(id);
+        await svc.RetirePreviousAsync(KeyFingerprint.Of(rotated.Current!.PublicKey));
 
         var events = Events();
-        Assert.Equal(new[] { "KeyGenerated", "KeyRotated" }, events.Select(e => e.GetProperty("event").GetString()).ToArray());
-        Assert.Equal("cz-its", events[0].GetProperty("target").GetString());
-        Assert.Equal($"fingerprint={TeamKeyStore.Fingerprint(Keys("one"))}", events[0].GetProperty("detail").GetString());
+        Assert.Equal(new[] { "KeyGenerated", "KeyPrepared", "KeyRotated", "KeyRetired" },
+            events.Select(e => e.GetProperty("event").GetString()).ToArray());
+        Assert.All(events, e => Assert.Equal("Success", e.GetProperty("outcome").GetString()));
+        Assert.Equal($"fingerprint={id}", events[0].GetProperty("detail").GetString());
 
         var raw = RawAudit();
-        Assert.DoesNotContain("priv-one", raw);
-        Assert.DoesNotContain("priv-two", raw);
-        Assert.DoesNotContain("pub-one", raw);   // the fingerprint, not even the public key
+        foreach (var key in new[] { generated.Current, prepared.Next })
+        {
+            Assert.DoesNotContain(key!.PrivateKey!, raw);
+            Assert.DoesNotContain(key.PublicKey!, raw);   // the fingerprint, not even the public key
+        }
     }
 
     [Fact]
-    public async Task Migration_IsRecordedAsKeyMigrated_WithFingerprint()
+    public async Task RefusedAction_OverAnUnreadableKey_IsRecordedAsFailure()
     {
-        WriteLegacy("cz-its", Keys("a"));
+        Directory.CreateDirectory(Path.GetDirectoryName(KeyFilePath)!);
+        File.WriteAllText(KeyFilePath, "{ corrupt");
 
-        await Service().LoadAsync("cz-its");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Service().GenerateAsync(null));
 
         var e = Assert.Single(Events());
-        Assert.Equal("KeyMigrated", e.GetProperty("event").GetString());
-        Assert.Equal("Success", e.GetProperty("outcome").GetString());
-        Assert.Equal($"fingerprint={TeamKeyStore.Fingerprint(Keys("a"))}", e.GetProperty("detail").GetString());
-        Assert.DoesNotContain("priv-a", RawAudit());
+        Assert.Equal("KeyGenerated", e.GetProperty("event").GetString());
+        Assert.Equal("Failure", e.GetProperty("outcome").GetString());
     }
 
     [Fact]
-    public async Task FailedMigration_IsRecordedAsFailure()
+    public async Task FailedWrite_IsRecordedAsFailure_AndLeavesNoKeyFile()
     {
-        WriteLegacy("cz-its", Keys("a"));
         var svc = Service(root => new FaultyStorage(new LocalSecureStorage(root)) { WriteFault = new UnauthorizedAccessException() });
 
-        await svc.LoadAsync("cz-its");
-
-        var e = Assert.Single(Events());
-        Assert.Equal("KeyMigrated", e.GetProperty("event").GetString());
-        Assert.Equal("Failure", e.GetProperty("outcome").GetString());
-        Assert.DoesNotContain("priv-a", RawAudit());
-    }
-
-    [Fact]
-    public async Task RefusedSave_OverAnUnreadableKey_IsRecordedAsFailure()
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(NewPath("cz-its"))!);
-        File.WriteAllText(NewPath("cz-its"), "{ corrupt");
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Service().SaveAsync("cz-its", Keys("n")));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => svc.GenerateAsync(null));
 
         var e = Assert.Single(Events());
         Assert.Equal("Failure", e.GetProperty("outcome").GetString());
+        Assert.False(File.Exists(KeyFilePath));
     }
 }

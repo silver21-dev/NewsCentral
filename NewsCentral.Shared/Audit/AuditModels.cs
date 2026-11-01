@@ -24,7 +24,9 @@ public static class AuditEvents
 
     public const string KeyGenerated = nameof(KeyGenerated);
     public const string KeyRotated = nameof(KeyRotated);
-    public const string KeyMigrated = nameof(KeyMigrated);
+    public const string KeyPrepared = nameof(KeyPrepared);
+    public const string KeyDiscarded = nameof(KeyDiscarded);
+    public const string KeyRetired = nameof(KeyRetired);
 
     public const string PresentationCreated = nameof(PresentationCreated);
     public const string PresentationDuplicated = nameof(PresentationDuplicated);

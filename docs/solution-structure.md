@@ -35,7 +35,7 @@ NewsCentral.Shared\
 │   ├── Assignment.cs                  implements ISignable
 │   ├── SessionTelemetry.cs            cross-component DTO; implements ISignable
 │   ├── Team.cs                        Team, TeamsCollection
-│   ├── TeamSigningKeys.cs             ECDSA key pair for a team: PrivateKey (PKCS#8), PublicKey, PublicKeyPrevious (SPKI)
+│   ├── EnvironmentSigningKeys.cs      SigningKeyPair (PrivateKey PKCS#8, PublicKey SPKI, CreatedAt) and EnvironmentSigningKeys (Current, Next, PreviousPublicKey, PreviousCreatedAt) — the environment signing key
 │   ├── User.cs                        User, TeamRole, UsersCollection
 │   ├── ResolvedTeams.cs               ResolvedTeamsFile, ResolvedTeamEntry, ResolvedTeamState, ResolvedTeamSource — resolved-teams.json (Entra dynamic teams)
 │   └── IndexFile\

@@ -32,25 +32,17 @@ internal sealed class FaultyStorage : ISecureStorage
 public abstract class SecureStoreTestBase : IDisposable
 {
     protected readonly string Root = Path.Combine(Path.GetTempPath(), "nc-secure-" + Guid.NewGuid().ToString("N"));
-    protected string DataPath => Path.Combine(Root, "data");
     protected string SecurePath => Path.Combine(Root, "secure");
 
-    protected static TeamSigningKeys Keys(string tag = "a") => new()
+    /// <summary>A pair with a real P-256 key (the service tests use real keys; the store tests only need valid Base64).</summary>
+    protected static SigningKeyPair Pair(string tag = "a", DateTime? createdAt = null) => new()
     {
         PrivateKey = "priv-" + tag,
-        PublicKey = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("pub-" + tag))   // valid Base64: the fingerprint decodes it
+        PublicKey = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("pub-" + tag)),   // valid Base64: the fingerprint decodes it
+        CreatedAt = createdAt
     };
 
-    protected string WriteLegacy(string team, TeamSigningKeys keys)
-    {
-        var path = TeamKeyMigrator.LegacyPath(DataPath, team);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllBytes(path, TeamKeyStore.Serialize(keys));
-        return path;
-    }
-
-    protected string NewPath(string team) =>
-        Path.Combine(SecurePath, "keys", team, "team-signing.json");
+    protected string KeyFilePath => Path.Combine(SecurePath, "keys", "environment-signing.json");
 
     public void Dispose()
     {
@@ -58,38 +50,63 @@ public abstract class SecureStoreTestBase : IDisposable
     }
 }
 
-public sealed class TeamKeyStoreTests : SecureStoreTestBase
+public sealed class EnvironmentKeyStoreTests : SecureStoreTestBase
 {
-    private TeamKeyStore Store(ISecureStorage? s = null) => new(s ?? new LocalSecureStorage(SecurePath));
+    private EnvironmentKeyStore Store(ISecureStorage? s = null) => new(s ?? new LocalSecureStorage(SecurePath));
 
     [Fact]
     public async Task AbsentFile_IsNotConfigured()
     {
-        var r = await Store().LoadAsync("cz-its");
+        var r = await Store().LoadAsync();
 
         Assert.Equal(KeyLoadOutcome.NotConfigured, r.Outcome);
         Assert.Null(r.Keys);
     }
 
     [Fact]
-    public async Task ExistingFile_IsLoaded_AtTheKeysSubfolder()
+    public async Task ExistingFile_IsLoaded_AtTheKeysSubfolder_WithAllThreeSlots()
     {
-        await Store().SaveAsync("cz-its", Keys("x"));
+        var created = new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc);
+        await Store().SaveAsync(new EnvironmentSigningKeys
+        {
+            Current = Pair("c", created),
+            Next = Pair("n", created),
+            PreviousPublicKey = "cHJldg==",
+            PreviousCreatedAt = created
+        });
 
-        var r = await Store().LoadAsync("cz-its");
+        var r = await Store().LoadAsync();
 
         Assert.Equal(KeyLoadOutcome.Loaded, r.Outcome);
-        Assert.Equal("priv-x", r.Keys!.PrivateKey);
-        Assert.True(File.Exists(NewPath("cz-its")));
+        Assert.Equal("priv-c", r.Keys!.Current!.PrivateKey);
+        Assert.Equal(created, r.Keys.Current.CreatedAt);
+        Assert.Equal("priv-n", r.Keys.Next!.PrivateKey);
+        Assert.Equal("cHJldg==", r.Keys.PreviousPublicKey);
+        Assert.Equal(created, r.Keys.PreviousCreatedAt);
+        Assert.True(File.Exists(KeyFilePath));
+    }
+
+    [Fact]
+    public async Task Json_IsCamelCase_Indented_AndOmitsNulls()
+    {
+        await Store().SaveAsync(new EnvironmentSigningKeys { Current = Pair("c") });
+
+        var text = await File.ReadAllTextAsync(KeyFilePath);
+
+        Assert.Contains("\"current\"", text);
+        Assert.Contains("\"privateKey\"", text);
+        Assert.DoesNotContain("\"next\"", text);
+        Assert.DoesNotContain("previousPublicKey", text);
+        Assert.Contains("\n", text);   // indented
     }
 
     [Fact]
     public async Task ParseError_IsUnreadable_NotNotConfigured()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(NewPath("cz-its"))!);
-        File.WriteAllText(NewPath("cz-its"), "{ not json");
+        Directory.CreateDirectory(Path.GetDirectoryName(KeyFilePath)!);
+        File.WriteAllText(KeyFilePath, "{ not json");
 
-        var r = await Store().LoadAsync("cz-its");
+        var r = await Store().LoadAsync();
 
         Assert.Equal(KeyLoadOutcome.Unreadable, r.Outcome);
         Assert.Contains("parsed", r.Reason);
@@ -98,10 +115,10 @@ public sealed class TeamKeyStoreTests : SecureStoreTestBase
     [Fact]
     public async Task JsonNull_IsUnreadable()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(NewPath("cz-its"))!);
-        File.WriteAllText(NewPath("cz-its"), "null");
+        Directory.CreateDirectory(Path.GetDirectoryName(KeyFilePath)!);
+        File.WriteAllText(KeyFilePath, "null");
 
-        Assert.Equal(KeyLoadOutcome.Unreadable, (await Store().LoadAsync("cz-its")).Outcome);
+        Assert.Equal(KeyLoadOutcome.Unreadable, (await Store().LoadAsync()).Outcome);
     }
 
     [Fact]
@@ -109,7 +126,7 @@ public sealed class TeamKeyStoreTests : SecureStoreTestBase
     {
         var storage = new FaultyStorage(new LocalSecureStorage(SecurePath)) { ReadFault = new UnauthorizedAccessException() };
 
-        var r = await Store(storage).LoadAsync("cz-its");
+        var r = await Store(storage).LoadAsync();
 
         Assert.Equal(KeyLoadOutcome.Unreadable, r.Outcome);
         Assert.Equal("access denied", r.Reason);
@@ -120,30 +137,26 @@ public sealed class TeamKeyStoreTests : SecureStoreTestBase
     {
         var storage = new FaultyStorage(new LocalSecureStorage(SecurePath)) { ReadFault = new IOException("disk gone") };
 
-        var r = await Store(storage).LoadAsync("cz-its");
+        var r = await Store(storage).LoadAsync();
 
         Assert.Equal(KeyLoadOutcome.Unreadable, r.Outcome);
         Assert.Contains("disk gone", r.Reason);
     }
 
-    [Theory]
-    [InlineData("..")]
-    [InlineData("a/b")]
-    [InlineData("a\\b")]
-    [InlineData("")]
-    public async Task UnsafeTeamName_IsUnreadable(string team)
-    {
-        Assert.Equal(KeyLoadOutcome.Unreadable, (await Store().LoadAsync(team)).Outcome);
-    }
-
     [Fact]
-    public void Fingerprint_IsDerivedFromThePublicKeyOnly()
+    public void Fingerprint_IsDerivedFromTheCurrentPublicKeyOnly()
     {
-        var f = TeamKeyStore.Fingerprint(new TeamSigningKeys { PrivateKey = "SECRET", PublicKey = "cHVi" });
+        var f = EnvironmentKeyStore.Fingerprint(new EnvironmentSigningKeys
+        {
+            Current = new SigningKeyPair { PrivateKey = "SECRET", PublicKey = "cHVi" },
+            Next = Pair("other")
+        });
 
         Assert.Equal(16, f!.Length);
         Assert.DoesNotContain("SECRET", f);
-        Assert.Null(TeamKeyStore.Fingerprint(new TeamSigningKeys { PrivateKey = "SECRET" }));
+        Assert.Equal(KeyFingerprint.Of("cHVi"), f);
+        Assert.Null(EnvironmentKeyStore.Fingerprint(new EnvironmentSigningKeys { Current = new SigningKeyPair { PrivateKey = "SECRET" } }));
+        Assert.Null(EnvironmentKeyStore.Fingerprint(new EnvironmentSigningKeys { Next = Pair("n") }));
     }
 }
 
@@ -152,7 +165,7 @@ public sealed class SigningKeyGateTests
     [Fact]
     public void Unreadable_Blocks_NeverUnsigned()
     {
-        var d = SigningKeyGate.Decide(TeamKeyLoadResult.Unreadable("access denied"));
+        var d = SigningKeyGate.Decide(SigningKeyLoadResult.Unreadable("access denied"));
 
         Assert.Equal(SigningAction.Block, d.Action);
         Assert.Equal("access denied", d.BlockReason);
@@ -161,256 +174,48 @@ public sealed class SigningKeyGateTests
     [Fact]
     public void NotConfigured_KeepsTodaysBehaviour_Unsigned()
     {
-        Assert.Equal(SigningAction.PublishUnsigned, SigningKeyGate.Decide(TeamKeyLoadResult.NotConfigured()).Action);
+        Assert.Equal(SigningAction.PublishUnsigned, SigningKeyGate.Decide(SigningKeyLoadResult.NotConfigured()).Action);
     }
 
     [Fact]
-    public void LoadedWithPrivateKey_Signs()
+    public void LoadedWithCurrentPrivateKey_SignsWithCurrent()
     {
-        var d = SigningKeyGate.Decide(TeamKeyLoadResult.Loaded(new TeamSigningKeys { PrivateKey = "p", PublicKey = "q" }));
+        var d = SigningKeyGate.Decide(SigningKeyLoadResult.Loaded(new EnvironmentSigningKeys
+        {
+            Current = new SigningKeyPair { PrivateKey = "p", PublicKey = "q" }
+        }));
 
         Assert.Equal(SigningAction.Sign, d.Action);
-        Assert.Equal("p", d.Keys!.PrivateKey);
+        Assert.Equal("p", d.Key!.PrivateKey);
+    }
+
+    [Fact]
+    public void NextIsNeverUsedForSigning()
+    {
+        var withNext = SigningKeyGate.Decide(SigningKeyLoadResult.Loaded(new EnvironmentSigningKeys
+        {
+            Current = new SigningKeyPair { PrivateKey = "cur", PublicKey = "q" },
+            Next = new SigningKeyPair { PrivateKey = "next", PublicKey = "r" }
+        }));
+        Assert.Equal("cur", withNext.Key!.PrivateKey);
+
+        // Only a Next, no Current: nothing to sign with, so the index is not signed with Next either.
+        var onlyNext = SigningKeyGate.Decide(SigningKeyLoadResult.Loaded(new EnvironmentSigningKeys
+        {
+            Next = new SigningKeyPair { PrivateKey = "next", PublicKey = "r" }
+        }));
+        Assert.Equal(SigningAction.PublishUnsigned, onlyNext.Action);
+        Assert.Null(onlyNext.Key);
     }
 
     [Fact]
     public void LoadedWithoutPrivateKey_IsAsToday_Unsigned()
     {
         Assert.Equal(SigningAction.PublishUnsigned,
-            SigningKeyGate.Decide(TeamKeyLoadResult.Loaded(new TeamSigningKeys { PublicKey = "q" })).Action);
-    }
-}
-
-public sealed class TeamKeyMigratorTests : SecureStoreTestBase
-{
-    [Fact]
-    public async Task Migrates_CopyVerified_ThenOldDeleted()
-    {
-        var old = WriteLegacy("cz-its", Keys("a"));
-        var source = File.ReadAllBytes(old);
-
-        var r = await TeamKeyMigrator.MigrateAsync(DataPath, "cz-its", new LocalSecureStorage(SecurePath));
-
-        Assert.Equal(KeyMigrationStatus.Migrated, r.Status);
-        Assert.False(File.Exists(old));
-        Assert.Equal(source, File.ReadAllBytes(NewPath("cz-its")));
-        Assert.NotNull(r.Fingerprint);
-    }
-
-    [Fact]
-    public async Task NoOldFile_NothingToMigrate()
-    {
-        var r = await TeamKeyMigrator.MigrateAsync(DataPath, "cz-its", new LocalSecureStorage(SecurePath));
-
-        Assert.Equal(KeyMigrationStatus.NothingToMigrate, r.Status);
-    }
-
-    [Fact]
-    public async Task WriteFailure_KeepsOldFile()
-    {
-        var old = WriteLegacy("cz-its", Keys("a"));
-        var storage = new FaultyStorage(new LocalSecureStorage(SecurePath)) { WriteFault = new UnauthorizedAccessException() };
-
-        var r = await TeamKeyMigrator.MigrateAsync(DataPath, "cz-its", storage);
-
-        Assert.Equal(KeyMigrationStatus.Failed, r.Status);
-        Assert.Contains("access denied", r.Detail);
-        Assert.True(File.Exists(old));
-        Assert.False(File.Exists(NewPath("cz-its")));
-    }
-
-    [Fact]
-    public async Task CopyThatDiffersFromSource_FailsVerification_KeepsOldFile_RemovesBadCopy()
-    {
-        var old = WriteLegacy("cz-its", Keys("a"));
-        var storage = new FaultyStorage(new LocalSecureStorage(SecurePath))
-        {
-            // Still valid JSON, so only the byte comparison can catch it.
-            CorruptOnWrite = b => Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(b) + " ")
-        };
-
-        var r = await TeamKeyMigrator.MigrateAsync(DataPath, "cz-its", storage);
-
-        Assert.Equal(KeyMigrationStatus.Failed, r.Status);
-        Assert.Contains("differs", r.Detail);
-        Assert.True(File.Exists(old));
-        Assert.False(File.Exists(NewPath("cz-its")));
-    }
-
-    [Fact]
-    public async Task CopyThatDoesNotParse_FailsVerification_KeepsOldFile()
-    {
-        var old = WriteLegacy("cz-its", Keys("a"));
-        var storage = new FaultyStorage(new LocalSecureStorage(SecurePath)) { CorruptOnWrite = _ => "garbage"u8.ToArray() };
-
-        var r = await TeamKeyMigrator.MigrateAsync(DataPath, "cz-its", storage);
-
-        Assert.Equal(KeyMigrationStatus.Failed, r.Status);
-        Assert.True(File.Exists(old));
-    }
-
-    [Fact]
-    public async Task SecureStoreNotReadable_Fails_KeepsOldFile()
-    {
-        var old = WriteLegacy("cz-its", Keys("a"));
-        var storage = new FaultyStorage(new LocalSecureStorage(SecurePath)) { ReadFault = new UnauthorizedAccessException() };
-
-        var r = await TeamKeyMigrator.MigrateAsync(DataPath, "cz-its", storage);
-
-        Assert.Equal(KeyMigrationStatus.Failed, r.Status);
-        Assert.True(File.Exists(old));
-    }
-
-    [Fact]
-    public async Task BothExistAndDiffer_IsConflict_NothingOverwrittenOrDeleted()
-    {
-        var old = WriteLegacy("cz-its", Keys("old"));
-        await new TeamKeyStore(new LocalSecureStorage(SecurePath)).SaveAsync("cz-its", Keys("new"));
-        var newBytes = File.ReadAllBytes(NewPath("cz-its"));
-
-        var r = await TeamKeyMigrator.MigrateAsync(DataPath, "cz-its", new LocalSecureStorage(SecurePath));
-
-        Assert.Equal(KeyMigrationStatus.Conflict, r.Status);
-        Assert.True(File.Exists(old));
-        Assert.Equal(newBytes, File.ReadAllBytes(NewPath("cz-its")));
-    }
-
-    [Fact]
-    public async Task BothExistAndIdentical_FinishesTheJob_DeletesOld()
-    {
-        var old = WriteLegacy("cz-its", Keys("a"));
-        Directory.CreateDirectory(Path.GetDirectoryName(NewPath("cz-its"))!);
-        File.Copy(old, NewPath("cz-its"));
-
-        var r = await TeamKeyMigrator.MigrateAsync(DataPath, "cz-its", new LocalSecureStorage(SecurePath));
-
-        Assert.Equal(KeyMigrationStatus.Migrated, r.Status);
-        Assert.False(File.Exists(old));
-    }
-
-    [Fact]
-    public async Task InvalidOldFile_IsNotCopied()
-    {
-        var old = TeamKeyMigrator.LegacyPath(DataPath, "cz-its");
-        Directory.CreateDirectory(Path.GetDirectoryName(old)!);
-        File.WriteAllText(old, "{ broken");
-
-        var r = await TeamKeyMigrator.MigrateAsync(DataPath, "cz-its", new LocalSecureStorage(SecurePath));
-
-        Assert.Equal(KeyMigrationStatus.Failed, r.Status);
-        Assert.True(File.Exists(old));
-        Assert.False(File.Exists(NewPath("cz-its")));
-    }
-}
-
-public sealed class TeamKeyServiceTests : SecureStoreTestBase
-{
-    private TeamKeyService Service(Func<string, ISecureStorage>? factory = null) =>
-        new(() => DataPath, () => Task.FromResult(new SecureRootResult(SecurePath, null)), factory);
-
-    [Fact]
-    public async Task FirstLoad_MigratesLazily_AndReturnsTheKey()
-    {
-        var old = WriteLegacy("cz-its", Keys("a"));
-        var svc = Service();
-
-        var r = await svc.LoadAsync("cz-its");
-
-        Assert.Equal(KeyLoadOutcome.Loaded, r.Outcome);
-        Assert.False(r.FromLegacyLocation);
-        Assert.False(File.Exists(old));
-        Assert.True(File.Exists(NewPath("cz-its")));
-        Assert.Empty(svc.Issues);
-    }
-
-    [Fact]
-    public async Task FailedMigration_UsesTheOldFileForTheSession_AndReportsIt()
-    {
-        var old = WriteLegacy("cz-its", Keys("a"));
-        var svc = Service(root => new FaultyStorage(new LocalSecureStorage(root)) { WriteFault = new UnauthorizedAccessException() });
-
-        var r = await svc.LoadAsync("cz-its");
-
-        Assert.Equal(KeyLoadOutcome.Loaded, r.Outcome);
-        Assert.True(r.FromLegacyLocation);
-        Assert.Equal("priv-a", r.Keys!.PrivateKey);
-        Assert.True(File.Exists(old));
-        Assert.Single(svc.Issues);
-        Assert.Contains("cz-its", svc.Issues[0]);
-    }
-
-    [Fact]
-    public async Task Conflict_UsesTheNewLocationFile()
-    {
-        WriteLegacy("cz-its", Keys("old"));
-        await new TeamKeyStore(new LocalSecureStorage(SecurePath)).SaveAsync("cz-its", Keys("new"));
-        var svc = Service();
-
-        var r = await svc.LoadAsync("cz-its");
-
-        Assert.Equal("priv-new", r.Keys!.PrivateKey);
-        Assert.False(r.FromLegacyLocation);
-        Assert.Contains("conflict", svc.Issues.Single());
-    }
-
-    [Fact]
-    public async Task MigrateAll_MigratesEveryTeam_AndRaisesTheEventPerTeam()
-    {
-        WriteLegacy("cz-its", Keys("a"));
-        WriteLegacy("de-prod", Keys("b"));
-        var svc = Service();
-        var migrated = new List<string>();
-        svc.MigrationCompleted += r => migrated.Add($"{r.Team}:{r.Status}");
-
-        var results = await svc.MigrateAllAsync(["cz-its", "de-prod", "empty-team"]);
-
-        Assert.Equal(3, results.Count);
-        Assert.Equal(["cz-its:Migrated", "de-prod:Migrated"], migrated);
-        Assert.True(File.Exists(NewPath("de-prod")));
-    }
-
-    [Fact]
-    public async Task UnreadableSecureStore_LoadIsUnreadable_NotNotConfigured()
-    {
-        var svc = Service(root => new FaultyStorage(new LocalSecureStorage(root)) { ReadFault = new UnauthorizedAccessException() });
-
-        var r = await svc.LoadAsync("cz-its");
-
-        Assert.Equal(KeyLoadOutcome.Unreadable, r.Outcome);
-    }
-
-    [Fact]
-    public async Task SecureRootUnavailable_LoadIsUnreadable()
-    {
-        var svc = new TeamKeyService(() => DataPath, () => Task.FromResult(new SecureRootResult(null, "settings invalid")));
-
-        var r = await svc.LoadAsync("cz-its");
-
-        Assert.Equal(KeyLoadOutcome.Unreadable, r.Outcome);
-        Assert.Contains("settings invalid", r.Reason);
-    }
-
-    [Fact]
-    public async Task Save_RefusesToReplaceAnUnreadableKey()
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(NewPath("cz-its"))!);
-        File.WriteAllText(NewPath("cz-its"), "{ corrupt");
-        var svc = Service();
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.SaveAsync("cz-its", Keys("n")));
-
-        Assert.Equal("{ corrupt", File.ReadAllText(NewPath("cz-its")));
-    }
-
-    [Fact]
-    public async Task Save_WritesToTheSecureStoreOnly()
-    {
-        var svc = Service();
-
-        await svc.SaveAsync("cz-its", Keys("n"));
-
-        Assert.True(File.Exists(NewPath("cz-its")));
-        Assert.False(File.Exists(TeamKeyMigrator.LegacyPath(DataPath, "cz-its")));
+            SigningKeyGate.Decide(SigningKeyLoadResult.Loaded(new EnvironmentSigningKeys
+            {
+                Current = new SigningKeyPair { PublicKey = "q" }
+            })).Action);
     }
 }
 

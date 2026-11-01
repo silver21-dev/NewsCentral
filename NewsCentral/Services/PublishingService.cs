@@ -110,9 +110,9 @@ public class PublishingService
             if (schedule == null)
                 return Fail(result, "Schedule not found");
 
-            // Fail before anything is copied or marked Published when the target team's signing key exists
+            // Fail before anything is copied or marked Published when the environment signing key exists
             // but cannot be read: the index could not be regenerated, and an unsigned one must never go out.
-            await _indexGenerationService.EnsureSigningKeyUsableAsync(assignment.TargetTeam);
+            await _indexGenerationService.EnsureSigningKeyUsableAsync();
 
             System.Diagnostics.Debug.WriteLine(
                 $"Copying files to {assignment.TargetTeam}...");

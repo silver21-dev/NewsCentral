@@ -12,7 +12,6 @@
 @inject EnvironmentSettingsService EnvironmentSettingsService
 @inject EnvironmentContext EnvironmentContext
 @inject DistributionStatusTracker DistributionStatus
-@inject TeamKeyService KeyService
 @inject UserNotices Notices
 @inject IAuditLog AuditLog
 @inject NavigationManager Navigation
@@ -95,19 +94,6 @@
                     <a href="/environment-management">Details</a>
                 </div>
             }
-
-            @* Admin-only: a team signing key that could not be migrated to the secure store (or exists in both
-               places and differs). The old file stays in use meanwhile and is exposed to every author. TODO(i18n). *@
-            if (currentUser.IsSystemAdmin && KeyService.Issues.Count > 0)
-            {
-                <div class="alert alert-danger mx-4 mt-2 mb-0">
-                    <strong>Signing key migration needs attention.</strong>
-                    @foreach (var issue in KeyService.Issues)
-                    {
-                        <div>@issue</div>
-                    }
-                </div>
-            }
         }
 
         @* Shown to everyone, until a later write succeeds. Auditing never blocks an action; this only says that
@@ -177,7 +163,6 @@
         TeamContext.OnTeamChanged += HandleTeamChanged;
         EnvironmentSettingsService.SettingsChanged += HandleEnvironmentSettingsChanged;
         DistributionStatus.Changed += HandleDistributionStatusChanged;
-        KeyService.IssuesChanged += HandleDistributionStatusChanged;
         Notices.Changed += HandleDistributionStatusChanged;
         AuditLog.StatusChanged += HandleDistributionStatusChanged;
         Navigation.LocationChanged += HandleLocationChanged;
@@ -327,7 +312,6 @@
         TeamContext.OnTeamChanged -= HandleTeamChanged;
         EnvironmentSettingsService.SettingsChanged -= HandleEnvironmentSettingsChanged;
         DistributionStatus.Changed -= HandleDistributionStatusChanged;
-        KeyService.IssuesChanged -= HandleDistributionStatusChanged;
         Notices.Changed -= HandleDistributionStatusChanged;
         AuditLog.StatusChanged -= HandleDistributionStatusChanged;
         Navigation.LocationChanged -= HandleLocationChanged;

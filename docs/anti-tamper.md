@@ -8,8 +8,8 @@ resolution see `docs/entra-dynamic-teams.md`.
 
 ## 1. Overview
 
-Each team's `index.json` is signed with a **per-team ECDSA P-256** private key by NewsCentral at
-publish time. NewsService and NewsViewer each verify that signature **independently** before
+Each team's `index.json` is signed with the **environment's ECDSA P-256** private key (one key for all teams;
+`current` in `environment-signing.json`) by NewsCentral at publish time. NewsService and NewsViewer each verify that signature **independently** before
 consuming the index — a rejected index aborts the team's sync (NewsService) or skips the team
 (NewsViewer). The signed index also carries a **SHA-256** hash for each content image, which
 NewsViewer re-checks against the cached image file before display. Session telemetry
@@ -70,13 +70,15 @@ Every anti-tamper-relevant value. Registry paths are under
 `RequireSignedIndex` are configured per component and do not cross over. Deploy the environment's public key
 (and the flag) to **both** components; under the default a component without `Signing\PublicKey` shows no content.
 
-**Authoring-side key material.** The **private** key (and the current/previous public keys) lives in
-`{SecurePath}\keys\{teamFolderName}\team-signing.json` (`TeamSigningKeys`, same JSON format as before) in
-the environment's **secure store** (§9) on the **authoring tier only** — never written through
-`IBlobDistributionService`, never synced to client machines, and no longer under the shared DataPath.
-NewsCentral loads it via `IndexGenerationService.LoadTeamSigningKeysAsync` to sign; the Key Management
-page manages it (see `docs/newscentral-spec.md`). The public key is what gets distributed — to the
-registry (flat `Signing\PublicKey`, §5); only its fingerprint (`KeyId`) travels with the content. Key storage and Key Management are still per-team until M3.
+**Authoring-side key material.** One key per **environment**, not per team. The **private** keys and the public
+keys live in `{SecurePath}\keys\environment-signing.json` (`EnvironmentSigningKeys`: `current`, `next`,
+`previousPublicKey`, each key with a `createdAt`) in the environment's **secure store** (§9) on the **authoring
+tier only** — never written through `IBlobDistributionService`, never synced to client machines, and not under the
+shared DataPath. NewsCentral loads it via `IndexGenerationService.LoadSigningKeysAsync` and signs **every** team's
+index with `current`; only a system administrator can change it, on the Key Management page (see
+`docs/newscentral-spec.md`). The public key is what gets distributed — to the registry (flat
+`Signing\PublicKey`, §5); only its fingerprint (`KeyId`) travels with the content. Old per-team files
+(`keys\<team>\team-signing.json`) are ignored; the code never deletes them — delete them yourself.
 
 ## 4. Enforcement behavior
 
@@ -107,7 +109,7 @@ pass-through in which only a present-but-wrong signature (`Invalid`) is rejected
 
 **NewsCentral signer modes** (`IndexGenerationService.GenerateIndexForTeamAsync`):
 
-- **Sign** — `team-signing.json` has a `PrivateKey`: the index's `KeyId` is set to `KeyFingerprint.Of(PublicKey)` and then the index is signed (`KeyId` is covered by the signature).
+- **Sign** — `environment-signing.json` has a `current` key with a `PrivateKey`: the index's `KeyId` is set to `KeyFingerprint.Of(current.PublicKey)` and then the index is signed (`KeyId` is covered by the signature). A prepared `next` key is never used for signing.
 - **Unsigned-with-warning** — no signing key: `Signature = null`, published unsigned with a warning
   (phased-rollout safe; consumers treat it as `Unsigned`).
 - **Self-verify guard aborts publish** — after signing, the index is serialized with the persisted
@@ -152,16 +154,31 @@ registry static team list (`EffectiveTeams.Union`); it never writes the file. Se
 
 ## 6. Operational notes
 
-**Dual-key rotation sequence** (static teams — dynamic teams are rotation-free because the key travels
-with the content):
+**Key rotation runbook (M3)** — one environment key, rotated in three steps after the first generation. It is
+done on the Key Management page, which is SystemAdmin-only and always shows the registry values to deploy for the
+current state ("Registry values to deploy (GPO)", for both `NewsService\Signing` and `NewsViewer\Signing`). The
+sequence never lets a client see an index signed with a key it does not trust. Static and Entra-resolved teams
+follow the same sequence, because both verify against the same registry keys.
 
-1. Generate a new key pair (Key Management page or `SigningKeyTool.GenerateKeyPair`). Applying it sets
-   `PublicKeyPrevious = old PublicKey` in `team-signing.json`.
-2. Deploy the **new** `PublicKey` to each verifier's registry, keeping the **old** key as
-   `PublicKeyPrevious` — verification then accepts a signature from either key during the window.
-3. Wait for registry propagation to reach all consuming machines.
-4. Republish the index (now signed with the new key) — a deliberate action on the Key Management page.
-5. Once every consumer has the new key and the republished index, clear `PublicKeyPrevious`.
+| Step | Key Management action | Signing uses | GPO `PublicKey` | GPO `PublicKeyPrevious` | Then |
+|---|---|---|---|---|---|
+| 0. First key | **Generate** (only when no key exists) | `current` | current | *(not set)* | Deploy the values, then Index Management → **Regenerate all teams** |
+| 1. Prepare | **Prepare next key** (needs `current`, no `next`, no previous) | `current` (unchanged) | **next** | **current** | Update the GPO and wait until every machine has it. **Discard next key** abandons the rotation |
+| 2. Activate | **Activate next key** (after the GPO has spread) | **next, now current** | next (now current) — **no GPO change** | old current (now previous) — **no GPO change** | Index Management → **Regenerate all teams**; wait until every machine has picked up the regenerated indexes |
+| 3. Retire | **Retire previous key** (after nothing signed with it remains) | `current` | current | **remove** `PublicKeyPrevious` | Update the GPO |
+
+Why it is safe: after step 1 the fleet trusts both keys, so activating (step 2) changes only what the authoring side
+signs with. The GPO already holds exactly the pair that step 2 produces (`PublicKey` = new current,
+`PublicKeyPrevious` = old current), so no registry change is needed at that moment. Step 3 only removes trust in the
+old key once no distributed index uses it. Registry values: `Signing\PublicKey`, `Signing\PublicKeyPrevious` under
+`HKLM\Software\{Company}\NewsCentral\NewsService` and `…\NewsViewer` (see `docs/configuration.md`); the page's values
+come from `EnvironmentKeyService.GpoTarget`.
+
+Rules enforced by the service: each action re-reads the file first, refuses when it is unreadable ("not replaced")
+or when the current key changed since the page loaded (the key was changed by someone else; reload), and is audited
+(`KeyGenerated`, `KeyPrepared`, `KeyDiscarded`, `KeyRotated`, `KeyRetired`) with **fingerprints only**. While a
+previous key is set, no new key can be prepared or activated: retire it first. Each key records `createdAt`, which
+the page shows as its age; rotate on your own schedule, and immediately if the file may have been exposed.
 
 **Persisted-form signing.** `index.json` is serialized with `JsonConfiguration.GetIndexJsonOptions()`
 (`SmartDateTimeConverter`, which truncates timestamps to whole seconds). The index is normalized
@@ -375,34 +392,32 @@ and are unchanged.
 ## 9. Authoring tier: secure key store, users.json, audit log (NewsCentral, S02)
 
 DataPath is shared by every author, who needs write access to it for content. Before S02 it also held each
-team's private ECDSA key (`{team}\team-signing.json`, unique and unrecoverable) and `config\users.json` (password
+team's private ECDSA key (`{team}\team-signing.json`; since M3 one environment key, see §3) and `config\users.json` (password
 hashes and `TeamRoles`): any author with file-system access could copy every team key or make themselves an
 administrator. The app runs as the operator's own Windows account, so **ACLs can only keep data away from people
 who do not need it**. S02 therefore separates the data and lets an administrator lock it down; **the app never sets
 an ACL** (`scripts/Set-AuthoringAcl.ps1` does) and only **warns** when the permissions have drifted.
 
 **Secure store.** `environment.json` `securePath` (default `{DataPath}\secure`) roots a storage abstraction
-(`ISecureStorage`) that is deliberately separate from the DataPath `IStorageService`. Keys live at
-`{SecurePath}\keys\{teamFolderName}\team-signing.json`.
+(`ISecureStorage`) that is deliberately separate from the DataPath `IStorageService`. The environment key lives at
+`{SecurePath}\keys\environment-signing.json`.
 
-**Three load outcomes** (`TeamKeyLoadResult`) — an unreadable key is never the same as no key:
+**Three load outcomes** (`SigningKeyLoadResult`) — an unreadable key is never the same as no key:
 
 | Outcome | Meaning | Signing | Fleet export | Key Management |
 |---|---|---|---|---|
-| `NotConfigured` | no file | unchanged: the index is published unsigned | "No signing key" warning | offers to generate |
-| `Loaded` | file read and parsed | signs | public keys exported | shows the key |
-| `Unreadable` + reason | access denied, IO error or parse error | **index generation and publish FAIL** with an error naming the team and reason; no index is written, the existing one is unchanged (`SigningKeyGate`) | "Key not readable" warning for that team (never "no key") | shows the reason; **does not offer to generate** — replacing an unreadable key would orphan every device that trusts it (`TeamKeyService.SaveAsync` refuses too) |
+| `NotConfigured` | no file | unchanged: the index is published unsigned | carries no signing keys until M4 | offers to generate |
+| `Loaded` | file read and parsed | signs with `current` | carries no signing keys until M4 | shows the keys and the valid actions |
+| `Unreadable` + reason | access denied, IO error or parse error | **index generation and publish FAIL** with an error naming the reason; no index is written, the existing one is unchanged (`SigningKeyGate`); "Regenerate all teams" stops at the first team and lists the teams not processed | carries no signing keys until M4 | shows the reason; **no action except reload** — replacing an unreadable key would orphan every device that trusts it (every `EnvironmentKeyService` action refuses too) |
 
-**Migration** from `{DataPath}\{team}\team-signing.json` (`TeamKeyMigrator`): runs for every team when a system
-administrator logs in, and lazily the first time a team's key is loaded in a session. The old file is **copied,
-read back, parsed and compared byte-for-byte with the source; only on an exact match is the old file deleted** —
-never before. Any failure keeps the old file, uses it for the session, and shows the error to administrators (banner in the main layout and on Key
-Management). If both locations hold a key and they differ, nothing is overwritten or deleted: a conflict is
-reported and the new-location file is used. Each outcome is audited as `KeyMigrated` (fingerprint only).
+**No migration.** Nothing was deployed with per-team keys, so there is no migration path: the per-team store,
+`TeamKeyMigrator`, the login migration pass and the `KeyMigrated` audit event are gone. Old per-team files under
+`{SecurePath}\keys\<team>\` and `{DataPath}\<team>\team-signing.json` are **ignored and never deleted by code**:
+delete them yourself (see `docs/disaster-recovery.md`).
 
-> ⚠️ **Rotate every team key after migrating.** The old `team-signing.json` files sat in a folder every author
-> could read; assume they were copied. Run `Set-AuthoringAcl.ps1` first, then rotate each team's key (Key Management →
-> Generate → Apply → deploy the new public key → Republish; see §6 for the dual-key window).
+> ⚠️ **If `keys\` or `environment-signing.json` was readable by other users, rotate the key** (Key Management, §6)
+> after running `Set-AuthoringAcl.ps1`. The drift check warns: "The signing key {path} can be read by {identity}. Any
+> user could copy the environment private key. Run scripts/Set-AuthoringAcl.ps1, then rotate the key."
 
 **users.json.** Writable by administrators only after provisioning. Login stays possible for authors: the
 `LastLogin` write is best effort (an `UnauthorizedAccessException`/`IOException` is logged and login continues; the
@@ -414,13 +429,12 @@ when users.json is not writable. See `docs/newscentral-spec.md` for the non-admi
 **Audit log.** Append-only, one JSON line per event; see `docs/newscentral-spec.md`. Written with
 `AppendData | Synchronize` only, so it works under the append-only ACL below.
 
-**Provisioning ACLs** (`scripts/Set-AuthoringAcl.ps1`, elevated, 64-bit host; refuses while any
-`{DataPath}\*\team-signing.json` exists):
+**Provisioning ACLs** (`scripts/Set-AuthoringAcl.ps1`, elevated, 64-bit host; there is no `-TeamSigners` parameter):
 
 | Path | ACEs |
 |---|---|
 | `SecurePath` | inheritance disabled; SYSTEM, Administrators, AdminsGroup: Full. Nothing else |
-| `SecurePath\keys\<team>` | `TeamSigners[team]`: Modify (plus the inherited administrators) |
+| `SecurePath\keys` | AuthorsGroup: Read (`ReadAndExecute`, this folder and files) on top of the Full control inherited from `SecurePath`. Authors' sessions sign with the key, so they read it; only administrators change it. Existing `keys\<team>` folders are left untouched |
 | `DataPath\config` (folder) | inheritance disabled; SYSTEM, Administrators, AdminsGroup: Full; AuthorsGroup: Read; all for the folder and its files. Every writer of this folder is a SystemAdmin, so authors only read it |
 | `DataPath\config\users.json` | also protected on its own, as defence in depth: inheritance disabled on the file; SYSTEM, Administrators, AdminsGroup: Full; AuthorsGroup: Read |
 | `AuditPath` | inheritance disabled; SYSTEM, Administrators, AdminsGroup: Full. AuthorsGroup, folders (this folder and subfolders): ListDirectory, CreateFiles, CreateDirectories, ReadAttributes, Synchronize. AuthorsGroup, files (inherit only): AppendData, ReadAttributes, Synchronize. OWNER RIGHTS, files (inherit only): ReadData, AppendData, ReadAttributes, ReadPermissions, Synchronize, so a file's owner cannot rewrite, delete or re-ACL it. OWNER RIGHTS, folders: ListDirectory, ReadAttributes, ReadPermissions, Synchronize (see below). No CREATOR OWNER ACE |
@@ -438,7 +452,7 @@ What authors lose: the last-login time is not recorded, and their sessions read 
 
 **Drift warnings** (Key Management and Environment Management; warn-only, never block), using the shared
 `AclExposureEvaluator` (identities Users / Everyone / Authenticated Users / INTERACTIVE, Deny cancels Allow,
-inheritance flags ignored): the keys folder (and each team folder) readable (`ReadData`) by a broad identity;
+inheritance flags ignored): `keys\` and `keys\environment-signing.json` readable (`ReadData`) by a broad identity (AuthorsGroup read is expected and is not a warning; team folders are no longer enumerated);
 `users.json` writable by one; the `config` folder granting `WriteData` (CreateFiles), `AppendData`, `Delete`,
 `DeleteSubdirectoriesAndFiles`, `ChangePermissions` or `TakeOwnership` to one; the audit folder granting `WriteData`, `Delete`, `DeleteSubdirectoriesAndFiles`,
 `ChangePermissions` or `TakeOwnership` to one. Because inheritance flags are ignored, the **audit check can
