@@ -9,6 +9,7 @@ namespace NewsCentral.App.Tests;
 /// (The leading #Requires -RunAsAdministrator line is dropped from the copy under test, as the repo's other script
 /// tests do. Applying the ACLs needs an elevated session and is covered by the manual test in the S02 spec.)
 /// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class AuthoringAclScriptTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "nc-aclscript-" + Guid.NewGuid().ToString("N"));

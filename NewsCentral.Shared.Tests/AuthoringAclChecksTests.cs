@@ -4,6 +4,7 @@ using NewsCentral.Security;
 
 namespace NewsCentral.Shared.Tests;
 
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class AuthoringAclChecksTests : IDisposable
 {
     private static readonly SecurityIdentifier Users = new(WellKnownSidType.BuiltinUsersSid, null);

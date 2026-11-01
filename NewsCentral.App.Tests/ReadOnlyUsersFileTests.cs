@@ -12,6 +12,7 @@ namespace NewsCentral.App.Tests;
 /// users.json is writable by administrators only. Login, the UI language and the password page must keep working
 /// (or explain themselves) for an author whose Windows account can read it but not write it.
 /// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class ReadOnlyUsersFileTests : IDisposable
 {
     private const string Password = "Passw0rd!";

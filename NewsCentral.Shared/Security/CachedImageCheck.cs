@@ -18,14 +18,16 @@ public static class CachedImageCheck
         fullPath = string.Empty;
 
         var shape = ImagePathValidator.Validate(imagePath, teamFolder);
-        if (!shape.IsValid)
+        // A valid shape implies a non-null path; the explicit null test lets the compiler see that
+        // instead of suppressing it (a null path is already reported invalid, so this adds no new branch).
+        if (!shape.IsValid || imagePath is null)
         {
             reason = $"ImagePath rejected: {shape.Reason}";
             return false;
         }
 
         // Validated: team is the first segment; the rest is the path under the team root.
-        var underTeam = imagePath![(imagePath.IndexOf('/') + 1)..];
+        var underTeam = imagePath[(imagePath.IndexOf('/') + 1)..];
         if (!ImagePathValidator.TryResolveContained(Path.Combine(cacheRoot, teamFolder), underTeam, out var full, out var containment))
         {
             reason = $"ImagePath rejected: {containment}";

@@ -6,6 +6,7 @@ using Xunit;
 namespace NewsCentral.Shared.Tests;
 
 /// <summary>The shared evaluator with caller-supplied masks (the NewsService write mask is covered by ImagePublisherAclTests).</summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class AclExposureEvaluatorTests
 {
     private static readonly SecurityIdentifier Users = new(WellKnownSidType.BuiltinUsersSid, null);

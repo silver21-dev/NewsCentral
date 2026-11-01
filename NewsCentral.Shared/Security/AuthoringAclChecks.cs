@@ -14,6 +14,7 @@ public sealed record AclDriftWarning(string Area, string Path, string Message);
 /// only" is still counted. The audit check can therefore over-report on a folder that is not provisioned by the
 /// script (an ordinary inherited folder grants Users create rights). That is acceptable for a warning.
 /// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public static class AuthoringAclChecks
 {
     public const string AreaKeys = "keys";

@@ -25,6 +25,7 @@ public sealed record AclExposure(string Identity, string Sid, string Rights)
 /// The raw GENERIC_WRITE and GENERIC_ALL bits an inherit-only ACE can carry count as write rights; the
 /// generic bits are matched only when the mask asks for them (see <see cref="WithGenericWrite"/>).
 /// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public static class AclExposureEvaluator
 {
     private const int GenericAll = 0x10000000;
