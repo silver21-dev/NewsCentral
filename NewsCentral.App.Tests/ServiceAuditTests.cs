@@ -96,7 +96,7 @@ public sealed class ServiceAuditTests : IDisposable
         await _auth.LoginAsync("admin", Password);
 
         var created = await _users.CreateUserAsync("bob", "b@x", "Bob", "Sup3r-secret!");
-        await _users.UpdateUserAsync(created.UserID, "b2@x", "Bobby", true);
+        await _users.UpdateUserAsync(created.UserID, "b2@x", "Bobby", true, false);
         await _users.UpdateUserUPNAsync(created.UserID, "bob@contoso.test");
         await _users.AssignUserToTeamAsync(created.UserID, "t-1", "cz-its", new List<string> { "ContentAuthor" });
         await _users.UpdateTeamRolesAsync(created.UserID, "t-1", new List<string> { "ContentAuthor", "Approver" });

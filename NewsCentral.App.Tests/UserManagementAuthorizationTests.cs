@@ -74,8 +74,8 @@ public sealed class UserManagementAuthorizationTests : IDisposable
     {
         ("create",           s => s.CreateUserAsync("bob", "b@x", "Bob", "pw-123456"),                        "UserCreated"),
         ("create+upn",       s => s.CreateUserWithUPNAsync("bob", "b@x", "Bob", "pw-123456", false, "b@c.t"), "UserCreated"),
-        ("update",           s => s.UpdateUserAsync("author", "a@x", "Author", true),                          "UserUpdated"),
-        ("update+upn",       s => s.UpdateUserWithUPNAsync("author", "a@x", "Author", true, "a@c.t"),          "UserUpdated"),
+        ("update",           s => s.UpdateUserAsync("author", "a@x", "Author", true, false),                          "UserUpdated"),
+        ("update+upn",       s => s.UpdateUserWithUPNAsync("author", "a@x", "Author", true, false, "a@c.t"),          "UserUpdated"),
         ("upn",              s => s.UpdateUserUPNAsync("author", "a@c.t"),                                     "UserUpnChanged"),
         ("assign",           s => s.AssignUserToTeamAsync("author", "t-1", "cz-its", new List<string> { "ContentAuthor" }), "UserTeamAssigned"),
         ("remove",           s => s.RemoveUserFromTeamAsync("author", "t-1"),                                  "UserTeamRemoved"),
@@ -113,8 +113,8 @@ public sealed class UserManagementAuthorizationTests : IDisposable
 
         var bob = await _users.CreateUserAsync("bob", "b@x", "Bob", "pw-123456");
         await _users.CreateUserWithUPNAsync("carol", "c@x", "Carol", "pw-123456", false, "c@c.t");
-        await _users.UpdateUserAsync(bob.UserID, "b2@x", "Bobby", true);
-        await _users.UpdateUserWithUPNAsync(bob.UserID, "b2@x", "Bobby", true, "b@c.t");
+        await _users.UpdateUserAsync(bob.UserID, "b2@x", "Bobby", true, false);
+        await _users.UpdateUserWithUPNAsync(bob.UserID, "b2@x", "Bobby", true, false, "b@c.t");
         await _users.UpdateUserUPNAsync(bob.UserID, null);
         Assert.True(await _users.AssignUserToTeamAsync(bob.UserID, "t-1", "cz-its", new List<string> { "ContentAuthor", "TeamAdmin" }));
         Assert.True(await _users.UpdateTeamRolesAsync(bob.UserID, "t-1", new List<string> { "ContentApprover" }));

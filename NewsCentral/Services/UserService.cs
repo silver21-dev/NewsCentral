@@ -55,6 +55,19 @@ public class UserService
         return currentUser;
     }
 
+    // Evaluated against the users as they would be after the change. The self-lockout rule is checked first so
+    // the caller gets the more specific message; the service is the authority, the UI disabling is convenience.
+    private static void EnsureAdminInvariants(IReadOnlyCollection<User> usersAfterChange, string currentUserId, string targetUserId)
+    {
+        var caller = currentUserId == targetUserId ? usersAfterChange.FirstOrDefault(u => u.UserID == currentUserId) : null;
+        if (caller != null && !(caller.IsSystemAdmin && caller.IsActive))
+            throw new InvalidOperationException(
+                "Cannot remove your own system administrator rights or deactivate your own account");
+
+        if (!usersAfterChange.Any(u => u.IsSystemAdmin && u.IsActive))
+            throw new InvalidOperationException("At least one active system administrator is required");
+    }
+
     // ── Queries ──────────────────────────────────────────────────────────────
 
     public async Task<List<User>> GetAllUsersAsync()
@@ -123,9 +136,9 @@ public class UserService
 
     public async Task UpdateUserWithUPNAsync(
         string userId, string email, string displayName,
-        bool isActive, string? upn)
+        bool isActive, bool isSystemAdmin, string? upn)
     {
-        await UpdateUserAsync(userId, email, displayName, isActive);
+        await UpdateUserAsync(userId, email, displayName, isActive, isSystemAdmin);
         await UpdateUserUPNAsync(userId, upn);
     }
 
@@ -174,13 +187,13 @@ public class UserService
     }
 
     public Task<User> UpdateUserAsync(
-        string userId, string email, string displayName, bool isActive) =>
+        string userId, string email, string displayName, bool isActive, bool isSystemAdmin) =>
         _audit.RunAsync(AuditEvents.UserUpdated, userId,
-            () => UpdateUserCoreAsync(userId, email, displayName, isActive),
-            detail: $"active={isActive}");
+            () => UpdateUserCoreAsync(userId, email, displayName, isActive, isSystemAdmin),
+            detail: $"active={isActive}; systemAdmin={isSystemAdmin}");
 
     private async Task<User> UpdateUserCoreAsync(
-        string userId, string email, string displayName, bool isActive)
+        string userId, string email, string displayName, bool isActive, bool isSystemAdmin)
     {
         var currentUser = RequireSystemAdmin("update users");
 
@@ -191,9 +204,13 @@ public class UserService
             ?? throw new InvalidOperationException($"User {userId} not found");
 
 
-        user.Email       = email;
-        user.DisplayName = displayName;
-        user.IsActive    = isActive;
+        user.Email         = email;
+        user.DisplayName   = displayName;
+        user.IsActive      = isActive;
+        user.IsSystemAdmin = isSystemAdmin;
+
+        // The collection is only mutated in memory; nothing is written when the guard refuses.
+        EnsureAdminInvariants(usersCollection.Users, currentUser.UserID, userId);
 
         usersCollection.LastModified = DateTime.UtcNow;
         usersCollection.ModifiedBy   = currentUser.UserID;
@@ -251,8 +268,10 @@ public class UserService
         var usersCollection = await _userRepo.GetByIdAsync("users");
         if (usersCollection == null) return false;
 
-        var removed = usersCollection.Users.RemoveAll(u => u.UserID == userId);
-        if (removed == 0) return false;
+        if (usersCollection.Users.All(u => u.UserID != userId)) return false;
+
+        EnsureAdminInvariants(usersCollection.Users.Where(u => u.UserID != userId).ToList(), currentUser.UserID, userId);
+        usersCollection.Users.RemoveAll(u => u.UserID == userId);
 
         usersCollection.LastModified = DateTime.UtcNow;
         usersCollection.ModifiedBy   = currentUser.UserID;

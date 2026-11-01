@@ -188,11 +188,24 @@
             }
             else
             {
+                @if (AuthService.IsSystemAdmin())
+                {
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" @bind="isSystemAdmin" disabled="@EditingSelf" />
+                            @Localizer["SystemAdminLabel"]
+                        </label>
+                    </div>
+                }
                 <div class="form-group">
                     <label>
-                        <input type="checkbox" @bind="isActive" />
+                        <input type="checkbox" @bind="isActive" disabled="@EditingSelf" />
                         @Localizer["ActiveLabel"]
                     </label>
+                    @if (EditingSelf)
+                    {
+                        <small class="form-text text-muted">@Localizer["OwnAccountHint"]</small>
+                    }
                 </div>
             }
 
@@ -578,6 +591,9 @@
     // Everyone else gets the list read-only, with no write controls.
     private bool CanManageUsers => AuthService.IsSystemAdmin();
 
+    // Own admin rights and active flag are locked in the dialog; UserService refuses the change regardless.
+    private bool EditingSelf => editingUser != null && editingUser.UserID == AuthService.GetCurrentUser()?.UserID;
+
     // A SystemAdmin administers every team, so every role checkbox in the dialog is editable.
     private bool CanAdministerTeam(string teamId) => CanManageUsers;
 
@@ -620,6 +636,7 @@
         displayName = user.DisplayName;
         email = user.Email;
         upn = user.UPN ?? string.Empty;
+        isSystemAdmin = user.IsSystemAdmin;
         isActive = user.IsActive;
         errorMessage = string.Empty;
         showCreateDialog = true;
@@ -666,6 +683,7 @@
                     email,
                     displayName,
                     isActive,
+                    isSystemAdmin,
                     string.IsNullOrWhiteSpace(upn) ? null : upn.Trim());
             }
 

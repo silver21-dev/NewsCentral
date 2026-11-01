@@ -153,6 +153,17 @@ the **login page** says "You don't have access to this environment's user list. 
 the NewsCentral authors group." instead of the raw .NET message (`UsersFileNotReadableException`). The self-service paths are unchanged (best-effort `LastLogin`, language in the local store, own password
 change explained as above).
 
+**SystemAdmin promote/demote and the last-admin guard (M0).** The Edit dialog on the Users page shows the "System
+admin" checkbox (SystemAdmin only), and `UpdateUserAsync` / `UpdateUserWithUPNAsync` take `isSystemAdmin` and persist
+it to `User.IsSystemAdmin`; the `UserUpdated` audit detail is `active={isActive}; systemAdmin={isSystemAdmin}`.
+"Active SystemAdmin" means `IsSystemAdmin && IsActive`. `UserService` evaluates every update and delete against the
+users as they would be after the change and refuses (`InvalidOperationException`, audited as Failure, users.json
+untouched) in two cases: (1) the change would leave **zero active SystemAdmins** (an inactive SystemAdmin does not
+count); (2) the target is the **current user** and the change would remove their own SystemAdmin flag or deactivate
+them ("Cannot remove your own system administrator rights or deactivate your own account"), even when other admins
+exist. Deleting your own account is refused separately. The dialog disables "System admin" and "Active" with a hint
+when editing the current user; that is convenience only, the service is the authority.
+
 ## Shared environment directory (`config/environments.json`)
 
 Authors read, administrators write. The file decides which environments every user's picker offers, so an

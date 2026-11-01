@@ -44,6 +44,7 @@
   <data name="PasswordLabel" xml:space="preserve"><value>Mot de passe : *</value></data>
   <data name="SystemAdminLabel" xml:space="preserve"><value>Administrateur système</value></data>
   <data name="ActiveLabel" xml:space="preserve"><value>Actif</value></data>
+  <data name="OwnAccountHint" xml:space="preserve"><value>Vous ne pouvez pas modifier vos propres droits d'administrateur système ni désactiver votre propre compte.</value></data>
   <data name="Cancel" xml:space="preserve"><value>Annuler</value></data>
   <data name="Saving" xml:space="preserve"><value>Enregistrement...</value></data>
   <data name="Save" xml:space="preserve"><value>Enregistrer</value></data>
